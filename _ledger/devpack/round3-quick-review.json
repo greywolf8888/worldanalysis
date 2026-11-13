@@ -1,0 +1,19 @@
+{
+  "schema":"worldanalysis.quick-review.v1",
+  "goal_id":"goal-432da048-e464-4fb3-89ff-2927dfba6d37",
+  "goal_revision_observed":6,
+  "goal_phase_observed":"active",
+  "activation_observed":"armed",
+  "review_policy":"User requested fewer ineffective tests/analysis and a quick review. No complete regression rerun was performed this round.",
+  "targeted_tests":{"modules":["tests/test_media_store.py","tests/test_cli.py"],"run":20,"passed":20,"elapsed_seconds":4.857},
+  "component_tests_already_completed":{"extraction_cache":{"run":31,"passed":30,"skipped":1},"incremental_ingest":{"run":5,"passed":5},"browser_bridge":{"run":28,"passed":28},"passive_browser_observer_node":{"run":36,"passed":36},"note":"Separate scoped runs, not one whole-project regression or real-cloud acceptance."},
+  "real_pdf_incremental":{"project_id":"real-pdf-163545","bundle_id":"bundle-c9efbe7ef1e84f699c4a5746066865aa","revision":"v0005","extract_calls_after_A":1,"extract_calls_after_A_plus_B":2,"extract_calls_after_reversed_repeat":2,"claimed_status":"partial","block_count":28},
+  "synthetic_actual_media_runtime":{"project_id":"calibration-synthetic-speech","bundle_id":"bundle-a57d0f2b90164ce8938b605499f7885a","revision":"v0001","input_bytes_received":459736,"source_content_hash_performed":false,"peak_worker_commit_bytes":356462592,"hard_cap_bytes":4294967296,"same_source_reused":true,"speech_processing_ms":8938,"production_accuracy_verified":false},
+  "synthetic_accepted_analysis":{"task_id":"analysis-task-18fa937a54bf4561b4ddd105e6b26420","status":"partial","read_blocks":3,"pending_blocks":1,"receipt_count":3,"result_sha256":"37037db78379ff4bfba03932b36408540c78127009b86329d75f4448d7b90a79","report":"整理结果/calibration-synthetic-speech/分析/analysis-task-18fa937a54bf4561b4ddd105e6b26420/accepted/report-00.md"},
+  "not_done":["Live browser projection and complete exact recursive inventory","Actual authorized transfer, independent destination IDs, readback and scoped download","Native/media and multi-media Bundle composition","Real course media accuracy and long-load acceptance","Remaining real document types and semantic gaps, external verification reader, full incremental analysis"],
+  "new_cloud_transfers":0,
+  "new_downloads":0,
+  "new_baidu_ai_generation_requests":0,
+  "whole_plan_complete":false,
+  "next":"Prefer a short real P2 read-only verification or implement mixed Bundle composition; reuse existing test evidence and only rerun affected tests. Keep the existing goal active."
+}

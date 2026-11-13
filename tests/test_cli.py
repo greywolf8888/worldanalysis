@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from worldanalysis.__main__ import main, parser, routed_extract, route_config_revision
+from worldanalysis.__main__ import main, parser, routed_extract, route_config_revision, media_config_revision
 from worldanalysis.capabilities import inventory
 
 
@@ -29,6 +29,28 @@ class CLITests(unittest.TestCase):
         first=route_config_revision(ocr_enabled=True)
         self.assertEqual(first,route_config_revision(ocr_enabled=True))
         self.assertNotEqual(first,route_config_revision(ocr_enabled=False))
+
+    def test_media_profile_stable_and_processing_choice_is_versioned(self):
+        opts={'ocr_enabled':True,'asr_enabled':True,'synthetic':True}
+        self.assertEqual(media_config_revision(opts),media_config_revision(opts))
+        self.assertNotEqual(media_config_revision(opts),media_config_revision(dict(opts,asr_enabled=False)))
+
+    def test_media_cli_routes_to_bounded_api_not_small_file_hash_path(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()):
+            (Path(temp)/'sample.wav').write_bytes(b'synthetic routing fixture, not a valid recording')
+            with patch('worldanalysis.store.Store.ingest_media',return_value={'status':'blocked','reason':'synthetic routing only'}) as call:
+                self.assertEqual(main(['--root',temp,'ingest','--project','unused','--synthetic-input','--no-asr','sample.wav']),2)
+                self.assertTrue(call.call_args.kwargs['options']['synthetic'])
+                self.assertFalse(call.call_args.kwargs['options']['asr_enabled'])
+
+    def test_mixed_cli_is_explicitly_not_accepted_without_any_worker(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()) as out:
+            (Path(temp)/'sample.wav').write_bytes(b'synthetic fixture')
+            (Path(temp)/'sample.txt').write_text('native fixture')
+            with patch('worldanalysis.store.Store.ingest_media') as media,patch('worldanalysis.store.Store.ingest') as native:
+                self.assertEqual(main(['--root',temp,'ingest','--project','unused','sample.wav','sample.txt']),2)
+                self.assertEqual(json.loads(out.getvalue())['status'],'unsupported')
+                self.assertFalse(media.called);self.assertFalse(native.called)
 
     def test_unknown_inventory_not_zero_complete(self):
         with tempfile.TemporaryDirectory() as temp:

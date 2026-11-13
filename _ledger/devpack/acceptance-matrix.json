@@ -5,7 +5,8 @@
   "goal_id": "goal-432da048-e464-4fb3-89ff-2927dfba6d37",
   "whole_plan_complete": false,
   "integration_verification": {"receipt":"_ledger/devpack/verification-20261113T134802Z.json","tests_run":188,"passed":187,"skipped":1,"failures":0,"errors":0,"source_snapshot_unchanged":true,"legacy_node_suites":"passed","scope":"Implemented code and selected actual/synthetic inputs; not whole-plan acceptance."},
-  "goal_control": "paused_by_host; model resume rejected; no replacement goal or schedule created",
+  "goal_control": "latest_observed_revision_6_active_armed; no replacement goal or schedule created",
+  "latest_targeted_review":"_ledger/devpack/round3-quick-review.json",
   "business_ledger": "整理结果/worldanalysis.sqlite3",
   "legacy_material_ledger": "_ledger/075-materials.json",
   "legacy_reverified": {"transcripts":78,"native_courseware":12,"pages":785,"integrity_problems":0,"revision":"78fa6046397d3595f41437705fe13aae2146e79a121771a133a63a96dc509c6f"},
@@ -13,8 +14,8 @@
     {"id":"P0","state":"verified_local","evidence":["_ledger/devpack/p0-capabilities-20261113.json","_ledger/devpack/执行模型.md"],"scope":"Existing local inventory, hardware, dependencies and additive version tracking; not an audit of all external disks."},
     {"id":"P1","state":"partial","evidence":["tests/test_documents.py","tests/test_pdf_render.py","tests/document_fixtures/real_inventory_results.json","tests/document_fixtures/pdf_render_results.json","整理结果/real-shorttxt-meituan/证据/v0001/manifest.json","整理结果/real-docx-virtual-materials/证据/v0001/manifest.json","整理结果/real-pdf-163545/证据/v0001/manifest.json"],"remaining":"Real XLSX and same-file mixed PDF acceptance, remaining image/vector/formula interpretation, four DOCX empty-text containers and complete project analysis."},
     {"id":"P2","state":"partial","evidence":["worldanalysis/acquisition.py","tests/test_acquisition.py","_ledger/devpack/p2-browser-observation-20261113.json"],"remaining":"Persistent exact recursive share inventory, formal browser connector/current grant binding, actual transfer with independent destination IDs, read-back and scoped local download."},
-    {"id":"P3","state":"partial","evidence":["worldanalysis/media.py","worldanalysis/ocr.py","tests/test_media.py","tests/test_ocr.py","_ledger/devpack/media-provider-acceptance.json","_ledger/devpack/media-provider-asr-smoke.json"],"remaining":"General Bundle ingestion of large media, real authorized course calibration and hundred-hour production acceptance; remote connector capabilities remain unverified."},
-    {"id":"P4","state":"partial","evidence":["worldanalysis/store.py","worldanalysis/analysis.py","tests/test_store.py","tests/test_analysis.py"],"remaining":"Exact repeated multi-input sets and legacy accepted results now reverified. Mixed new/changed per-asset reuse, source-driven incremental operation, external verification reader and full project delivery remain incomplete."}
+    {"id":"P3","state":"partial","evidence":["worldanalysis/media.py","worldanalysis/ocr.py","tests/test_media.py","tests/test_ocr.py","_ledger/devpack/media-provider-acceptance.json","_ledger/devpack/media-provider-asr-smoke.json"],"remaining":"Single-source bounded media to Bundle is now connected and synthetic actual ASR/partial Agent report accepted. Native/media and multi-source composition, real authorized course calibration and hundred-hour production acceptance remain incomplete."},
+    {"id":"P4","state":"partial","evidence":["worldanalysis/store.py","worldanalysis/analysis.py","tests/test_store.py","tests/test_analysis.py"],"remaining":"Mixed new/changed per-asset extraction reuse is now verified in unit paths and on actual two-PDF input (1 then 2 then still 2 extractor calls). Source-driven operation, incremental analysis and external verification reader remain incomplete."}
   ],
   "scenarios": [
     {"id":"A01","requirement":"Two-line TXT retained without video tasks","state":"verified_real_selected_file","evidence":["整理结果/real-shorttxt-meituan/分析/analysis-task-0193d2b5749b418c84f724b4b43154be/accepted/report-00.md"]},

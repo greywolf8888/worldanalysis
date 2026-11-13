@@ -55,6 +55,21 @@ def route_config_revision(*, ocr_enabled=True):
     return 'route-'+hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
 
+def media_config_revision(options):
+    import hashlib
+    from importlib import metadata
+    package = Path(__file__).resolve().parent
+    code = {name:hashlib.sha256((package/name).read_bytes()).hexdigest() for name in ('media.py','media_store.py','ocr.py','policy.py','contracts.py')}
+    versions = {}
+    for name in ('av','faster-whisper','ctranslate2','rapidocr-onnxruntime','onnxruntime','Pillow'):
+        try: versions[name] = metadata.version(name)
+        except metadata.PackageNotFoundError: versions[name] = 'not-installed'
+    admission = package.parent/'_ledger'/'devpack'/'media-provider-models.json'
+    model = json.loads(admission.read_bytes()) if admission.is_file() else {}
+    profile = {'code':code,'versions':versions,'options':options,'model_revision':model.get('revision'),'model_files':model.get('files',[])}
+    return 'media-route-'+hashlib.sha256(json.dumps(profile,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
+
 def parser():
     root = argparse.ArgumentParser(prog='python -m worldanalysis', description='本地混合证据、不可变发布与独立Agent分析；默认零商业调用。')
     root.add_argument('--root', type=Path, default=Path.cwd())
@@ -73,6 +88,9 @@ def parser():
     ocr_mode = ingest.add_mutually_exclusive_group()
     ocr_mode.add_argument('--ocr', action='store_true', help='兼容选项：默认已自动选用注册本地OCR；不下载权重')
     ocr_mode.add_argument('--no-ocr', action='store_true', help='明确停用本地OCR；相应覆盖缺口仍保留')
+    ingest.add_argument('--resume-media', action='store_true', help='仅续已登记的本地媒体检查点暂停；未知IO不重放')
+    ingest.add_argument('--no-asr', action='store_true', help='媒体仅解码/画面；语音仍留未处理缺口，不冒称ASR完成')
+    ingest.add_argument('--synthetic-input', action='store_true', help='显式标记自建校准素材；不能作真实课程验收')
     ingest.add_argument('inputs', nargs='+', type=Path)
     verify = sub.add_parser('verify')
     verify.add_argument('--project', required=True)
@@ -133,8 +151,17 @@ def main(argv=None):
                 if not path.is_relative_to(root):
                     raise ValueError('This workspace input must remain under --root; manual input is never moved or deleted')
                 inputs.append(path)
-            options = {'ocr': None} if args.no_ocr else None
-            bundle = store.ingest(args.project, inputs, routed_extract, options=options, config_version=route_config_revision(ocr_enabled=not args.no_ocr))
+            import mimetypes
+            media = [(mimetypes.guess_type(str(p))[0] or '').startswith(('audio/','video/')) for p in inputs]
+            if any(media):
+                if not all(media):
+                    display({'status':'unsupported','reason':'Native/media composite Bundle is not yet accepted; inputs remain untouched and no worker started'})
+                    return 2
+                options = {'ocr_enabled':not args.no_ocr,'asr_enabled':not args.no_asr,'synthetic':bool(args.synthetic_input)}
+                bundle = store.ingest_media(args.project,inputs,options=options,config_version=media_config_revision(options),resume=args.resume_media)
+            else:
+                options = {'ocr': None} if args.no_ocr else None
+                bundle = store.ingest(args.project, inputs, routed_extract, options=options, config_version=route_config_revision(ocr_enabled=not args.no_ocr))
             if 'bundle_id' not in bundle:
                 display(bundle)
                 return 2

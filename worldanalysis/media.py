@@ -163,7 +163,7 @@ def _open(reader, cfg):
     # Demuxer whitelist also rejects local playlists/concat that could otherwise
     # cause FFmpeg to open unregistered files or network URLs behind our reader.
     return av.open(reader, mode="r", buffer_size=32768,
-                   options={"protocol_whitelist": "file,pipe", "format_whitelist": _FORMATS,
+                   options={"protocol_whitelist": "pipe", "format_whitelist": _FORMATS,
                             "probesize": str(min(262144, int(cfg["probe_max_received_bytes"]))),
                             "analyzeduration": "1000000", "enable_drefs": "0"})
 

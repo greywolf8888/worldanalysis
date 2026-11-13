@@ -36,7 +36,7 @@ def _config_value(value):
     if callable(value):
         code = getattr(value,"__code__",None)
         cells = getattr(value,"__closure__",None) or ()
-        return {"callable":getattr(value,"__module__","")+"."+getattr(value,"__qualname__",type(value).__name__),"implementation":hashlib.sha256(marshal.dumps(code)).hexdigest() if code else type(value).__name__,"closure":[cell.cell_contents if isinstance(cell.cell_contents,(str,int,float,bool,type(None))) else type(cell.cell_contents).__name__ for cell in cells]}
+        return {"callable":getattr(value,"__module__","")+"."+getattr(value,"__qualname__",type(value).__name__),"implementation":hashlib.sha256(marshal.dumps(code,0)).hexdigest() if code else type(value).__name__,"closure":[cell.cell_contents if isinstance(cell.cell_contents,(str,int,float,bool,type(None))) else type(cell.cell_contents).__name__ for cell in cells]}
     if isinstance(value,(str,int,float,bool,type(None))):
         return value
     raise ContractError("configuration requires an explicit serializable version")
@@ -232,6 +232,8 @@ class Store:
         CREATE INDEX IF NOT EXISTS publication_ready ON publications(project_id,state,revision);
         CREATE INDEX IF NOT EXISTS analysis_ready ON analysis_tasks(state,created_at);
         ''')
+        from .media_store import ensure_schema as media_schema
+        media_schema(self.connection)
         for registration in self.connection.execute("SELECT * FROM providers").fetchall():
             p = json.loads(registration["provider_json"])
             self.connection.execute("INSERT OR IGNORE INTO provider_configurations VALUES(?,?,?,?)",(p["provider_id"],p["implementation_version"],p["config_version"],registration["provider_json"]))
@@ -379,7 +381,7 @@ class Store:
             if not source:
                 self.connection.execute("INSERT INTO sources VALUES(?,?,?,?,?)", (source_id,project_id,"local",str(path),now()))
             self.connection.execute("INSERT OR IGNORE INTO source_revisions VALUES(?,?,?,?,?)", (source_id,source_revision,sha,size,now()))
-            same = self.connection.execute("SELECT r.* FROM asset_revisions r JOIN assets a USING(asset_id) WHERE a.project_id=? AND r.sha256=? LIMIT 1", (project_id,sha)).fetchone()
+            same = self.connection.execute("SELECT r.* FROM asset_revisions r JOIN assets a USING(asset_id) WHERE a.project_id=? AND r.sha256=? AND NOT EXISTS(SELECT 1 FROM media_sources m WHERE m.asset_id=r.asset_id AND m.asset_revision=r.asset_revision) LIMIT 1", (project_id,sha)).fetchone()
             prior = self.connection.execute("SELECT asset_id FROM source_assets WHERE source_id=? LIMIT 1", (source_id,)).fetchone()
             asset_id = same["asset_id"] if same else prior[0] if prior else new_id("asset")
             self.connection.execute("INSERT OR IGNORE INTO assets VALUES(?,?,?)", (asset_id,project_id,now()))
@@ -425,7 +427,14 @@ class Store:
                 candidate = self.get_bundle(project_id,previous["bundle_id"])
                 if {asset_key(a) for a in candidate["assets"]} == wanted_assets and {a["job_id"] for a in candidate["artifacts"]} == wanted_jobs:
                     return candidate
+        from .extraction_cache import Cache
+        cache = Cache(self)
         for entry,job,config in prepared:
+            restored = cache.restore(entry,job,config)
+            if restored is not None:
+                self._validate_raw(restored)
+                entries.append(restored)
+                continue
             asset = entry["asset"]
             outdir = self.root / "下载暂存" / job["job_id"] / new_id("extraction")
             reject_links(outdir)
@@ -455,11 +464,76 @@ class Store:
                     self.connection.execute("UPDATE jobs SET state='failed',reason=?,updated_at=? WHERE job_id=? AND state!='verified_complete'", (type(exc).__name__,now(),job["job_id"]))
                 raise
             entries.append(entry)
-        return self.publish(project_id,entries)
+        bundle = self.publish(project_id,entries)
+        if bundle.get('bundle_id'):
+            for entry in entries:
+                cache.remember(entry,bundle)
+        return bundle
 
-    def ingest_media(self, project_id, inputs, extractor=None, *, options=None):
+    def ingest_media(self, project_id, inputs, extractor=None, *, options=None, config_version=None, resume=False):
+        """Publish bounded derived media, not an immutable whole-source copy.
+
+        Default reuse is safe even for partial evidence. Explicit resume continues
+        a deliberate checkpoint pause only; unknown IO never auto-replays.
+        """
         self.project_root(project_id)
-        return {"status":"blocked", "reason":"bounded media source-revision registration not connected to Store; no media bytes read or hashed", "project_id":project_id}
+        if self.pipeline_state('collection') != 'running':
+            return {'status':'blocked','reason':'collection paused','project_id':project_id}
+        if not inputs:
+            raise ContractError('at least one media input is required')
+        if len(inputs) != 1:
+            return {'status':'unsupported','reason':'single-source bounded media is connected; multi-source/native-media Bundle composition is not yet accepted','project_id':project_id}
+        if any(not (mimetypes.guess_type(str(p))[0] or '').startswith(('audio/','video/')) for p in inputs):
+            return {'status':'blocked','reason':'non-media input; no source bytes read or hashed','project_id':project_id}
+        from .media import extract_media, _limits, PROVIDER_ID, PROVIDER_VERSION
+        from .media_store import MediaRegistration
+        from .policy import Policy
+        supplied = dict(options or {})
+        expected_root = self.root.resolve(strict=True)
+        if supplied.get('allowed_root') is not None and Path(supplied['allowed_root']).resolve() != expected_root:
+            raise ContractError('media options cannot change the authorized workspace')
+        supplied['allowed_root'] = str(expected_root)
+        limits = _limits(supplied)
+        if limits['ram_byte_cap'] > Policy().max_ram_bytes or limits['cache_byte_cap'] > Policy().max_cache_bytes:
+            raise ContractError('media RAM/cache request exceeds the registered local policy')
+        scan_secrets(limits)
+        extractor = extractor or extract_media
+        module = sys.modules.get(getattr(extractor,'__module__',''))
+        provider_id = getattr(extractor,'provider_id',None) or getattr(module,'PROVIDER_ID',None) or PROVIDER_ID
+        version = getattr(extractor,'provider_version',None) or getattr(module,'PROVIDER_VERSION',None) or PROVIDER_VERSION
+        config = check_id(config_version) if config_version else 'media-config-'+digest([_config_value(extractor),_config_value(limits)])[:40]
+        provider = self.register_provider(provider_id,version,config_version=config)
+        bridge, entries, cached = MediaRegistration(self), [], []
+        for path in inputs:
+            if self.pipeline_state('collection') != 'running':
+                return {'status':'blocked','reason':'collection paused between media assets','project_id':project_id}
+            entry = bridge.register(project_id,path)
+            asset = entry['asset']
+            job = self.queue_job(project_id,'native_extract',provider,asset['asset_id']+':'+asset['asset_revision'],config_version=config,estimated_cost_minor=0)
+            if job['state'] in {'submission_unknown','submitted','waiting'}:
+                return {'status':'blocked','reason':'existing submission requires reconciliation','job_id':job['job_id']}
+            entry, previous = bridge.execute(project_id,entry,job,extractor,limits,resume=resume)
+            if previous is not None:
+                cached.append(previous)
+                continue
+            entry['config_version'] = config
+            self._validate_raw(entry)
+            actual = self.register_provider(entry['raw']['provider_id'],entry['raw']['provider_version'],config_version=config)
+            with self.transaction():
+                row = self.connection.execute('SELECT state,provider_json FROM jobs WHERE job_id=?',(job['job_id'],)).fetchone()
+                if row['state'] == 'verified_complete' and json.loads(row['provider_json']) != actual:
+                    raise ContractError('media provider changed without a new configuration')
+                if row['state'] != 'verified_complete':
+                    self.connection.execute('UPDATE jobs SET provider_json=?,updated_at=? WHERE job_id=? AND project_id=? AND operation=? AND state=?',(canonical(actual).decode(),now(),job['job_id'],project_id,'native_extract','running'))
+            entries.append(entry)
+        if cached and entries or len(cached) > 1:
+            raise ContractError('mixed cached media groups require per-asset merge; use individual inputs without replaying them')
+        if cached:
+            return cached[0]
+        bundle = self.publish(project_id,entries)
+        if 'bundle_id' in bundle:
+            bridge.mark_published(entries,bundle)
+        return bundle
 
     def _validate_raw(self, entry):
         raw = entry["raw"]
@@ -471,6 +545,9 @@ class Store:
             raise ContractError("extractor version required")
         keys, declared = set(), set()
         total = 0
+        from .media_store import MediaRegistration
+        media_registration = MediaRegistration(self)
+        output_limit = media_registration.output_limit(entry) if media_registration.record(entry['asset']) else self.max_file_bytes * 4
         outdir = Path(entry["output_dir"])
         reject_links(outdir)
         for file in raw["files"]:
@@ -485,7 +562,7 @@ class Store:
             path = safe_path(outdir,rel)
             sha,size = hash_file(path)
             total += size
-            if total > self.max_file_bytes * 4:
+            if total > output_limit:
                 raise ContractError("extraction output bound exceeded")
         actual = set()
         for path in outdir.rglob("*"):
@@ -553,7 +630,13 @@ class Store:
             row = self.connection.execute("SELECT r.* FROM assets a JOIN asset_revisions r USING(asset_id) JOIN source_assets sa USING(asset_id,asset_revision) JOIN sources s USING(source_id) WHERE a.project_id=? AND r.asset_id=? AND r.asset_revision=? AND s.source_id=? AND s.project_id=?", (project_id,*asset_key(entry["asset"]),entry["asset"]["source_ref"],project_id)).fetchone()
             if not row:
                 raise ContractError("publication asset/source revision not owned by project")
-            if entry["original_relative_path"] != row["original_relative_path"] or hash_file(safe_path(root,entry["original_relative_path"])) != (row["sha256"],row["size_bytes"]):
+            from .media_store import MediaRegistration
+            registration = MediaRegistration(self)
+            if registration.record(entry['asset']):
+                registration.validate(project_id,entry['asset'],row,require_current=True)
+                if entry.get('original_kind') != 'inventory' or entry.get('original_media_type') != 'application/json':
+                    raise ContractError('media registration descriptor cannot masquerade as an original audio/video file')
+            elif entry["original_relative_path"] != row["original_relative_path"] or hash_file(safe_path(root,entry["original_relative_path"])) != (row["sha256"],row["size_bytes"]):
                 raise ContractError("publication original does not match registered source revision")
             if entry["asset"]["source_binding"].get("kind") != "local":
                 raise ContractError("local registration cannot claim an unverified remote source binding")
@@ -566,7 +649,7 @@ class Store:
         for e in entries:
             ident = asset_key(e["asset"])
             file_state = [(f["key"],hash_file(safe_path(Path(e["output_dir"]),f["relative_path"]))) for f in e["raw"]["files"]]
-            fingerprint = digest([e["raw"],file_state])
+            fingerprint = digest([e["job_id"],e["raw"],file_state])
             if ident in grouped:
                 old,old_fingerprint = grouped[ident]
                 if fingerprint != old_fingerprint:
@@ -579,7 +662,7 @@ class Store:
         fingerprints = []
         for e in entries:
             files = [(f["key"],hash_file(safe_path(Path(e["output_dir"]),f["relative_path"]))[0]) for f in e["raw"]["files"]]
-            fingerprints.append([e["asset"],e["provider"],e["raw"],files])
+            fingerprints.append([e["asset"],e["job_id"],e["provider"],e["raw"],files])
         key = digest([project_id,self._catalog_revision(project_id),fingerprints])
         with self.transaction():
             old = self.connection.execute("SELECT * FROM publications WHERE project_id=? AND idempotency_key=?", (project_id,key)).fetchone()
@@ -618,8 +701,10 @@ class Store:
             "publish_id":publish_id,"created_at":created,
             "publication":{"state":"published","journal_ref":publish_id,"manifest_relative_path":final_rel+"/manifest.json","published_at":created},
             "assets":[],"artifacts":[],"blocks":[],"coverage":{},"gaps":[],"contacts":[],"program_validation":receipt}
-        budget = {"policy_ref":"local-small-file-v1","currency":"CNY","max_cost_minor":0,"max_input_bytes":self.max_file_bytes*len(entries),"max_cache_bytes":self.max_file_bytes*4*len(entries),"max_ram_bytes":512*1024*1024,"max_vram_bytes":0,"max_wall_seconds":3600,"max_concurrency":1}
-        plan = {"schema_version":"1.0-draft","plan_id":new_id("plan"),"project_id":project_id,"created_at":created,"policy_version":"local-small-file-v1","provider_registry_revision":"local-registered-v1","capability_observations":[],"permission_checks":[],"hard_budget":budget,"asset_plans":[],"program_validation":receipt}
+        media_caps = [e['media_limits'] for e in entries if e.get('media_registration')]
+        policy_ref = 'bounded-local-media-v1' if media_caps else 'local-small-file-v1'
+        budget = {"policy_ref":policy_ref,"currency":"CNY","max_cost_minor":0,"max_input_bytes":sum(int(c['input_byte_cap']) for c in media_caps)+self.max_file_bytes*(len(entries)-len(media_caps)),"max_cache_bytes":max([self.max_file_bytes*4]+[int(c['final_evidence_byte_cap'])+int(c['cache_byte_cap']) for c in media_caps]),"max_ram_bytes":max([512*1024*1024]+[int(c['ram_byte_cap']) for c in media_caps]),"max_vram_bytes":0,"max_wall_seconds":max([3600]+[int(c['wall_timeout_seconds']) for c in media_caps]),"max_concurrency":1}
+        plan = {"schema_version":"1.0-draft","plan_id":new_id("plan"),"project_id":project_id,"created_at":created,"policy_version":policy_ref,"provider_registry_revision":"local-registered-v1","capability_observations":[],"permission_checks":[],"hard_budget":budget,"asset_plans":[],"program_validation":receipt}
         def artifact(entry,physical,rel,kind,media,restricted=False,ident=None):
             sha,size = hash_file(physical)
             item = {"artifact_id":ident or new_id("artifact"),"artifact_revision":"sha256-"+sha,"asset_ref":{k:entry["asset"][k] for k in ("asset_id","asset_revision")},"job_id":entry["job_id"],"kind":kind,"relative_path":rel,"media_type":media,"byte_length":size,"sha256":sha,"created_at":created,"access_class":"restricted_local" if restricted else "project_local","provider":entry["provider"]}
@@ -637,7 +722,7 @@ class Store:
                 original_restricted = contains_sensitive(original_path.read_text(encoding="utf-8"))
             except (UnicodeError,ValueError):
                 original_restricted = False
-            original = artifact(entry,original_path,entry["original_relative_path"],"original_small_file",raw["media_type"],original_restricted)
+            original = artifact(entry,original_path,entry["original_relative_path"],entry.get('original_kind','original_small_file'),entry.get('original_media_type',raw['media_type']),original_restricted)
             filemap = {}
             for i,file in enumerate(raw["files"]):
                 src = safe_path(Path(entry["output_dir"]),file["relative_path"])
@@ -660,7 +745,7 @@ class Store:
             metadata_path = stage / metadata_rel[len(final_rel)+1:]
             metadata_bytes = canonical(raw["metadata"])
             _write(metadata_path,metadata_bytes)
-            artifact(entry,metadata_path,metadata_rel,"structured_data","application/json",contains_sensitive(metadata_bytes.decode("utf-8")))
+            metadata_artifact = artifact(entry,metadata_path,metadata_rel,"structured_data","application/json",contains_sensitive(metadata_bytes.decode("utf-8")))
             own = []
             restricted_indexes = []
             for index,b in enumerate(raw["blocks"]):
@@ -688,7 +773,7 @@ class Store:
                     if len(text) > 16000:
                         block["uncertainty"] = "Inline text is a 16000-character preview; the referenced native_text artifact contains the full text and analysis.read reads it completely."
                     if sensitive:
-                        block["uncertainty"] = "Sensitive line withheld; full original retained restricted_local."
+                        block["uncertainty"] = "Sensitive line withheld; corresponding bounded raw/original evidence retained restricted_local. Media registration is not a whole-source copy."
                 if block["processing"]["status"] == "extracted" and not block["artifact_ids"]:
                     block["artifact_ids"] = [original["artifact_id"]]
                 if b["origin"] in {"ocr","asr","visual_observation","provider_ai_note","model_inference"}:
@@ -740,7 +825,7 @@ class Store:
             for g in raw["gaps"]:
                 gap(g["kind"],g["severity"],g["reason"],g["block_indexes"])
             if restricted_indexes:
-                gap("access","informational","Credential/private URL lines withheld from model-visible text; exact source bytes retained restricted_local, not deleted.",restricted_indexes)
+                gap("access","informational","Credential/private URL lines withheld from model-visible text; bounded raw evidence retained restricted_local, not deleted. Original media is stat-registered rather than fully copied." if entry.get('media_registration') else "Credential/private URL lines withheld from model-visible text; exact source bytes retained restricted_local, not deleted.",restricted_indexes)
             visual_indexes = [i for i,b in enumerate(own) if b["kind"] in {"image_occurrence","chart"}]
             if visual_indexes:
                 gap("semantic_gap","important","Images preserved; image meaning has not been read by the analysis agent.",visual_indexes)
@@ -762,8 +847,8 @@ class Store:
             observation,permission = new_id("observation"),new_id("permission")
             evidence = {"kind":"program_receipt","record_ref":entry["job_id"],"observed_at":created}
             plan["capability_observations"].append({"observation_id":observation,"provider":provider,"scope":{"source_ref":asset["source_ref"],"asset_ref":ref},"capability":"native_parse","state":"verified_available" if own else "unsupported","observed_at":created,"evidence_refs":[evidence],"limitations":["Local operator supplied extractor; extraction is not semantic reading."]})
-            plan["permission_checks"].append({"check_id":permission,"operation":"native_extract","scope_ref":asset["asset_id"],"state":"granted","grant_ref":"local-input-"+asset["source_ref"],"checked_at":created,"reason":"Explicit local input; immutable copy; no remote side effects."})
-            plan["asset_plans"].append({"asset_ref":ref,"source_ref":asset["source_ref"],"media_type":raw["media_type"],"format_evidence_refs":[evidence],"goals":["text","images","tables"],"jobs":[{"job_id":entry["job_id"],"operation":"native_extract","tier":"native","reason":"Preserve all discovered local content and gaps.","basis_refs":[evidence],"provider":provider,"selection":{"mode":"all_discovered_content","locators":[],"reason":"All discovered objects, not top-k sampling."},"capability_observation_ids":[observation],"permission_check_ids":[permission],"budget":budget,"estimate":{"state":"measured","input_bytes":asset["size_bytes"],"peak_ram_bytes":None,"peak_vram_bytes":None,"cache_bytes":None,"wall_seconds":None,"cost_minor":0,"basis_refs":[evidence]},"side_effect":"local_read_or_derivation","depends_on_job_ids":[],"fallback_job_ids":[],"stop_conditions":["permission_denied","scope_changed","budget_exhausted","deterministic_failure","submission_unknown"],"acceptance_checks":["actual_format","actual_files_readable","all_discovered_accounted","program_receipt"],"retry_policy":{"max_attempts":1,"max_route_upgrades":0,"repeat_deterministic_failure":False}}]})
+            plan["permission_checks"].append({"check_id":permission,"operation":"native_extract","scope_ref":asset["asset_id"],"state":"granted","grant_ref":"local-input-"+asset["source_ref"],"checked_at":created,"reason":"Explicit local input; stat descriptor plus independently hashed derived artifacts; no whole-media copy/hash." if entry.get('media_registration') else "Explicit local input; immutable copy; no remote side effects."})
+            plan["asset_plans"].append({"asset_ref":ref,"source_ref":asset["source_ref"],"media_type":raw["media_type"],"format_evidence_refs":[evidence,{"kind":"local_probe","record_ref":metadata_artifact['artifact_id'],"observed_at":created}] if entry.get('media_registration') else [evidence],"goals":["transcript","visual_events","metadata"] if entry.get('media_registration') else ["text","images","tables"],"jobs":[{"job_id":entry["job_id"],"operation":"native_extract","tier":"native","reason":"Preserve all discovered local content and gaps.","basis_refs":[evidence],"provider":provider,"selection":{"mode":"all_discovered_content","locators":[],"reason":"Discovered bounded audio windows and explicitly sparse visual samples; does not claim complete visual coverage." if entry.get('media_registration') else "All discovered objects, not top-k sampling."},"capability_observation_ids":[observation],"permission_check_ids":[permission],"budget":budget,"estimate":{"state":"measured","input_bytes":raw['metadata'].get('input_bytes_received') if entry.get('media_registration') else asset["size_bytes"],"peak_ram_bytes":raw['metadata'].get('ram',{}).get('peak_worker_commit_bytes') if entry.get('media_registration') else None,"peak_vram_bytes":None,"cache_bytes":None,"wall_seconds":None,"cost_minor":0,"basis_refs":[evidence]},"side_effect":"local_read_or_derivation","depends_on_job_ids":[],"fallback_job_ids":[],"stop_conditions":["permission_denied","scope_changed","budget_exhausted","deterministic_failure","submission_unknown"],"acceptance_checks":["actual_format","actual_files_readable","all_discovered_accounted","program_receipt"],"retry_policy":{"max_attempts":1,"max_route_upgrades":0,"repeat_deterministic_failure":False}}]})
         states = [a["enumeration_state"] for a in per_asset]
         inventory = "complete" if all(s == "complete" for s in states) else "unknown" if all(s == "unknown" for s in states) else "partial"
         bundle["coverage"] = {"scope":"listed_assets","inventory_state":inventory,"claimed_status":"verified_complete" if inventory == "complete" and not bundle["gaps"] and all(a["processing_status"] == "verified_complete" for a in per_asset) else "partial","discovered_counts":{"assets":len(entries),"blocks":len(bundle["blocks"]),"visual_occurrences":sum(b["kind"] in {"image_occurrence","chart"} for b in bundle["blocks"])},"per_asset":per_asset}
@@ -822,9 +907,17 @@ class Store:
             self._check_extraction_job(row["project_id"],artifact["asset_ref"],artifact["job_id"],artifact["provider"],published=row["state"] == "published",legacy_publish_id=row["publish_id"] if planned["provider"] == artifact["provider"] else None)
         for asset in bundle["assets"]:
             bound = self.connection.execute("SELECT r.* FROM asset_revisions r JOIN assets a USING(asset_id) JOIN source_assets sa USING(asset_id,asset_revision) JOIN sources s USING(source_id) WHERE a.project_id=? AND r.asset_id=? AND r.asset_revision=? AND s.source_id=? AND s.project_id=?", (row["project_id"],asset["asset_id"],asset["asset_revision"],asset["source_ref"],row["project_id"])).fetchone()
-            originals = [a for a in bundle["artifacts"] if a["kind"] == "original_small_file" and asset_key(a["asset_ref"]) == asset_key(asset)]
-            if not bound or asset["size_bytes"] != bound["size_bytes"] or len(originals) != 1 or originals[0]["relative_path"] != bound["original_relative_path"] or originals[0]["sha256"] != bound["sha256"]:
-                raise ContractError("published asset/source/original identity inconsistent with ledger")
+            from .media_store import MediaRegistration
+            registration = MediaRegistration(self)
+            if registration.record(asset):
+                registration.validate(row['project_id'],asset,bound,require_current=False)
+                originals = [a for a in bundle['artifacts'] if a['kind'] == 'inventory' and asset_key(a['asset_ref']) == asset_key(asset) and a['relative_path'] == bound['original_relative_path']]
+                if len(originals) != 1 or originals[0]['sha256'] != bound['sha256'] or originals[0]['media_type'] != 'application/json':
+                    raise ContractError('published media descriptor identity mismatch')
+            else:
+                originals = [a for a in bundle["artifacts"] if a["kind"] == "original_small_file" and asset_key(a["asset_ref"]) == asset_key(asset)]
+                if not bound or asset["size_bytes"] != bound["size_bytes"] or len(originals) != 1 or originals[0]["relative_path"] != bound["original_relative_path"] or originals[0]["sha256"] != bound["sha256"]:
+                    raise ContractError("published asset/source/original identity inconsistent with ledger")
         return bundle
 
     def _after_rename(self, publish_id):
