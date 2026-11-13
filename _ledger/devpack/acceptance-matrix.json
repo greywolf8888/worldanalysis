@@ -7,6 +7,8 @@
   "integration_verification": {"receipt":"_ledger/devpack/verification-20261113T134802Z.json","tests_run":188,"passed":187,"skipped":1,"failures":0,"errors":0,"source_snapshot_unchanged":true,"legacy_node_suites":"passed","scope":"Implemented code and selected actual/synthetic inputs; not whole-plan acceptance."},
   "goal_control": "latest_observed_revision_6_active_armed; no replacement goal or schedule created",
   "latest_targeted_review":"_ledger/devpack/round3-quick-review.json",
+  "latest_real_cloud_execution":"_ledger/devpack/round4-progress.md",
+  "p2_real_transfer_readback":{"operation_id":"transfer-a7f9a2ff37a4cb9ff1fbd7419a701ecc","state":"verified_complete","verified_items":18,"files":16,"directories":2,"file_bytes":238660633,"new_save_requests":1,"download_and_local_extract":"not_yet_attempted","source_pagination_transport":"not_claimed; closure based on independently observed parent UI counts and returned sets"},
   "business_ledger": "整理结果/worldanalysis.sqlite3",
   "legacy_material_ledger": "_ledger/075-materials.json",
   "legacy_reverified": {"transcripts":78,"native_courseware":12,"pages":785,"integrity_problems":0,"revision":"78fa6046397d3595f41437705fe13aae2146e79a121771a133a63a96dc509c6f"},
