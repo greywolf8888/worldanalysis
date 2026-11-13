@@ -80,6 +80,13 @@ class CLITests(unittest.TestCase):
                 self.assertEqual(reused.call_args.args[1:],('task-routing',['block-one']))
                 self.assertEqual(json.loads(out.getvalue())['status'],'reused')
 
+    def test_local_supplement_cli_only_routes_explicit_request(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()) as out:
+            with patch('worldanalysis.store.Store.fulfil_available',return_value={'status':'pending','request_id':'request-routing','new_parse':False}) as worker:
+                self.assertEqual(main(['--root',temp,'supplement-fulfil','--request','request-routing']),0)
+                worker.assert_called_once_with('request-routing')
+                self.assertEqual(json.loads(out.getvalue())['status'],'pending')
+
     def test_unknown_inventory_not_zero_complete(self):
         with tempfile.TemporaryDirectory() as temp:
             result=inventory(Path(temp))

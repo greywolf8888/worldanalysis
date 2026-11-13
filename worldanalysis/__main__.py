@@ -92,6 +92,8 @@ def parser():
     ingest.add_argument('--no-asr', action='store_true', help='媒体仅解码/画面；语音仍留未处理缺口，不冒称ASR完成')
     ingest.add_argument('--synthetic-input', action='store_true', help='显式标记自建校准素材；不能作真实课程验收')
     ingest.add_argument('inputs', nargs='+', type=Path)
+    fulfil = sub.add_parser('supplement-fulfil', help='仅对账已有且完整匹配的本地证据；不扩权、不新解析')
+    fulfil.add_argument('--request', required=True)
     compose = sub.add_parser('compose', help='仅组合本项目已发布证据；不重新提取、不改变旧生产回执')
     compose.add_argument('--project', required=True)
     compose.add_argument('--bundle', action='append', required=True)
@@ -186,6 +188,8 @@ def main(argv=None):
                 display(bundle)
                 return 2
             display({'project_id':bundle['project_id'],'bundle_id':bundle['bundle_id'],'revision':bundle['bundle_revision'],'publish_id':bundle['publish_id'],'coverage':bundle['coverage'],'gaps':bundle['gaps'],'project_root':store.project_root(args.project),'analysis': 'Ready for independent agent reading; no summary has been fabricated'})
+        elif args.command == 'supplement-fulfil':
+            display(store.fulfil_available(args.request))
         elif args.command == 'compose':
             bundle = store.compose(args.project,args.bundle)
             display({'status':bundle.get('status','published'),'project_id':args.project,'bundle_id':bundle.get('bundle_id'),'coverage':bundle.get('coverage'),'new_extraction_executed':False})

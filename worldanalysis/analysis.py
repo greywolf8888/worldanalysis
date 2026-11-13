@@ -648,15 +648,25 @@ class Analysis:
         event = self.connection.execute("SELECT payload_json FROM events WHERE kind='analysis_completed' AND record_id=?",(task_id,)).fetchone()
         return {"task_id":task_id,"mode":"original_completion_event_hash","validation_sha256":json.loads(event[0])["validation_sha256"]}
 
+    def request_supplement(self,task_id,request):
+        return self.request_evidence(task_id,request)
+
     def request_evidence(self,task_id,request):
         """Persist a proposal without cloud privileges, authorization or execution."""
-        task = self._task(task_id,require_running=True)
+        task = self._task(task_id)
+        accepted = None
+        if task['state'] != 'running':
+            accepted = self.get_result(task_id)
+            validate_schema('analysis',{**accepted,'supplement_requests':[request]})
         bundle = self._bundle(task)
+        known_gaps = {g['gap_id'] for g in bundle['gaps']}
+        if accepted:
+            known_gaps.update(g['gap_id'] for g in accepted['gaps'])
         check_id(request["request_id"])
         required = {"request_id","gap_ids","reason","minimal_targets","requested_outputs","priority","status","requires_scope_expansion"}
         if set(request) != required or request["status"] not in {"proposed","queued_for_collection","blocked","accepted_limitation"} or request["priority"] not in {"blocking","important","optional"}:
             raise ContractError("invalid supplement request contract")
-        if not request["gap_ids"] or len(request["gap_ids"]) != len(set(request["gap_ids"])) or not set(request["gap_ids"]) <= {g["gap_id"] for g in bundle["gaps"]}:
+        if not request["gap_ids"] or len(request["gap_ids"]) != len(set(request["gap_ids"])) or not set(request["gap_ids"]) <= known_gaps:
             raise ContractError("supplement references missing bundle gaps")
         allowed_outputs = {"inventory","original_text","original_image","page_render","table","formula","audio_window","transcript","video_clip","source_attribution"}
         if not isinstance(request["requires_scope_expansion"],bool) or not set(request["requested_outputs"]) <= allowed_outputs:
@@ -673,5 +683,5 @@ class Analysis:
                     raise ContractError("supplement ID conflict")
             else:
                 self.connection.execute("INSERT INTO supplement_requests VALUES(?,?,?,?,?,?,?)",(request["request_id"],task["project_id"],task_id,task["publish_id"],"blocked_scope_expansion" if request.get("requires_scope_expansion") else "queued",canonical(request).decode(),now()))
-                self.store.event("supplement_requested",request["request_id"],task["project_id"])
+                self.store.event('supplement_requested',request['request_id'],task['project_id'],{'task_id':task_id,'publish_id':task['publish_id'],'request_sha256':hashlib.sha256(canonical(request)).hexdigest(),'source':'Analysis.request_supplement','proposal_only':True})
         return {"request_id":request["request_id"],"status":"blocked" if request.get("requires_scope_expansion") else "queued_for_collection","executed":False}

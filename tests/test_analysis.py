@@ -365,6 +365,26 @@ class AnalysisTests(unittest.TestCase):
         self.store = Store(self.root)
         self.assertEqual(self.store.list_supplements()[0]["state"],"queued")
 
+    def test_post_accepted_supplement_is_proposal_only_and_hash_provenanced(self):
+        missing=self.bundle['blocks'][1]
+        result=self.result('partial',{missing['block_id']:'pending'})
+        ref={'project_id':self.project,**missing['asset_ref'],'block_id':missing['block_id'],'locator':missing['locator']}
+        result['gaps'].append({'gap_id':'post-accepted-gap','kind':'unprocessed','severity':'important','status':'open','reason':'Need the bounded original text','target_refs':[ref],'resolution_refs':[]})
+        accepted=self.submit(result)
+        result_path=self.project_root/accepted['result_relative_path'];before=hash_file(result_path)
+        request={'request_id':'post-accepted-request','gap_ids':['post-accepted-gap'],'reason':'Deliver the existing text without rerunning parser','minimal_targets':[ref],'requested_outputs':['original_text'],'priority':'important','status':'proposed','requires_scope_expansion':False}
+        queued=self.analysis.request_supplement(self.task['task_id'],request)
+        self.assertFalse(queued['executed']);self.assertEqual(queued['status'],'queued_for_collection')
+        self.assertEqual(hash_file(result_path),before)
+        self.assertEqual(self.analysis.get_result(self.task['task_id'])['execution_status'],'partial')
+        event=json.loads(self.store.connection.execute("SELECT payload_json FROM events WHERE kind='supplement_requested' AND record_id=?",(request['request_id'],)).fetchone()[0])
+        self.assertEqual(event['task_id'],self.task['task_id']);self.assertEqual(event['publish_id'],self.bundle['publish_id'])
+        self.assertEqual(event['request_sha256'],hashlib.sha256(canonical(request)).hexdigest())
+        self.analysis.request_supplement(self.task['task_id'],request)
+        self.assertEqual(self.store.connection.execute('SELECT COUNT(*) FROM supplement_requests').fetchone()[0],1)
+        denied=copy.deepcopy(request);denied['request_id']='invalid-post-gap';denied['gap_ids']=['not-in-accepted-evidence']
+        with self.assertRaises(ContractError):self.analysis.request_supplement(self.task['task_id'],denied)
+
     def test_not_applicable_cannot_hide_real_evidence(self):
         result = self.result("partial",{self.bundle["blocks"][1]["block_id"]:"not_applicable"})
         with self.assertRaisesRegex(ContractError,"not_applicable"):

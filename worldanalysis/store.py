@@ -470,6 +470,10 @@ class Store:
                 cache.remember(entry,bundle)
         return bundle
 
+    def fulfil_available(self, request_id):
+        from .local_supplement import fulfil_available
+        return fulfil_available(self, request_id)
+
     def compose(self, project_id, bundle_ids):
         from .bundle_merge import compose
         return compose(self, project_id, bundle_ids)
