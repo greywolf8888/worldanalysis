@@ -470,6 +470,14 @@ class Store:
                 cache.remember(entry,bundle)
         return bundle
 
+    def publish_audio_window(self, project_id, source_bundle_id, asset_id, asset_revision, start_ms, end_ms, *, output_relative, request_id=None, max_received_bytes=None):
+        from .audio_publication import publish_audio_window
+        return publish_audio_window(self,project_id,source_bundle_id,asset_id,asset_revision,start_ms,end_ms,output_relative=output_relative,request_id=request_id,max_received_bytes=max_received_bytes)
+
+    def reconcile_audio_window(self, request_id, bundle_id):
+        from .audio_delivery import reconcile_audio_window
+        return reconcile_audio_window(self,request_id,bundle_id)
+
     def reconcile_image_region(self, request_id, bundle_id):
         from .derived_delivery import reconcile_image_region
         return reconcile_image_region(self,request_id,bundle_id)
@@ -940,6 +948,9 @@ class Store:
                 originals = [a for a in bundle["artifacts"] if a["kind"] == "original_small_file" and asset_key(a["asset_ref"]) == asset_key(asset)]
                 if not bound or asset["size_bytes"] != bound["size_bytes"] or len(originals) != 1 or originals[0]["relative_path"] != bound["original_relative_path"] or originals[0]["sha256"] != bound["sha256"]:
                     raise ContractError("published asset/source/original identity inconsistent with ledger")
+        if any(a['provider']['provider_id'] == 'local_audio_window' and a['relative_path'].startswith(row['final_relative_path']+'/') for a in bundle['artifacts']):
+            from .audio_publication import verify_audio_window_publication
+            verify_audio_window_publication(self,row,bundle,staging=staging)
         return bundle
 
     def _after_rename(self, publish_id):

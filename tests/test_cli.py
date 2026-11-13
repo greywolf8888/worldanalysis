@@ -110,6 +110,16 @@ class CLITests(unittest.TestCase):
                 reconcile.assert_called_once_with('r','b')
                 self.assertFalse(json.loads(out.getvalue())['new_publication'])
 
+    def test_audio_publication_and_delivery_cli_keep_exact_time_scope(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()):
+            with patch('worldanalysis.store.Store.publish_audio_window',return_value={'status':'published','listened':False}) as publish:
+                self.assertEqual(main(['--root',temp,'publish-audio-window','--project','p','--bundle','b','--asset','a','--asset-revision','v','--start-ms','2940','--end-ms','4420','--output-relative','窗口派生/test.wav','--request','r']),0)
+                self.assertEqual(publish.call_args.args,('p','b','a','v',2940,4420))
+                self.assertEqual(publish.call_args.kwargs,{'output_relative':'窗口派生/test.wav','request_id':'r','max_received_bytes':None})
+            with patch('worldanalysis.store.Store.reconcile_audio_window',return_value={'status':'fulfilled','listened':False}) as reconcile:
+                self.assertEqual(main(['--root',temp,'reconcile-audio-window','--request','r','--bundle','b']),0)
+                reconcile.assert_called_once_with('r','b')
+
     def test_unknown_inventory_not_zero_complete(self):
         with tempfile.TemporaryDirectory() as temp:
             result=inventory(Path(temp))

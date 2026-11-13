@@ -92,6 +92,19 @@ def parser():
     ingest.add_argument('--no-asr', action='store_true', help='媒体仅解码/画面；语音仍留未处理缺口，不冒称ASR完成')
     ingest.add_argument('--synthetic-input', action='store_true', help='显式标记自建校准素材；不能作真实课程验收')
     ingest.add_argument('inputs', nargs='+', type=Path)
+    audio_publish = sub.add_parser('publish-audio-window', help='正式发布已授权源的有界音频窗；stat不等于原片摘要，未试听')
+    audio_publish.add_argument('--project', required=True)
+    audio_publish.add_argument('--bundle', required=True)
+    audio_publish.add_argument('--asset', required=True)
+    audio_publish.add_argument('--asset-revision', required=True)
+    audio_publish.add_argument('--start-ms', type=int, required=True)
+    audio_publish.add_argument('--end-ms', type=int, required=True)
+    audio_publish.add_argument('--output-relative', required=True)
+    audio_publish.add_argument('--request')
+    audio_publish.add_argument('--max-received-bytes', type=int)
+    audio_reconcile = sub.add_parser('reconcile-audio-window', help='对账已发布窗口并交付；不自动标听过或解决缺口')
+    audio_reconcile.add_argument('--request', required=True)
+    audio_reconcile.add_argument('--bundle', required=True)
     window = sub.add_parser('audio-window', help='显式本地源时间窗；stat不是原媒体全摘要，不发布Bundle')
     window.add_argument('--source', type=Path, required=True)
     window.add_argument('--start-ms', type=int, required=True)
@@ -214,6 +227,10 @@ def main(argv=None):
                 display(bundle)
                 return 2
             display({'project_id':bundle['project_id'],'bundle_id':bundle['bundle_id'],'revision':bundle['bundle_revision'],'publish_id':bundle['publish_id'],'coverage':bundle['coverage'],'gaps':bundle['gaps'],'project_root':store.project_root(args.project),'analysis': 'Ready for independent agent reading; no summary has been fabricated'})
+        elif args.command == 'publish-audio-window':
+            display(store.publish_audio_window(args.project,args.bundle,args.asset,args.asset_revision,args.start_ms,args.end_ms,output_relative=args.output_relative,request_id=args.request,max_received_bytes=args.max_received_bytes))
+        elif args.command == 'reconcile-audio-window':
+            display(store.reconcile_audio_window(args.request,args.bundle))
         elif args.command == 'audio-window':
             from .audio_window import extract_audio_window
             from .media_store import identity

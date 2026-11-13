@@ -14,6 +14,9 @@ after collecting/identity-checking receipts and before physical-read checking::
 
 The original _has_read implementation is still used to prove original physical
 reads; multi-hop reuse is deliberately ineligible. Unknown usage remains null.
+New receipts use block-evidence closure v2; v1 fingerprints remain frozen for
+already-issued receipts. Validation dispatches by the stored reuse_policy and
+never rewrites historical accepted results, reports or proofs.
 All verification is local; no provider, acquisition or cloud API is invoked.
 """
 from __future__ import annotations
@@ -30,7 +33,8 @@ from . import bundle_merge as _published
 from .contracts import (ContractError, asset_key, canonical, check_id, digest,
                         safe_path, validate_evidence)
 
-_POLICY = "same-agent-accepted-physical-read-v1"
+_POLICY = "same-agent-accepted-physical-read-v1"  # Frozen historical proof algorithm.
+_POLICY_V2 = "same-agent-accepted-physical-read-v2"
 _MAX_JSON = 8 * 1024**2
 _MAX_OUTPUTS = 16 * 1024**2
 _MAX_RECEIPTS = 8192
@@ -293,6 +297,133 @@ class _Run:
         source["byte_proven_block_ids"] = direct.keys() - unproven
         return source["fingerprints"]
 
+    def fingerprints_v2(self, source):
+        """Pin only each block's explicit evidence/producer dependency closure.
+
+        Admission still validates the entire publication. An unrelated append is
+        not a dependency, but original bytes, complete text, locator geometry,
+        selected producer jobs/configuration and their explicit inputs are.
+        """
+        if "fingerprints_v2" in source:
+            return source["fingerprints_v2"]
+        bundle, artifacts = source["bundle"], source["artifacts"]
+        assets = {asset_key(a): a for a in bundle["assets"]}
+        originals = {k: [] for k in assets}
+        for artifact in artifacts.values():
+            if artifact["kind"] == "original_small_file":
+                originals[asset_key(artifact["asset_ref"])].append(artifact["artifact_id"])
+        jobs, contexts = {}, {}
+        observations = _unique(source["plan"]["capability_observations"], "observation_id")
+        permissions = _unique(source["plan"]["permission_checks"], "check_id")
+        for key, plan in source["plans"].items():
+            for job in plan["jobs"]:
+                ident = job["job_id"]
+                if ident in jobs:
+                    raise ContractError("duplicate incremental producer job")
+                jobs[ident] = job
+                contexts[ident] = {"asset_ref": plan["asset_ref"], "source_ref": plan["source_ref"],
+                    "media_type": plan["media_type"], "job": job,
+                    "observations": [observations[i] for i in sorted(job["capability_observation_ids"])],
+                    "permissions": [permissions[i] for i in sorted(job["permission_check_ids"])]}
+        proven_assets = set()
+        for key, asset in assets.items():
+            row = self.conn.execute("SELECT kind FROM sources WHERE source_id=? AND project_id=?",
+                                    (asset["source_ref"], bundle["project_id"])).fetchone()
+            if row and row[0] == "local" and len(originals[key]) == 1:
+                sha = artifacts[originals[key][0]]["sha256"]
+                if type(sha) is str and len(sha) == 64 and set(sha) <= set("0123456789abcdef"):
+                    proven_assets.add(key)
+        direct, dependencies, unproven = {}, {}, set()
+        for ident, block in source["blocks"].items():
+            selected = {"asset": set(), "artifact": set(), "job": set()}
+            queue = deque()
+            dependencies[ident] = set()
+
+            def include(kind, value):
+                if value not in selected[kind]:
+                    selected[kind].add(value)
+                    queue.append((kind, value))
+
+            def evidence(ref):
+                validate_evidence(ref, bundle)
+                include("asset", asset_key(ref))
+                if "block_id" in ref:
+                    dependencies[ident].add(ref["block_id"])
+                if "artifact_id" in ref:
+                    include("artifact", ref["artifact_id"])
+                geometry(ref["locator"])
+
+            def geometry(locator):
+                if "geometry" in locator:
+                    value = locator["geometry"]
+                    include("artifact", value["reference_object_ref"])
+                    mapping = value["transform_to_original"].get("mapping_artifact_id")
+                    if mapping:
+                        include("artifact", mapping)
+
+            include("asset", asset_key(block["asset_ref"]))
+            include("job", block["processing"]["recovery_ref"])
+            for artifact_id in block["artifact_ids"]:
+                include("artifact", artifact_id)
+            geometry(block["locator"])
+            for ref in block["derived_from"] + block["processing"]["evidence_refs"]:
+                evidence(ref)
+            while queue:
+                kind, value = queue.popleft()
+                if kind == "asset":
+                    for artifact_id in originals[value]:
+                        include("artifact", artifact_id)
+                elif kind == "artifact":
+                    artifact = artifacts[value]
+                    include("asset", asset_key(artifact["asset_ref"]))
+                    include("job", artifact["job_id"])
+                else:
+                    context, job = contexts[value], jobs[value]
+                    include("asset", asset_key(context["asset_ref"]))
+                    for job_id in job["depends_on_job_ids"] + job["fallback_job_ids"]:
+                        include("job", job_id)
+                    refs = job["basis_refs"] + job["estimate"]["basis_refs"]
+                    refs += [r for o in context["observations"] for r in o["evidence_refs"]]
+                    for ref in refs:
+                        if "source_evidence" in ref:
+                            evidence(ref["source_evidence"])
+                        record = ref["record_ref"]
+                        if record in artifacts:
+                            include("artifact", record)
+                        if record in jobs:
+                            include("job", record)
+                        if record in source["blocks"]:
+                            dependencies[ident].add(record)
+            if not selected["asset"] <= proven_assets:
+                unproven.add(ident)
+            text, _ = self.text(source, block)
+            encoded = text.encode("utf-8")
+            direct[ident] = digest([_snapshot(block),
+                [assets[k] for k in sorted(selected["asset"])],
+                [artifacts[a] for a in sorted(selected["artifact"])],
+                [_snapshot(contexts[j]) for j in sorted(selected["job"])],
+                {"full_text_sha256": hashlib.sha256(encoded).hexdigest(), "full_text_bytes": len(encoded)}])
+        source["fingerprints_v2"] = _closure_fingerprints(direct, dependencies)
+        children = {k: [] for k in direct}
+        for child, deps in dependencies.items():
+            for parent in deps:
+                children[parent].append(child)
+        queue = deque(unproven)
+        while queue:
+            for child in children[queue.popleft()]:
+                if child not in unproven:
+                    unproven.add(child)
+                    queue.append(child)
+        source["byte_proven_block_ids_v2"] = direct.keys() - unproven
+        return source["fingerprints_v2"]
+
+    def policy_fingerprints(self, source, policy):
+        if policy == _POLICY:
+            return self.fingerprints(source), source["byte_proven_block_ids"]
+        if policy == _POLICY_V2:
+            return self.fingerprints_v2(source), source["byte_proven_block_ids_v2"]
+        raise ContractError("unsupported historical reuse policy")
+
     def accepted(self, task):
         source = self.source(task)
         ident = task["task_id"]
@@ -456,7 +587,7 @@ def _assertions(prior, current, reusable):
     return [eligible[k] for k in sorted(eligible.keys() - invalid)], sorted(invalid)
 
 
-def _plan(run, task):
+def _plan(run, task, policy=_POLICY_V2):
     current = run.source(task)
     row = run.conn.execute("""SELECT t.task_id FROM analyses a
         JOIN analysis_tasks t ON t.task_id=a.task_id
@@ -468,14 +599,13 @@ def _plan(run, task):
     old_blocks = prior["source"]["blocks"] if prior else {}
     shared = now_blocks.keys() & old_blocks.keys()
     same_agent = bool(prior and _loads(task["agent_json"], 4096) == prior["result"]["agent"])
-    current_fps = run.fingerprints(current)
-    old_fps = run.fingerprints(prior["source"]) if prior else {}
+    current_fps, current_proven = run.policy_fingerprints(current, policy)
+    old_fps, old_proven = run.policy_fingerprints(prior["source"], policy) if prior else ({}, set())
     changed = {k for k in shared if current_fps[k] != old_fps[k]}
     reusable, proofs = set(), {}
     if same_agent:
         for ident in shared - changed:
-            if (ident not in current["byte_proven_block_ids"]
-                    or ident not in prior["source"]["byte_proven_block_ids"]):
+            if ident not in current_proven or ident not in old_proven:
                 continue
             entry = prior["entries"][ident]
             if entry["status"] == "read":
@@ -487,7 +617,7 @@ def _plan(run, task):
     limitations = list(prior["result"]["coverage"]["limitations"]) if prior else []
     if prior and not same_agent:
         limitations.append("Prior agent/provider/model/prompt differs; no historical reading or assertion is reused.")
-    if now_blocks.keys() - current["byte_proven_block_ids"]:
+    if now_blocks.keys() - current_proven:
         limitations.append("Stat-only media registration cannot prove full source-byte identity; affected blocks/dependencies require new reading, not historical reuse.")
     if reusable:
         limitations.append("Historical same-agent reuse is not a new physical text delivery/image open or a new semantic verification.")
@@ -499,7 +629,7 @@ def _plan(run, task):
     processing = [{"block_id": k, "asset_ref": deepcopy(b["asset_ref"]), "status": "pending",
                    "priority": "normal", "reason": "Pending new reading or explicit verified historical reuse.",
                    "read_receipt_refs": [], "exclusion": None} for k, b in now_blocks.items()]
-    public = {"status": "prepared", "task_id": task["task_id"],
+    public = {"status": "prepared", "task_id": task["task_id"], "reuse_policy": policy,
         "source_task_id": prior["task"]["task_id"] if prior else None,
         "same_agent": same_agent, "new_block_ids": sorted(now_blocks.keys() - old_blocks.keys()),
         "changed_block_ids": sorted(changed), "removed_block_ids": sorted(old_blocks.keys() - now_blocks.keys()),
@@ -525,15 +655,16 @@ def prepare(analysis, task_id):
         return _plan(run, task)[0]
 
 
-def _payload(task, prior, current, block_id, proof):
-    return {"reuse_policy": _POLICY, "historical_reuse": True, "new_physical_read": False,
+def _payload(task, prior, current, block_id, proof, policy=_POLICY_V2):
+    fingerprint_key = "fingerprints" if policy == _POLICY else "fingerprints_v2"
+    return {"reuse_policy": policy, "historical_reuse": True, "new_physical_read": False,
         "source_task_id": prior["task"]["task_id"], "source_publish_id": prior["task"]["publish_id"],
         "source_bundle_id": prior["source"]["bundle"]["bundle_id"],
         "source_bundle_revision": prior["source"]["bundle"]["bundle_revision"],
         "source_result_sha256": prior["result_sha256"],
         "source_report_hashes": {r["relative_path"]: r["sha256"] for r in prior["result"]["reports"]},
         "source_read_receipt_sha256": proof,
-        "evidence_fingerprint": current["fingerprints"][block_id],
+        "evidence_fingerprint": current[fingerprint_key][block_id],
         "agent_sha256": digest(_loads(task["agent_json"], 4096))}
 
 
@@ -562,6 +693,12 @@ def reuse(analysis, task_id, block_ids):
                 raise ContractError("duplicate historical reuse receipts require review")
             if existing:
                 receipt, _ = run.stored_receipt(task, ident, existing[0][0], current["bundle"])
+                if receipt.get("reuse_policy") == _POLICY:
+                    # A running pre-v2 task may already hold v1 evidence. Keep
+                    # that exact proof; never upgrade/rewrite an issued receipt.
+                    validate_reused(analysis, task, current["blocks"][ident], current["bundle"], receipt)
+                    run.policy_fingerprints(current, _POLICY)
+                    payload = _payload(task, prior, current, ident, proofs[ident], _POLICY)
                 actual = {k: v for k, v in receipt.items() if k not in {"receipt_id", "task_id", "block_id", "kind", "publish_id", "created_at", "content"}}
                 if actual != payload or receipt["content"] is not None:
                     raise ContractError("historical reuse receipt proof changed/tampered")
@@ -610,11 +747,12 @@ def validate_reused(analysis, task, currentBlock, currentBundle, receipt):
         proof = run.original_read(source_task, prior["source"], prior["entries"][ident])
         if proof is None:
             raise ContractError("multi-hop historical reuse is not supported")
-        old_fps, new_fps = run.fingerprints(prior["source"]), run.fingerprints(current)
-        if (old_fps[ident] != new_fps[ident] or ident not in current["byte_proven_block_ids"]
-                or ident not in prior["source"]["byte_proven_block_ids"]):
+        policy = actual.get("reuse_policy")
+        old_fps, old_proven = run.policy_fingerprints(prior["source"], policy)
+        new_fps, new_proven = run.policy_fingerprints(current, policy)
+        if old_fps[ident] != new_fps[ident] or ident not in new_proven or ident not in old_proven:
             raise ContractError("historical reuse source identity/evidence/dependency changed or unproven")
-        expected = _payload(stored_task, prior, current, ident, proof)
+        expected = _payload(stored_task, prior, current, ident, proof, policy)
         base = {"receipt_id", "task_id", "block_id", "kind", "publish_id", "created_at", "content"}
         if {k: v for k, v in actual.items() if k not in base} != expected:
             raise ContractError("historical reuse accepted result/read receipt/fingerprint tampered")
