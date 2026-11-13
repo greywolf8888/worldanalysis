@@ -87,6 +87,14 @@ class CLITests(unittest.TestCase):
                 worker.assert_called_once_with('request-routing')
                 self.assertEqual(json.loads(out.getvalue())['status'],'pending')
 
+    def test_crop_cli_passes_explicit_pixel_box_without_publication(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()) as out:
+            with patch('worldanalysis.store.Store.crop_region',return_value={'status':'derived_only','bundle_published':False}) as crop:
+                self.assertEqual(main(['--root',temp,'crop-region','--project','p','--bundle','b','--block','block','--artifact','image','--bbox','1','2','10','20','--resize','9','18','--output-relative','补采派生/r.png']),0)
+                self.assertEqual(crop.call_args.args[4],{'unit':'pixel','origin':'top_left','xyxy':[1,2,10,20]})
+                self.assertEqual(crop.call_args.kwargs['resize'],[9,18])
+                self.assertFalse(json.loads(out.getvalue())['bundle_published'])
+
     def test_unknown_inventory_not_zero_complete(self):
         with tempfile.TemporaryDirectory() as temp:
             result=inventory(Path(temp))

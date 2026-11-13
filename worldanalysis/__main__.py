@@ -92,6 +92,20 @@ def parser():
     ingest.add_argument('--no-asr', action='store_true', help='媒体仅解码/画面；语音仍留未处理缺口，不冒称ASR完成')
     ingest.add_argument('--synthetic-input', action='store_true', help='显式标记自建校准素材；不能作真实课程验收')
     ingest.add_argument('inputs', nargs='+', type=Path)
+    window = sub.add_parser('audio-window', help='显式本地源时间窗；stat不是原媒体全摘要，不发布Bundle')
+    window.add_argument('--source', type=Path, required=True)
+    window.add_argument('--start-ms', type=int, required=True)
+    window.add_argument('--end-ms', type=int, required=True)
+    window.add_argument('--output-relative', required=True)
+    window.add_argument('--max-received-bytes', type=int, default=64*1024*1024)
+    crop = sub.add_parser('crop-region', help='仅对已封存本地图片作有界裁切；不发布Bundle或自标fulfilled')
+    crop.add_argument('--project', required=True)
+    crop.add_argument('--bundle', required=True)
+    crop.add_argument('--block', required=True)
+    crop.add_argument('--artifact', required=True)
+    crop.add_argument('--bbox', required=True, nargs=4, type=int, metavar=('LEFT','TOP','RIGHT','BOTTOM'))
+    crop.add_argument('--resize', nargs=2, type=int, metavar=('WIDTH','HEIGHT'))
+    crop.add_argument('--output-relative', required=True)
     fulfil = sub.add_parser('supplement-fulfil', help='仅对账已有且完整匹配的本地证据；不扩权、不新解析')
     fulfil.add_argument('--request', required=True)
     compose = sub.add_parser('compose', help='仅组合本项目已发布证据；不重新提取、不改变旧生产回执')
@@ -188,6 +202,19 @@ def main(argv=None):
                 display(bundle)
                 return 2
             display({'project_id':bundle['project_id'],'bundle_id':bundle['bundle_id'],'revision':bundle['bundle_revision'],'publish_id':bundle['publish_id'],'coverage':bundle['coverage'],'gaps':bundle['gaps'],'project_root':store.project_root(args.project),'analysis': 'Ready for independent agent reading; no summary has been fabricated'})
+        elif args.command == 'audio-window':
+            from .audio_window import extract_audio_window
+            from .media_store import identity
+            from .policy import contained_path, GateError
+            source = args.source if args.source.is_absolute() else Path(args.root)/args.source
+            try:
+                relative = source.absolute().relative_to(Path(args.root).absolute()).as_posix()
+            except ValueError:
+                raise GateError('OUTSIDE_LOCAL_SCOPE') from None
+            source = contained_path(Path(args.root),relative)
+            display(extract_audio_window(args.root,source,args.output_relative,args.start_ms,args.end_ms,expected_identity=identity(source),max_received_bytes=args.max_received_bytes))
+        elif args.command == 'crop-region':
+            display(store.crop_region(args.project,args.bundle,args.block,args.artifact,{'unit':'pixel','origin':'top_left','xyxy':args.bbox},args.output_relative,resize=args.resize))
         elif args.command == 'supplement-fulfil':
             display(store.fulfil_available(args.request))
         elif args.command == 'compose':

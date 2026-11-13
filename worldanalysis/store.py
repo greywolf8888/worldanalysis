@@ -470,6 +470,10 @@ class Store:
                 cache.remember(entry,bundle)
         return bundle
 
+    def crop_region(self, project_id, bundle_id, block_id, artifact_id, bbox, output_relative, *, resize=None):
+        from .image_region import crop_region
+        return crop_region(self,project_id,bundle_id,block_id,artifact_id,bbox,output_relative,resize=resize)
+
     def fulfil_available(self, request_id):
         from .local_supplement import fulfil_available
         return fulfil_available(self, request_id)
