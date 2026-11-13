@@ -1,0 +1,58 @@
+{
+  "schema": "worldanalysis.authorized-browser-observation.v1",
+  "observed_date": "2026-11-13",
+  "time_zone": "Asia/Singapore",
+  "evidence_class": "real_authorized_browser",
+  "channel": "dsh_browser",
+  "source_article": "https://www.wangzjk.com/163378.html",
+  "source_role": "article_description_not_course_content",
+  "authorization_root": "/apps/教育分析学习/",
+  "root_observation": {
+    "path": "/apps/教育分析学习/",
+    "exists_and_readable": true,
+    "visible_directories": ["联调验证", "待分析"]
+  },
+  "destination_observation": {
+    "path": "/apps/教育分析学习/待分析/163378_AI视频创作",
+    "state": "existing_directory_observed_empty",
+    "created_by_this_run": false,
+    "observed_message": "当前列表为空，上传你的第一个文件吧"
+  },
+  "source_share_observation": {
+    "access_reference": "site-163378-authorized-share-observed",
+    "share_access_information": "not included in this report",
+    "root_folder": "059-20261105-AI视频创作从入门到实操课程，从认知避坑、画布工具，到写剧本、做角色卡、场景堪景，从零搭建完整创作思路【更多资源www.abab9.cn】",
+    "inventory_state": "partial",
+    "enumerated_visible_level_items": 10,
+    "visible_videos": 7,
+    "visible_text_files": 1,
+    "visible_images": 1,
+    "visible_directories": 1,
+    "nested_directory_enumerated": false,
+    "exact_source_sizes_verified": false,
+    "source_destination_id_mapping_verified": false,
+    "source_file_ids_from_visible_DOM": ["503846216786114", "841335604498100", "701327767201446", "1120276855579888", "1015199350314822", "733864071326109", "391187737113691", "223983712952769", "350426040438461", "361276075160049"]
+  },
+  "lightweight_site_fetch": {
+    "state": "transport_failed",
+    "reason": "Remote end closed connection before HTTP response",
+    "attempts": 1,
+    "authorization_denial_observed": false,
+    "automatic_credential_channel_fallback": false
+  },
+  "capability_states": {
+    "current_root_and_destination_visible_listing": "verified_available",
+    "specific_share_visible_listing": "verified_available",
+    "full_recursive_paginated_manifest": "not_yet_verified",
+    "transfer_with_target_readback": "not_yet_verified",
+    "authorized_download_in_new_scope": "not_yet_verified"
+  },
+  "side_effects": {
+    "transfer_submitted": false,
+    "generation_submitted": false,
+    "download_submitted": false,
+    "cloud_move_delete_or_public_share": false,
+    "credential_material_persisted_in_this_report": false
+  },
+  "completion_claim": "P2 partial observation only; not a completed website-to-cloud-to-local acceptance. Finish source manifest and durable operation registration before any transfer."
+}

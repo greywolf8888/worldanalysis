@@ -1,0 +1,542 @@
+{
+  "checked_at": "2026-11-13T21:15:02.029642+08:00",
+  "implementation_version": "p3.3",
+  "tests_report": "_ledger/devpack/media-provider-tests.json",
+  "actual_cases": [
+    {
+      "label": "synthetic_two_hour_decode_only",
+      "input_kind": "synthetic_test_only",
+      "source_relative_path": "tests/media_fixtures/synthetic_2h_silence.flac",
+      "source_size_bytes": 1515574,
+      "raw_result_relative_path": "tests/media_fixtures/acceptance-p3.3-20261113T211444214526-synthetic_two_hour_decode_only/acceptance_raw.json",
+      "elapsed_seconds": 8.90599999999904,
+      "processing_status": "partial",
+      "enumeration_state": "complete",
+      "metrics": [
+        {
+          "unit": "millisecond",
+          "expected": 7200000,
+          "observed": 7200000,
+          "processed": 0,
+          "excluded": 0,
+          "method": "full_audio_windows",
+          "ranges": []
+        }
+      ],
+      "audio_window_count": 25,
+      "max_pcm_window_bytes": 9600000,
+      "real_input_bytes_received": 1515574,
+      "ram": {
+        "hard_cap_bytes": 4294967296,
+        "peak_worker_commit_bytes": 111730688,
+        "enforcement": "Windows JobObject aggregate commit",
+        "workers": 1,
+        "device": "cpu",
+        "host_available_ram_at_admission": 15325077504,
+        "includes": "decode, ASR, OCR, queue; parent transport bounded separately"
+      },
+      "runs": [
+        {
+          "input_bytes_received": 1515574,
+          "read_calls": 50,
+          "seek_calls": 6,
+          "max_read_bytes": 32768,
+          "elapsed_seconds": 8.156000000000859,
+          "mixed_source_demux_passes": 1,
+          "resume_seek_ms": 0
+        }
+      ],
+      "asr_text": [],
+      "ocr_blocks_executed": 0,
+      "visual_frames": [],
+      "gaps": [
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            0
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            1
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            2
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            3
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            4
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            5
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            6
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            7
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            8
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            9
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            10
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            11
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            12
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            13
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            14
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            15
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            16
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            17
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            18
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            19
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            20
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            21
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            22
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            23
+          ]
+        },
+        {
+          "kind": "unprocessed",
+          "severity": "important",
+          "reason": "ASR_DISABLED",
+          "block_indexes": [
+            24
+          ]
+        }
+      ]
+    },
+    {
+      "label": "synthetic_silent_visual_changes_actual_ocr_asr",
+      "input_kind": "synthetic_test_only",
+      "source_relative_path": "tests/media_fixtures/synthetic_silent_changes.mp4",
+      "source_size_bytes": 9268,
+      "raw_result_relative_path": "tests/media_fixtures/acceptance-p3.3-20261113T211444214526-synthetic_silent_visual_changes_actual_ocr_asr/acceptance_raw.json",
+      "elapsed_seconds": 6.20299999999952,
+      "processing_status": "partial",
+      "enumeration_state": "complete",
+      "metrics": [
+        {
+          "unit": "millisecond",
+          "expected": 12000,
+          "observed": 12000,
+          "processed": 12000,
+          "excluded": 0,
+          "method": "full_audio_windows",
+          "ranges": [
+            {
+              "kind": "time",
+              "precision": "exact",
+              "start_ms": 0,
+              "end_ms": 12000
+            }
+          ]
+        },
+        {
+          "unit": "visual_occurrence",
+          "expected": null,
+          "observed": 8,
+          "processed": 8,
+          "excluded": 0,
+          "method": "sparse_visual_sampling",
+          "ranges": [
+            {
+              "kind": "time",
+              "precision": "exact",
+              "start_ms": 0,
+              "end_ms": 0
+            },
+            {
+              "kind": "time",
+              "precision": "exact",
+              "start_ms": 2000,
+              "end_ms": 2000
+            },
+            {
+              "kind": "time",
+              "precision": "exact",
+              "start_ms": 3000,
+              "end_ms": 3000
+            },
+            {
+              "kind": "time",
+              "precision": "exact",
+              "start_ms": 5000,
+              "end_ms": 5000
+            },
+            {
+              "kind": "time",
+              "precision": "exact",
+              "start_ms": 6000,
+              "end_ms": 6000
+            },
+            {
+              "kind": "time",
+              "precision": "exact",
+              "start_ms": 7000,
+              "end_ms": 7000
+            },
+            {
+              "kind": "time",
+              "precision": "exact",
+              "start_ms": 9000,
+              "end_ms": 9000
+            },
+            {
+              "kind": "time",
+              "precision": "exact",
+              "start_ms": 10000,
+              "end_ms": 10000
+            }
+          ]
+        }
+      ],
+      "audio_window_count": 1,
+      "max_pcm_window_bytes": 384000,
+      "real_input_bytes_received": 9268,
+      "ram": {
+        "hard_cap_bytes": 4294967296,
+        "peak_worker_commit_bytes": 410898432,
+        "enforcement": "Windows JobObject aggregate commit",
+        "workers": 1,
+        "device": "cpu",
+        "host_available_ram_at_admission": 14516588544,
+        "includes": "decode, ASR, OCR, queue; parent transport bounded separately"
+      },
+      "runs": [
+        {
+          "input_bytes_received": 9268,
+          "read_calls": 1,
+          "seek_calls": 10,
+          "max_read_bytes": 9268,
+          "elapsed_seconds": 5.42200000000048,
+          "mixed_source_demux_passes": 1,
+          "resume_seek_ms": 0
+        }
+      ],
+      "asr_text": [
+        "You"
+      ],
+      "ocr_blocks_executed": 8,
+      "visual_frames": [
+        {
+          "time_ms": 0,
+          "triggers": [
+            "periodic_floor"
+          ],
+          "size": {
+            "width": 640,
+            "height": 360
+          }
+        },
+        {
+          "time_ms": 2000,
+          "triggers": [
+            "periodic_floor"
+          ],
+          "size": {
+            "width": 640,
+            "height": 360
+          }
+        },
+        {
+          "time_ms": 3000,
+          "triggers": [
+            "sampled_local_pixel_change_including_silent_activity"
+          ],
+          "size": {
+            "width": 640,
+            "height": 360
+          }
+        },
+        {
+          "time_ms": 5000,
+          "triggers": [
+            "periodic_floor"
+          ],
+          "size": {
+            "width": 640,
+            "height": 360
+          }
+        },
+        {
+          "time_ms": 6000,
+          "triggers": [
+            "sampled_local_pixel_change_including_silent_activity"
+          ],
+          "size": {
+            "width": 640,
+            "height": 360
+          }
+        },
+        {
+          "time_ms": 7000,
+          "triggers": [
+            "sampled_local_pixel_change_including_silent_activity"
+          ],
+          "size": {
+            "width": 640,
+            "height": 360
+          }
+        },
+        {
+          "time_ms": 9000,
+          "triggers": [
+            "periodic_floor"
+          ],
+          "size": {
+            "width": 640,
+            "height": 360
+          }
+        },
+        {
+          "time_ms": 10000,
+          "triggers": [
+            "sampled_local_pixel_change_including_silent_activity"
+          ],
+          "size": {
+            "width": 640,
+            "height": 360
+          }
+        }
+      ],
+      "gaps": [
+        {
+          "kind": "semantic_gap",
+          "severity": "important",
+          "reason": "Lossy periodic + sampled scene/local-pixel changes; no guarantee of all visual operations, brief text, speech pointers or semantics",
+          "block_indexes": []
+        }
+      ]
+    },
+    {
+      "label": "synthetic_offline_system_tts_actual_asr",
+      "input_kind": "synthetic_test_only",
+      "source_relative_path": "tests/media_fixtures/synthetic_tts.wav",
+      "source_size_bytes": 394200,
+      "raw_result_relative_path": "tests/media_fixtures/acceptance-p3.3-20261113T211444214526-synthetic_offline_system_tts_actual_asr/acceptance_raw.json",
+      "elapsed_seconds": 2.2960000000002765,
+      "processing_status": "partial",
+      "enumeration_state": "complete",
+      "metrics": [
+        {
+          "unit": "millisecond",
+          "expected": 8938,
+          "observed": 8938,
+          "processed": 8938,
+          "excluded": 0,
+          "method": "full_audio_windows",
+          "ranges": [
+            {
+              "kind": "time",
+              "precision": "exact",
+              "start_ms": 0,
+              "end_ms": 8938
+            }
+          ]
+        }
+      ],
+      "audio_window_count": 1,
+      "max_pcm_window_bytes": 286006,
+      "real_input_bytes_received": 459736,
+      "ram": {
+        "hard_cap_bytes": 4294967296,
+        "peak_worker_commit_bytes": 342364160,
+        "enforcement": "Windows JobObject aggregate commit",
+        "workers": 1,
+        "device": "cpu",
+        "host_available_ram_at_admission": 14525349888,
+        "includes": "decode, ASR, OCR, queue; parent transport bounded separately"
+      },
+      "runs": [
+        {
+          "input_bytes_received": 459736,
+          "read_calls": 17,
+          "seek_calls": 17,
+          "max_read_bytes": 32814,
+          "elapsed_seconds": 1.5310000000008586,
+          "mixed_source_demux_passes": 1,
+          "resume_seek_ms": 0
+        }
+      ],
+      "asr_text": [
+        "This is a synthetic offline test.",
+        "The lesson number is 42.",
+        "Save the original image and preserve the timestamps."
+      ],
+      "ocr_blocks_executed": 0,
+      "visual_frames": [],
+      "gaps": []
+    }
+  ],
+  "runtime_report": "_ledger/devpack/media-provider-runtime.json",
+  "production_real_course_acceptance": "pending_no_local_authorized_course_media_available",
+  "real_local_media_search_before_synthetic_generation": {
+    "patterns": [
+      "**/*.mp4",
+      "**/*.wav",
+      "**/*.mp3",
+      "**/*.m4a",
+      "**/*.mkv"
+    ],
+    "matches": 0,
+    "excluded_hidden_and_dependency_dirs": true
+  },
+  "not_verified": [
+    "Real course ASR accuracy, language/terminology and teaching-step completeness",
+    "100-hour real-source throughput/RAM/ETA",
+    "Authorized connector media streaming/HTTP Range",
+    "GPU mode",
+    "Store/CLI media ingest (out of this agent's write scope)",
+    "Complete visual semantics; sparse sampling cannot guarantee every brief or local change"
+  ],
+  "no_external_material_processing": true,
+  "new_paid_cost_cny": 0,
+  "elapsed_seconds": 43.60900000000038
+}

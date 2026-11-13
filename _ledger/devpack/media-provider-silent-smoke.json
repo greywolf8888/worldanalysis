@@ -1,0 +1,879 @@
+{
+  "media_type": "video/mov",
+  "provider_id": "bounded-pyav-faster-whisper",
+  "provider_version": "p3.1",
+  "blocks": [
+    {
+      "kind": "audio_segment",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 0,
+        "end_ms": 5000
+      },
+      "file_keys": [
+        "audio-window-000000000000-json"
+      ],
+      "processing_status": "extracted",
+      "reason": "Source PCM window decoded; descriptor is not a transcript; original remains the local source"
+    },
+    {
+      "kind": "audio_segment",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 3000,
+        "end_ms": 8000
+      },
+      "file_keys": [
+        "audio-window-000000003000-json"
+      ],
+      "processing_status": "extracted",
+      "reason": "Source PCM window decoded; descriptor is not a transcript; original remains the local source"
+    },
+    {
+      "kind": "audio_segment",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 6000,
+        "end_ms": 11000
+      },
+      "file_keys": [
+        "audio-window-000000006000-json"
+      ],
+      "processing_status": "extracted",
+      "reason": "Source PCM window decoded; descriptor is not a transcript; original remains the local source"
+    },
+    {
+      "kind": "audio_segment",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 9000,
+        "end_ms": 12032
+      },
+      "file_keys": [
+        "audio-window-000000009000-json"
+      ],
+      "processing_status": "extracted",
+      "reason": "Source PCM window decoded; descriptor is not a transcript; original remains the local source"
+    },
+    {
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 0,
+        "end_ms": 0,
+        "geometry": {
+          "reference_object_ref": "frames-frame-000000000000-png",
+          "coordinate_space": "original",
+          "unit": "pixel",
+          "origin": "top_left",
+          "frame_size": {
+            "width": 640,
+            "height": 360
+          },
+          "original_size": {
+            "width": 640,
+            "height": 360,
+            "unit": "pixel"
+          },
+          "rotation_degrees": 0,
+          "bbox_xywh": [
+            0,
+            0,
+            640,
+            360
+          ],
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          }
+        }
+      },
+      "file_keys": [
+        "frames-frame-000000000000-png"
+      ],
+      "processing_status": "extracted",
+      "reason": "Actual decoded frame: periodic_floor"
+    },
+    {
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 2000,
+        "end_ms": 2000,
+        "geometry": {
+          "reference_object_ref": "frames-frame-000000002000-png",
+          "coordinate_space": "original",
+          "unit": "pixel",
+          "origin": "top_left",
+          "frame_size": {
+            "width": 640,
+            "height": 360
+          },
+          "original_size": {
+            "width": 640,
+            "height": 360,
+            "unit": "pixel"
+          },
+          "rotation_degrees": 0,
+          "bbox_xywh": [
+            0,
+            0,
+            640,
+            360
+          ],
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          }
+        }
+      },
+      "file_keys": [
+        "frames-frame-000000002000-png"
+      ],
+      "processing_status": "extracted",
+      "reason": "Actual decoded frame: periodic_floor"
+    },
+    {
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 3000,
+        "end_ms": 3000,
+        "geometry": {
+          "reference_object_ref": "frames-frame-000000003000-png",
+          "coordinate_space": "original",
+          "unit": "pixel",
+          "origin": "top_left",
+          "frame_size": {
+            "width": 640,
+            "height": 360
+          },
+          "original_size": {
+            "width": 640,
+            "height": 360,
+            "unit": "pixel"
+          },
+          "rotation_degrees": 0,
+          "bbox_xywh": [
+            0,
+            0,
+            640,
+            360
+          ],
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          }
+        }
+      },
+      "file_keys": [
+        "frames-frame-000000003000-png"
+      ],
+      "processing_status": "extracted",
+      "reason": "Actual decoded frame: sampled_local_pixel_change_including_silent_activity"
+    },
+    {
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 5000,
+        "end_ms": 5000,
+        "geometry": {
+          "reference_object_ref": "frames-frame-000000005000-png",
+          "coordinate_space": "original",
+          "unit": "pixel",
+          "origin": "top_left",
+          "frame_size": {
+            "width": 640,
+            "height": 360
+          },
+          "original_size": {
+            "width": 640,
+            "height": 360,
+            "unit": "pixel"
+          },
+          "rotation_degrees": 0,
+          "bbox_xywh": [
+            0,
+            0,
+            640,
+            360
+          ],
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          }
+        }
+      },
+      "file_keys": [
+        "frames-frame-000000005000-png"
+      ],
+      "processing_status": "extracted",
+      "reason": "Actual decoded frame: periodic_floor"
+    },
+    {
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 6000,
+        "end_ms": 6000,
+        "geometry": {
+          "reference_object_ref": "frames-frame-000000006000-png",
+          "coordinate_space": "original",
+          "unit": "pixel",
+          "origin": "top_left",
+          "frame_size": {
+            "width": 640,
+            "height": 360
+          },
+          "original_size": {
+            "width": 640,
+            "height": 360,
+            "unit": "pixel"
+          },
+          "rotation_degrees": 0,
+          "bbox_xywh": [
+            0,
+            0,
+            640,
+            360
+          ],
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          }
+        }
+      },
+      "file_keys": [
+        "frames-frame-000000006000-png"
+      ],
+      "processing_status": "extracted",
+      "reason": "Actual decoded frame: sampled_local_pixel_change_including_silent_activity"
+    },
+    {
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 7000,
+        "end_ms": 7000,
+        "geometry": {
+          "reference_object_ref": "frames-frame-000000007000-png",
+          "coordinate_space": "original",
+          "unit": "pixel",
+          "origin": "top_left",
+          "frame_size": {
+            "width": 640,
+            "height": 360
+          },
+          "original_size": {
+            "width": 640,
+            "height": 360,
+            "unit": "pixel"
+          },
+          "rotation_degrees": 0,
+          "bbox_xywh": [
+            0,
+            0,
+            640,
+            360
+          ],
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          }
+        }
+      },
+      "file_keys": [
+        "frames-frame-000000007000-png"
+      ],
+      "processing_status": "extracted",
+      "reason": "Actual decoded frame: sampled_local_pixel_change_including_silent_activity"
+    },
+    {
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 9000,
+        "end_ms": 9000,
+        "geometry": {
+          "reference_object_ref": "frames-frame-000000009000-png",
+          "coordinate_space": "original",
+          "unit": "pixel",
+          "origin": "top_left",
+          "frame_size": {
+            "width": 640,
+            "height": 360
+          },
+          "original_size": {
+            "width": 640,
+            "height": 360,
+            "unit": "pixel"
+          },
+          "rotation_degrees": 0,
+          "bbox_xywh": [
+            0,
+            0,
+            640,
+            360
+          ],
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          }
+        }
+      },
+      "file_keys": [
+        "frames-frame-000000009000-png"
+      ],
+      "processing_status": "extracted",
+      "reason": "Actual decoded frame: periodic_floor"
+    },
+    {
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 10000,
+        "end_ms": 10000,
+        "geometry": {
+          "reference_object_ref": "frames-frame-000000010000-png",
+          "coordinate_space": "original",
+          "unit": "pixel",
+          "origin": "top_left",
+          "frame_size": {
+            "width": 640,
+            "height": 360
+          },
+          "original_size": {
+            "width": 640,
+            "height": 360,
+            "unit": "pixel"
+          },
+          "rotation_degrees": 0,
+          "bbox_xywh": [
+            0,
+            0,
+            640,
+            360
+          ],
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          }
+        }
+      },
+      "file_keys": [
+        "frames-frame-000000010000-png"
+      ],
+      "processing_status": "extracted",
+      "reason": "Actual decoded frame: sampled_local_pixel_change_including_silent_activity"
+    }
+  ],
+  "files": [
+    {
+      "key": "audio-window-000000000000-json",
+      "relative_path": "audio/window-000000000000.json",
+      "kind": "inventory",
+      "media_type": "application/json",
+      "byte_length": 225,
+      "sha256": "09f7fae3bb70916502462e7315d32eb51937f816397fab9800ef3417ef495764"
+    },
+    {
+      "key": "audio-window-000000003000-json",
+      "relative_path": "audio/window-000000003000.json",
+      "kind": "inventory",
+      "media_type": "application/json",
+      "byte_length": 228,
+      "sha256": "0e59ee31339ffd5fca05c355b7f4a212f451333aae8b6f85d54bf40ada1fd31f"
+    },
+    {
+      "key": "audio-window-000000006000-json",
+      "relative_path": "audio/window-000000006000.json",
+      "kind": "inventory",
+      "media_type": "application/json",
+      "byte_length": 229,
+      "sha256": "f7f0243cc76cb4f468261bdc6545cbf480d79ab35ac4b8f3e2be75225d6bf9f9"
+    },
+    {
+      "key": "audio-window-000000009000-json",
+      "relative_path": "audio/window-000000009000.json",
+      "kind": "inventory",
+      "media_type": "application/json",
+      "byte_length": 228,
+      "sha256": "2baa27cbff2838d87afce8c222578714b9494ed89ae5c6bf673f061ac867b492"
+    },
+    {
+      "key": "frames-frame-000000000000-png",
+      "relative_path": "frames/frame-000000000000.png",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "byte_length": 1483,
+      "sha256": "d0953ebbb4a39871d61a377e22a1e0d96bb6044e3f6379f81ab340de4979f932"
+    },
+    {
+      "key": "frames-frame-000000002000-png",
+      "relative_path": "frames/frame-000000002000.png",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "byte_length": 1483,
+      "sha256": "d0953ebbb4a39871d61a377e22a1e0d96bb6044e3f6379f81ab340de4979f932"
+    },
+    {
+      "key": "frames-frame-000000003000-png",
+      "relative_path": "frames/frame-000000003000.png",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "byte_length": 1686,
+      "sha256": "7577740828ee8e4f69bd0a77a2552d15f51c735d8fd3e32a0f25ca972aa299cc"
+    },
+    {
+      "key": "frames-frame-000000005000-png",
+      "relative_path": "frames/frame-000000005000.png",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "byte_length": 1630,
+      "sha256": "5740ddf2551b853c957976b19ba5b6c48f6660729319e28df19f4811434eca25"
+    },
+    {
+      "key": "frames-frame-000000006000-png",
+      "relative_path": "frames/frame-000000006000.png",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "byte_length": 1483,
+      "sha256": "d0953ebbb4a39871d61a377e22a1e0d96bb6044e3f6379f81ab340de4979f932"
+    },
+    {
+      "key": "frames-frame-000000007000-png",
+      "relative_path": "frames/frame-000000007000.png",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "byte_length": 1553,
+      "sha256": "ae9a3d33f114423d7a2784bea7d8b473252c0b2cbb56268b65b82afbf5d7fe95"
+    },
+    {
+      "key": "frames-frame-000000009000-png",
+      "relative_path": "frames/frame-000000009000.png",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "byte_length": 1535,
+      "sha256": "9cc018e4c42c13d9cdedbef93a3117ae85bbd64dd21e4d2b6887c3255689674f"
+    },
+    {
+      "key": "frames-frame-000000010000-png",
+      "relative_path": "frames/frame-000000010000.png",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "byte_length": 1483,
+      "sha256": "d0953ebbb4a39871d61a377e22a1e0d96bb6044e3f6379f81ab340de4979f932"
+    }
+  ],
+  "gaps": [
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "ASR_DISABLED",
+      "block_indexes": [
+        0
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "ASR_DISABLED",
+      "block_indexes": [
+        1
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "ASR_DISABLED",
+      "block_indexes": [
+        2
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "ASR_DISABLED",
+      "block_indexes": [
+        3
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "OCR_DISABLED",
+      "block_indexes": [
+        4
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "OCR_DISABLED",
+      "block_indexes": [
+        5
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "OCR_DISABLED",
+      "block_indexes": [
+        6
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "OCR_DISABLED",
+      "block_indexes": [
+        7
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "OCR_DISABLED",
+      "block_indexes": [
+        8
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "OCR_DISABLED",
+      "block_indexes": [
+        9
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "OCR_DISABLED",
+      "block_indexes": [
+        10
+      ]
+    },
+    {
+      "kind": "unprocessed",
+      "severity": "important",
+      "reason": "OCR_DISABLED",
+      "block_indexes": [
+        11
+      ]
+    },
+    {
+      "kind": "semantic_gap",
+      "severity": "important",
+      "reason": "Lossy periodic + sampled scene/local-pixel changes; no guarantee of all visual operations, brief text, speech pointers or semantics",
+      "block_indexes": []
+    }
+  ],
+  "metrics": [
+    {
+      "unit": "millisecond",
+      "expected": 12000,
+      "observed": 12032,
+      "processed": 0,
+      "excluded": 0,
+      "method": "full_audio_windows",
+      "ranges": []
+    },
+    {
+      "unit": "visual_occurrence",
+      "expected": null,
+      "observed": 8,
+      "processed": 8,
+      "excluded": 0,
+      "method": "sparse_visual_sampling",
+      "ranges": [
+        {
+          "kind": "time",
+          "precision": "exact",
+          "start_ms": 0,
+          "end_ms": 0
+        },
+        {
+          "kind": "time",
+          "precision": "exact",
+          "start_ms": 2000,
+          "end_ms": 2000
+        },
+        {
+          "kind": "time",
+          "precision": "exact",
+          "start_ms": 3000,
+          "end_ms": 3000
+        },
+        {
+          "kind": "time",
+          "precision": "exact",
+          "start_ms": 5000,
+          "end_ms": 5000
+        },
+        {
+          "kind": "time",
+          "precision": "exact",
+          "start_ms": 6000,
+          "end_ms": 6000
+        },
+        {
+          "kind": "time",
+          "precision": "exact",
+          "start_ms": 7000,
+          "end_ms": 7000
+        },
+        {
+          "kind": "time",
+          "precision": "exact",
+          "start_ms": 9000,
+          "end_ms": 9000
+        },
+        {
+          "kind": "time",
+          "precision": "exact",
+          "start_ms": 10000,
+          "end_ms": 10000
+        }
+      ]
+    }
+  ],
+  "enumeration_state": "complete",
+  "processing_status": "partial",
+  "metadata": {
+    "probe": {
+      "media_type": "video/mov",
+      "provider_id": "pyav",
+      "provider_version": "16.0.1",
+      "duration_ms": 12000,
+      "timeline_origin_ms": 0,
+      "streams": [
+        {
+          "index": 0,
+          "type": "video",
+          "codec": "h264",
+          "duration_ms": 12000,
+          "start_ms": 0,
+          "width": 640,
+          "height": 360,
+          "display_rotation_degrees": "0"
+        },
+        {
+          "index": 1,
+          "type": "audio",
+          "codec": "aac",
+          "duration_ms": 12000,
+          "start_ms": 0,
+          "sample_rate": 16000,
+          "channels": 1
+        }
+      ],
+      "size_bytes": 9268,
+      "input_bytes_received": 9268,
+      "source_capabilities": {
+        "kind": "local_file",
+        "seekable": true,
+        "authorized_connector_reader": false,
+        "http_range": "unsupported_not_probed",
+        "network_saving_claim": false
+      },
+      "processing_status": "extracted",
+      "reason": "LOCAL_CONTAINER_METADATA_PROBED_NOT_CONTENT_ACCEPTANCE"
+    },
+    "source_identity": {
+      "path": "G:\\Worldanalysis\\tests\\media_fixtures\\synthetic_silent_changes.mp4",
+      "size": 9268,
+      "mtime_ns": 1794574327157057000,
+      "device": 9010812912146678753,
+      "inode": 281474976721791,
+      "method": "local_stat_revision_not_full_content_hash"
+    },
+    "derivations": [],
+    "audio_windows": [
+      {
+        "start_ms": 0,
+        "end_ms": 5000,
+        "pcm_bytes": 160000,
+        "input_bytes_received": 9268,
+        "decode_elapsed_seconds": 0.3900000000012369,
+        "asr_elapsed_seconds": 0,
+        "asr_status": "unsupported"
+      },
+      {
+        "start_ms": 3000,
+        "end_ms": 8000,
+        "pcm_bytes": 160000,
+        "input_bytes_received": 0,
+        "decode_elapsed_seconds": 0.25,
+        "asr_elapsed_seconds": 0,
+        "asr_status": "unsupported"
+      },
+      {
+        "start_ms": 6000,
+        "end_ms": 11000,
+        "pcm_bytes": 160000,
+        "input_bytes_received": 0,
+        "decode_elapsed_seconds": 0.21900000000096043,
+        "asr_elapsed_seconds": 0,
+        "asr_status": "unsupported"
+      },
+      {
+        "start_ms": 9000,
+        "end_ms": 12032,
+        "pcm_bytes": 97024,
+        "input_bytes_received": 0,
+        "decode_elapsed_seconds": 0.0,
+        "asr_elapsed_seconds": 0,
+        "asr_status": "unsupported"
+      }
+    ],
+    "visual_frames": [
+      {
+        "time_ms": 0,
+        "triggers": [
+          "periodic_floor"
+        ],
+        "size": {
+          "width": 640,
+          "height": 360
+        }
+      },
+      {
+        "time_ms": 2000,
+        "triggers": [
+          "periodic_floor"
+        ],
+        "size": {
+          "width": 640,
+          "height": 360
+        }
+      },
+      {
+        "time_ms": 3000,
+        "triggers": [
+          "sampled_local_pixel_change_including_silent_activity"
+        ],
+        "size": {
+          "width": 640,
+          "height": 360
+        }
+      },
+      {
+        "time_ms": 5000,
+        "triggers": [
+          "periodic_floor"
+        ],
+        "size": {
+          "width": 640,
+          "height": 360
+        }
+      },
+      {
+        "time_ms": 6000,
+        "triggers": [
+          "sampled_local_pixel_change_including_silent_activity"
+        ],
+        "size": {
+          "width": 640,
+          "height": 360
+        }
+      },
+      {
+        "time_ms": 7000,
+        "triggers": [
+          "sampled_local_pixel_change_including_silent_activity"
+        ],
+        "size": {
+          "width": 640,
+          "height": 360
+        }
+      },
+      {
+        "time_ms": 9000,
+        "triggers": [
+          "periodic_floor"
+        ],
+        "size": {
+          "width": 640,
+          "height": 360
+        }
+      },
+      {
+        "time_ms": 10000,
+        "triggers": [
+          "sampled_local_pixel_change_including_silent_activity"
+        ],
+        "size": {
+          "width": 640,
+          "height": 360
+        }
+      }
+    ],
+    "audio_observed_ranges": [
+      {
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 0,
+        "end_ms": 12032
+      }
+    ],
+    "runs": [
+      {
+        "input_bytes_received": 9268,
+        "read_calls": 1,
+        "seek_calls": 10,
+        "max_read_bytes": 9268,
+        "elapsed_seconds": 1.5780000000013388,
+        "mixed_source_demux_passes": 1,
+        "resume_seek_ms": 0
+      }
+    ],
+    "input_bytes_received": 9268,
+    "input_byte_attribution": "actual reader bytes since previous audio emission, includes buffered/index/seek reads; not intrinsic per-time encoded size",
+    "queue": {
+      "max_pending_audio_windows": 1,
+      "max_pending_images": 1,
+      "backpressure": "synchronous sinks stop demux reads"
+    },
+    "timestamp_unit": "ms",
+    "full_input_hash_performed": false,
+    "visual_content_completeness": "unknown_lossy",
+    "network_saving_claim": false,
+    "synthetic": true,
+    "production_acceptance": "pending_real_authorized_course_input",
+    "peak_pcm_bytes": 160000,
+    "ram": {
+      "hard_cap_bytes": 4294967296,
+      "peak_worker_commit_bytes": 98807808,
+      "enforcement": "Windows JobObject aggregate commit",
+      "workers": 1,
+      "device": "cpu",
+      "includes": "decode, ASR, OCR, queue; parent transport bounded separately"
+    }
+  }
+}

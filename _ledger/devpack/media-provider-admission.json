@@ -1,0 +1,12 @@
+{
+  "checked_date": "2026-11-13",
+  "time_precision": "date; fetch/install chronology is retained in tool and pip records, not a fabricated exact timestamp",
+  "scope": "project_local_cpu_only_initial_calibration",
+  "packages": {
+    "rapidocr_onnxruntime": {"version": "1.4.4", "pypi": "https://pypi.org/pypi/rapidocr_onnxruntime/1.4.4/json", "code_license": "Apache-2.0", "license_url": "https://raw.githubusercontent.com/RapidAI/RapidOCR/v1.4.4/LICENSE", "source_config": "https://raw.githubusercontent.com/RapidAI/RapidOCR/v1.4.4/python/rapidocr_onnxruntime/config.yaml", "weights_license": "Apache-2.0", "weights_evidence": ["https://huggingface.co/SWHL/RapidOCR/raw/main/README.md", "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det/raw/main/README.md", "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_rec/raw/main/README.md"], "weights_provenance": "SWHL model card explicitly licenses PaddleOCR-converted PP-OCRv1-v4 ONNX models Apache-2.0; v1.4.4 config pins v4 det/rec and v2 cls bundled in wheel. RapidOCR README retains Baidu model copyright. Inference is local CPU, no remote inference."},
+    "faster-whisper": {"version": "1.2.1", "pypi": "https://pypi.org/pypi/faster-whisper/1.2.1/json", "code_license": "MIT", "source": "https://github.com/SYSTRAN/faster-whisper/tree/v1.2.1", "model": "Systran/faster-whisper-tiny", "weights_license": "MIT", "weights_evidence": ["https://huggingface.co/Systran/faster-whisper-tiny/raw/main/README.md", "https://raw.githubusercontent.com/openai/whisper/main/README.md"], "weights_note": "Converted model card says license mit; OpenAI README explicitly covers code AND model weights. No automatic model fetch in runtime; only explicit reviewed local weights."}
+  },
+  "authority": "User explicitly permits one CPU OCR and one faster-whisper backend in .runtime/site-packages. No new paid service, no material egress, no browser or credentials.",
+  "production_media_acceptance": "pending_real_authorized_course_input",
+  "hardware_reported_by_parent": {"gpu": "RTX 4060 Laptop", "total_vram_mib": 8188, "free_vram_mib": 5498, "default_device": "cpu", "max_workers": 1}
+}

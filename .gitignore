@@ -18,5 +18,9 @@ _ledger/075/
 _ledger/075-materials.json
 _ledger/pan-tree.json
 _tools/browser-download-fix/
-# Test products are ephemeral; fixture generators stay versioned.
-tests/document_fixtures/generated/
+# Runtime/test evidence may contain real private materials; never publish it as code.
+# Fixture generators live in the versioned test_*.py modules.
+tests/document_fixtures/*
+!tests/document_fixtures/README.md
+tests/media_fixtures/*
+!tests/media_fixtures/README.md

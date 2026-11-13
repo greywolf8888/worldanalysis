@@ -1,0 +1,102 @@
+{
+  "text": "TEST 42 12345",
+  "boxes": [
+    {
+      "text": "TEST 42 12345",
+      "bbox": [
+        32.0,
+        80.0,
+        480.0,
+        132.0
+      ],
+      "bbox_xywh": [
+        32.0,
+        80.0,
+        448.0,
+        52.0
+      ],
+      "polygon": [
+        [
+          32.0,
+          80.0
+        ],
+        [
+          480.0,
+          82.0
+        ],
+        [
+          480.0,
+          132.0
+        ],
+        [
+          32.0,
+          130.0
+        ]
+      ],
+      "original_polygon": [
+        [
+          32.0,
+          80.0
+        ],
+        [
+          480.0,
+          82.0
+        ],
+        [
+          480.0,
+          132.0
+        ],
+        [
+          32.0,
+          130.0
+        ]
+      ],
+      "confidence": 0.9915150954173162,
+      "unit": "pixel",
+      "origin": "top_left"
+    }
+  ],
+  "confidence": 0.9915150954173162,
+  "provider_id": "rapidocr_onnxruntime",
+  "provider_version": "1.4.4",
+  "processing_status": "extracted",
+  "reason": "OCR_EXECUTED",
+  "metadata": {
+    "ocr_executed": true,
+    "runtime": "local_cpu",
+    "weights_license": "Apache-2.0",
+    "lossy_recognition": true,
+    "original_path": "G:\\Worldanalysis\\tests\\media_fixtures\\synthetic_ocr.png",
+    "input_bytes": 8053,
+    "original_width": 1000,
+    "original_height": 240,
+    "width": 1000,
+    "height": 240,
+    "frame_size": {
+      "width": 1000,
+      "height": 240
+    },
+    "original_size": {
+      "width": 1000,
+      "height": 240,
+      "unit": "pixel"
+    },
+    "exif_orientation": 1,
+    "rotation_degrees": 0,
+    "coordinate_space": "original",
+    "unit": "pixel",
+    "origin": "top_left",
+    "transform_to_original": {
+      "method": "identity",
+      "operations": []
+    },
+    "source_retention": "caller_must_retain_original; this adapter never overwrites it",
+    "backend_stage_seconds": [
+      0.2685604999987845,
+      0.0010628700256347656,
+      0.10550212860107422
+    ],
+    "rotation_scope": "EXIF/manual orientation; classifier may rotate individual text crops",
+    "elapsed_seconds": 2.6560000000008586
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "schema": "worldanalysis.capabilities.v1",
+  "observed_at": "2026-11-13T12:47:54.813337+00:00",
+  "workspace": "G:\\Worldanalysis",
+  "hardware": {
+    "observed_at": "2026-11-13T12:47:54.813337+00:00",
+    "platform": "win32",
+    "python": "3.12.14",
+    "cpu_count": 24,
+    "disk": {
+      "total_bytes": 1000203816960,
+      "free_bytes": 998876045312,
+      "used_bytes": 1327771648
+    },
+    "ram": {
+      "physical_total_bytes": 34078150656,
+      "physical_available_bytes": 15529644032,
+      "load_percent": 54
+    },
+    "gpu": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "vram_total_mib": 8188,
+        "vram_free_mib": 5240,
+        "driver": "616.56"
+      }
+    ],
+    "executables": {
+      "ffmpeg": "C:\\Users\\GreyWolf\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-9.0-full_build\\bin\\ffmpeg.EXE",
+      "ffprobe": "C:\\Users\\GreyWolf\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-9.0-full_build\\bin\\ffprobe.EXE",
+      "tesseract": null,
+      "git": "C:\\Users\\GreyWolf\\AppData\\Local\\Temp\\dsh-ops-niu-exec-wWE6Ag\\winuxcmd\\usr\\bin\\git.EXE"
+    },
+    "initial_limits": {
+      "ram_bytes": 4294967296,
+      "temporary_cache_bytes": 8589934592,
+      "gpu_workers": 1,
+      "ocr_workers": 1
+    }
+  },
+  "inventory": {
+    "scope": "local wangzjk.com inventory only, not cloud inventory",
+    "counts": {
+      ".docx": 4,
+      ".jpg": 787,
+      ".json": 13,
+      ".md": 104,
+      ".pdf": 14,
+      ".png": 44,
+      ".pptx": 12,
+      ".txt": 25,
+      ".url": 10
+    },
+    "smallest_samples": {
+      ".md": {
+        "path": "wangzjk.com/075-20261106-自媒体起号全流程系统课，账号包装、爆款选题、流量钩子、拍摄剪辑、同城引流、私域获客、IP矩阵全覆盖【更多资源www.abab9.cn】/11 钩子开头篇/75.钩子开头：羡慕嫉妒法 (1).文稿.md",
+        "bytes": 894
+      },
+      ".pptx": {
+        "path": "wangzjk.com/075-20261106-自媒体起号全流程系统课，账号包装、爆款选题、流量钩子、拍摄剪辑、同城引流、私域获客、IP矩阵全覆盖【更多资源www.abab9.cn】/09 带货视频篇/58.带货视频：如何正确推销你的产品 (1).课件.pptx",
+        "bytes": 129801
+      },
+      ".jpg": {
+        "path": "wangzjk.com/075-20261106-自媒体起号全流程系统课，账号包装、爆款选题、流量钩子、拍摄剪辑、同城引流、私域获客、IP矩阵全覆盖【更多资源www.abab9.cn】/05 拍摄剪辑篇/37.轻抖怎么用 (1).课件素材/image-0048-a3edf5c11fc2.jpg",
+        "bytes": 18597
+      },
+      ".json": {
+        "path": "wangzjk.com/075-20261106-自媒体起号全流程系统课，账号包装、爆款选题、流量钩子、拍摄剪辑、同城引流、私域获客、IP矩阵全覆盖【更多资源www.abab9.cn】/09 带货视频篇/58.带货视频：如何正确推销你的产品 (1).课件素材/manifest.json",
+        "bytes": 4144
+      },
+      ".png": {
+        "path": "wangzjk.com/075-20261106-自媒体起号全流程系统课，账号包装、爆款选题、流量钩子、拍摄剪辑、同城引流、私域获客、IP矩阵全覆盖【更多资源www.abab9.cn】/01 账号搭建篇/04.账号搭建：头像放什么照片 (1).课件素材/页面保存/page-01.png",
+        "bytes": 270512
+      },
+      ".txt": {
+        "path": "wangzjk.com/163545 抖音全域付费起号特训课/配套文档和加入框架/文字提取/泽泽学员内部加热框架.txt",
+        "bytes": 24
+      },
+      ".pdf": {
+        "path": "wangzjk.com/163545 抖音全域付费起号特训课/配套文档和加入框架/泽泽学员内部加热框架.pdf",
+        "bytes": 47141
+      },
+      ".url": {
+        "path": "wangzjk.com/2026王炸玩法｜AI秒出影视解说，每天10分钟，日入3000+/【此处获取】软件，脚笨，卡密，粉丝，image2图，ai短剧一键生成工具/爆火AI短剧一键生成工具.url",
+        "bytes": 134
+      },
+      ".docx": {
+        "path": "wangzjk.com/没有货源也能做，零基础入局拼多多虚拟，收获稳定每月 1-3 万被动收入/创金思维团队制作无限生成虚拟资料程序/创金思维团队制作无限生成虚拟资料程序.docx",
+        "bytes": 830777
+      }
+    },
+    "errors": [],
+    "enumeration_state": "complete"
+  },
+  "packages": {
+    "python-docx": {
+      "version": "1.2.0",
+      "state": "implemented_dependency_not_yet_sample_verified",
+      "license": "MIT"
+    },
+    "python-pptx": {
+      "version": "1.0.2",
+      "state": "implemented_dependency_not_yet_sample_verified",
+      "license": "MIT"
+    },
+    "openpyxl": {
+      "version": "3.1.5",
+      "state": "implemented_dependency_not_yet_sample_verified",
+      "license": "MIT"
+    },
+    "Pillow": {
+      "version": "13.0.0",
+      "state": "implemented_dependency_not_yet_sample_verified",
+      "license": "MIT-CMU"
+    },
+    "pypdf": {
+      "version": "7.0.0",
+      "state": "implemented_dependency_not_yet_sample_verified",
+      "license": "BSD-3-Clause"
+    },
+    "jsonschema": {
+      "version": "4.25.1",
+      "state": "implemented_dependency_not_yet_sample_verified",
+      "license": "MIT"
+    },
+    "rapidocr": {
+      "state": "not_installed"
+    },
+    "onnxruntime": {
+      "version": "1.23.2",
+      "state": "implemented_dependency_not_yet_sample_verified",
+      "license": "MIT License"
+    },
+    "faster-whisper": {
+      "version": "1.2.1",
+      "state": "implemented_dependency_not_yet_sample_verified",
+      "license": "MIT"
+    },
+    "av": {
+      "version": "16.0.1",
+      "state": "implemented_dependency_not_yet_sample_verified",
+      "license": "BSD-3-Clause"
+    }
+  },
+  "business_databases_found": [],
+  "legacy": {
+    "material_ledger": "_ledger/075-materials.json",
+    "mode": "preserved_read_only_history",
+    "source_index": "No persistent article index located in the inspected workspace; existing project documents retained."
+  },
+  "authorization": {
+    "agent_analysis": "current_user_authorized_agent_assisted",
+    "commercial_api": "blocked_zero_budget_no_external_processing",
+    "baidu_generation": "disabled",
+    "cloud_root": "/apps/教育分析学习/",
+    "cloud_root_live_verification": "pending",
+    "credential_export": "disabled"
+  },
+  "claims": {
+    "hardware": "verified",
+    "local_inventory": "verified_metadata_only",
+    "parser_import": "implemented_not_complete_extraction",
+    "schema_files": "documented_until_contract_tests_pass",
+    "legacy_course_materials": "separate existing validator required"
+  }
+}
