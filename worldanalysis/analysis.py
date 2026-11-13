@@ -189,6 +189,10 @@ class Analysis:
         status = "read" if items and all(i["status"] in {"read","already_read"} and not i.get("image_open_required") for i in items) else "partial"
         return {"status":status,"task_id":task_id,"items":items,"returned_chars":max_chars-remaining}
 
+    def read_external(self,task_id,source_id,url,*,reader=None,allowed_hosts=()):
+        from .external_verification import read
+        return read(self,task_id,source_id,url,reader=reader,allowed_hosts=allowed_hosts)
+
     def open_image(self,task_id,block_id,artifact_id=None,*,opener=None):
         if self.store.pipeline_state("analysis") != "running":
             return {"status":"blocked","reason":"analysis paused"}
@@ -301,6 +305,9 @@ class Analysis:
                 r = self.receipt(source["receipt_ref"],_bundle=bundle)
                 if r["task_id"] != task["task_id"] or r["kind"] != "external" or r.get("public_url") != source["public_url"]:
                     raise ContractError("external source has no actual matching read receipt")
+            if source['read_status'] == 'read':
+                from .external_verification import validate_receipt
+                validate_receipt(self,task,source,bundle=bundle)
         assertions = unique(result["assertions"],"assertion_id","assertion ID")
         for assertion in assertions.values():
             for ref in assertion["evidence_refs"]:

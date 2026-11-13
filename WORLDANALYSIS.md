@@ -52,4 +52,4 @@ node --test _tools/course-flow.test.mjs _tools/materials-ingest.test.mjs
 
 尚未全计划验收：真实云盘下载与本地提取整链、真实课程与百小时生产校准、真实XLSX与同文件混合PDF样本、复杂页/矢量/公式语义、外部核验reader及更完整增量调度。不要把离线通过、合成语音识别或这两份partial报告说成整个计划完成。
 
-本轮[快速复核](<_ledger/devpack/round3-quick-review.json>)仅跑受改动影响的20项，全部通过，未重复整套测试。真实双PDF已验证新增B只提取B，反序重复不重提取；合成语音已实际ASR→Bundle→Agent partial报告，不是生产课验收。目标实时已为active/armed，保留继续；未创建新目标、定时器或常驻循环。第五轮[进展记录](<_ledger/devpack/round5-progress.json>)：混合组合已实跑，相关59项28.145秒全通过；真实云盘18条映射仍保持，正常下载票据已签发但私有读取未成功，文件尚未落地，未导出签名URL。
+本轮[快速复核](<_ledger/devpack/round3-quick-review.json>)仅跑受改动影响的20项，全部通过，未重复整套测试。真实双PDF已验证新增B只提取B，反序重复不重提取；合成语音已实际ASR→Bundle→Agent partial报告，不是生产课验收。目标实时已为active/armed，保留继续；未创建新目标、定时器或常驻循环。第七轮[记录](<_ledger/devpack/round7-progress.json>)：用户明确保持下载链接不传出；外部核验API默认无reader/白名单则blocked，只有完整公开HTTPS内容及SHA/范围匹配才保存external回执。45项相关短测通过；真实public GET失败且无回执，不假称已完成外核。已有派生PPTX两页已实际看图并partial接受，16个母版/布局对象待处理，不把派生课件当逐字稿。第五轮[进展记录](<_ledger/devpack/round5-progress.json>)：混合组合已实跑，相关59项28.145秒全通过；真实云盘18条映射仍保持，正常下载票据已签发但私有读取未成功，文件尚未落地，未导出签名URL。
