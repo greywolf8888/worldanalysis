@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.worldanalysis.invalid/draft/2026-11-10/plan.schema.json",
+  "title": "Worldanalysis 按资产采集计划契约草案（未部署）",
+  "$comment": "Plan 是建议，不是执行授权。程序必须验证 provider 注册、当前账号/文件范围、授权有效期、能力证据真伪和新鲜度、全部引用唯一性、预算可用余额、DAG 无环与降级不越权。未知能力不能视为可用；documented 不等于实测。预算/权限独立检查，模型不得自行批准。禁止 Cookie、headers、token、签名/私有 URL；只给受限记录的不透明引用。自由文本仍须脱敏扫描。离线注册本目录 Bundle schema 解析相对 $ref。",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "plan_id", "project_id", "created_at", "policy_version", "provider_registry_revision", "capability_observations", "permission_checks", "hard_budget", "asset_plans", "program_validation"],
+  "properties": {
+    "schema_version": {"const": "1.0-draft"},
+    "plan_id": {"$ref": "bundle.schema.json#/$defs/id"}, "project_id": {"$ref": "bundle.schema.json#/$defs/id"}, "created_at": {"$ref": "bundle.schema.json#/$defs/timestamp"}, "policy_version": {"$ref": "bundle.schema.json#/$defs/id"}, "provider_registry_revision": {"$ref": "bundle.schema.json#/$defs/id"},
+    "capability_observations": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["observation_id", "provider", "scope", "capability", "state", "observed_at", "evidence_refs", "limitations"],
+        "properties": {
+          "observation_id": {"$ref": "bundle.schema.json#/$defs/id"}, "provider": {"$ref": "bundle.schema.json#/$defs/providerRef"},
+          "scope": {"type": "object", "additionalProperties": false, "required": ["source_ref"], "properties": {"source_ref": {"$ref": "bundle.schema.json#/$defs/id"}, "account_ref": {"$ref": "bundle.schema.json#/$defs/id"}, "asset_ref": {"$ref": "bundle.schema.json#/$defs/assetRef"}}},
+          "capability": {"enum": ["list_paginated", "list_recursive", "transfer", "download_stream", "range_206", "seek", "audio_only", "renditions", "existing_transcript", "read_existing_artifact", "request_generation", "native_parse", "ocr", "asr", "image_export", "render_region", "visual_interpretation", "remote_idempotency", "remote_task_query", "quota", "expires_at"]},
+          "state": {"enum": ["unknown", "documented", "verified_available", "unsupported", "blocked"]}, "observed_at": {"$ref": "bundle.schema.json#/$defs/timestamp"}, "valid_until": {"anyOf": [{"$ref": "bundle.schema.json#/$defs/timestamp"}, {"type": "null"}]},
+          "evidence_refs": {"type": "array", "items": {"$ref": "#/$defs/decisionEvidence"}}, "limitations": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 2000}}
+        },
+        "allOf": [{"if": {"properties": {"state": {"not": {"const": "unknown"}}}, "required": ["state"]}, "then": {"properties": {"evidence_refs": {"minItems": 1}}}}]
+      }
+    },
+    "permission_checks": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["check_id", "operation", "scope_ref", "state", "grant_ref", "checked_at", "reason"],
+        "properties": {
+          "check_id": {"$ref": "bundle.schema.json#/$defs/id"}, "operation": {"$ref": "#/$defs/operation"}, "scope_ref": {"$ref": "bundle.schema.json#/$defs/id"}, "state": {"enum": ["granted", "pending", "denied", "expired"]}, "grant_ref": {"anyOf": [{"$ref": "bundle.schema.json#/$defs/id"}, {"type": "null"}]}, "checked_at": {"$ref": "bundle.schema.json#/$defs/timestamp"}, "reason": {"type": "string", "minLength": 1, "maxLength": 4000}
+        },
+        "allOf": [{"if": {"properties": {"state": {"const": "granted"}}, "required": ["state"]}, "then": {"properties": {"grant_ref": {"$ref": "bundle.schema.json#/$defs/id"}}}}],
+        "$comment": "grant_ref 须指向真实已授权的操作与范围。read_existing_artifact 和 request_generation 不可互相替代；受限页面的拒绝不可改工具绕过。"
+      }
+    },
+    "hard_budget": {"$ref": "#/$defs/budget"},
+    "asset_plans": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["asset_ref", "source_ref", "media_type", "format_evidence_refs", "goals", "jobs"],
+        "properties": {
+          "asset_ref": {"$ref": "bundle.schema.json#/$defs/assetRef"}, "source_ref": {"$ref": "bundle.schema.json#/$defs/id"}, "media_type": {"type": "string", "minLength": 1}, "format_evidence_refs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/decisionEvidence"}},
+          "goals": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["inventory", "metadata", "text", "images", "tables", "formulas", "code", "transcript", "visual_events", "contacts", "asset_relations"]}},
+          "jobs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/job"}}
+        }
+      }
+    },
+    "program_validation": {"$ref": "bundle.schema.json#/$defs/validationReceipt"}
+  },
+  "$defs": {
+    "operation": {"enum": ["inventory", "probe", "transfer", "read_existing_artifact", "read_stream", "download_bounded_file", "native_extract", "structured_parse", "ocr", "asr", "render_region", "visual_interpretation", "archive_enumerate", "archive_extract_bounded", "request_generation", "remote_parse"]},
+    "decisionEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "record_ref", "observed_at"],
+      "properties": {
+        "kind": {"enum": ["source_metadata", "local_probe", "authorized_runtime_observation", "official_documentation", "original_evidence", "program_receipt"]}, "record_ref": {"$ref": "bundle.schema.json#/$defs/id"}, "observed_at": {"$ref": "bundle.schema.json#/$defs/timestamp"}, "source_evidence": {"$ref": "bundle.schema.json#/$defs/evidenceRef"}
+      },
+      "$comment": "记录必须可回读。公开文档只能证明上游声明，不能证明本账号/资产支持；record_ref 不存下载链接。"
+    },
+    "budget": {
+      "type": "object", "additionalProperties": false,
+      "required": ["policy_ref", "currency", "max_cost_minor", "max_input_bytes", "max_cache_bytes", "max_ram_bytes", "max_vram_bytes", "max_wall_seconds", "max_concurrency"],
+      "properties": {
+        "policy_ref": {"$ref": "bundle.schema.json#/$defs/id"}, "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}, "max_cost_minor": {"type": "integer", "minimum": 0, "description": "所填币种最小货币单位的预算上限，0 表示不允许新增付费调用；非调用次数。"},
+        "max_input_bytes": {"type": "integer", "minimum": 0}, "max_cache_bytes": {"type": "integer", "minimum": 0}, "max_ram_bytes": {"type": "integer", "minimum": 0}, "max_vram_bytes": {"type": "integer", "minimum": 0}, "max_wall_seconds": {"type": "integer", "minimum": 1}, "max_concurrency": {"type": "integer", "minimum": 1}
+      },
+      "$comment": "程序实时统计实际读入字节、并发驻留内存、缓存和预留费用；不能仅信估算或 Content-Length。子任务上限不得高于项目剩余配额，总峰值含排队缓冲和框架开销。"
+    },
+    "estimate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "input_bytes", "peak_ram_bytes", "peak_vram_bytes", "cache_bytes", "wall_seconds", "cost_minor", "basis_refs"],
+      "properties": {
+        "state": {"enum": ["measured", "estimated", "unknown"]}, "input_bytes": {"type": ["integer", "null"], "minimum": 0}, "peak_ram_bytes": {"type": ["integer", "null"], "minimum": 0}, "peak_vram_bytes": {"type": ["integer", "null"], "minimum": 0}, "cache_bytes": {"type": ["integer", "null"], "minimum": 0}, "wall_seconds": {"type": ["number", "null"], "minimum": 0}, "cost_minor": {"type": ["integer", "null"], "minimum": 0}, "basis_refs": {"type": "array", "items": {"$ref": "#/$defs/decisionEvidence"}}
+      },
+      "$comment": "费用币种与 job.budget.currency 一致。未知字段为 null，不记0。明确成本和权限不足时阻断，不因估算未知默认无限额度。"
+    },
+    "selection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "locators", "reason"],
+      "properties": {"mode": {"enum": ["metadata_only", "all_discovered_content", "specific_locators"]}, "locators": {"type": "array", "items": {"$ref": "bundle.schema.json#/$defs/locator"}}, "reason": {"type": "string", "minLength": 1, "maxLength": 4000}},
+      "allOf": [{"if": {"properties": {"mode": {"const": "specific_locators"}}, "required": ["mode"]}, "then": {"properties": {"locators": {"minItems": 1}}}}]
+    },
+    "job": {
+      "type": "object", "additionalProperties": false,
+      "required": ["job_id", "operation", "tier", "reason", "basis_refs", "provider", "selection", "capability_observation_ids", "permission_check_ids", "budget", "estimate", "side_effect", "depends_on_job_ids", "fallback_job_ids", "stop_conditions", "acceptance_checks", "retry_policy"],
+      "properties": {
+        "job_id": {"$ref": "bundle.schema.json#/$defs/id"}, "operation": {"$ref": "#/$defs/operation"}, "tier": {"enum": ["native", "structured_local", "local_semantic", "approved_commercial"]}, "reason": {"type": "string", "minLength": 1, "maxLength": 4000}, "basis_refs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/decisionEvidence"}},
+        "provider": {"$ref": "bundle.schema.json#/$defs/providerRef"}, "selection": {"$ref": "#/$defs/selection"}, "capability_observation_ids": {"$ref": "bundle.schema.json#/$defs/idList"}, "permission_check_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "bundle.schema.json#/$defs/id"}}, "budget": {"$ref": "#/$defs/budget"}, "estimate": {"$ref": "#/$defs/estimate"},
+        "side_effect": {"enum": ["local_read_or_derivation", "remote_read_only", "remote_mutation", "unknown"]}, "depends_on_job_ids": {"$ref": "bundle.schema.json#/$defs/idList"}, "fallback_job_ids": {"$ref": "bundle.schema.json#/$defs/idList"},
+        "stop_conditions": {"type": "array", "minItems": 1, "items": {"enum": ["permission_denied", "scope_changed", "budget_exhausted", "unsupported_capability", "unknown_side_effect", "deterministic_failure", "retry_limit", "upgrade_limit", "submission_unknown"]}},
+        "acceptance_checks": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["actual_format", "pagination_exhausted", "source_revision_match", "actual_files_readable", "all_discovered_accounted", "images_exported", "ocr_executed", "time_alignment", "coordinates_mapped", "source_destination_reconciled", "bytes_within_budget", "program_receipt"]}},
+        "retry_policy": {"type": "object", "additionalProperties": false, "required": ["max_attempts", "max_route_upgrades", "repeat_deterministic_failure"], "properties": {"max_attempts": {"type": "integer", "minimum": 1, "maximum": 3}, "max_route_upgrades": {"type": "integer", "minimum": 0, "maximum": 2}, "repeat_deterministic_failure": {"const": false}}},
+        "submission_policy": {
+          "type": "object", "additionalProperties": false,
+          "required": ["persist_request_before_send", "reserve_budget_before_send", "unknown_response_action", "reconciliation_capability_ids"],
+          "properties": {"persist_request_before_send": {"const": true}, "reserve_budget_before_send": {"const": true}, "unknown_response_action": {"const": "hold_and_reconcile_no_automatic_resubmit"}, "reconciliation_capability_ids": {"$ref": "bundle.schema.json#/$defs/idList"}}
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"side_effect": {"const": "remote_mutation"}}, "required": ["side_effect"]}, "then": {"required": ["submission_policy"]}},
+        {"if": {"properties": {"operation": {"enum": ["request_generation", "remote_parse", "transfer"]}}, "required": ["operation"]}, "then": {"required": ["submission_policy"], "properties": {"side_effect": {"const": "remote_mutation"}}}}
+      ],
+      "$comment": "asset_ref 从所在 asset_plan 继承。执行前程序确认所引能力适用同 provider/账号/资产版本，所有权限与预算检查通过；unknown 副作用仅可计划，不得执行探测性点击。远端提交前生成并持久化 request_id/幂等键/预算预留，响应丢失记 submission_unknown；没有已验证查询或服务端幂等能力不得自动重发。解析器默认页数/图片开关/OCR未执行不得伪报完成。"
+    }
+  }
+}

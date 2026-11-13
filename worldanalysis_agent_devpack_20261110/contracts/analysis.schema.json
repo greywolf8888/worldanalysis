@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.worldanalysis.invalid/draft/2026-11-10/analysis.schema.json",
+  "title": "Worldanalysis 独立分析结果契约草案（未部署）",
+  "$comment": "本 schema 不证明模型实际读过素材、结论正确或证据支持主张。程序须对账 based_bundle_revision/publish_id 与真实已发布 Bundle、全部 block ID 恰好一次的处理记录、计数、证据可回读性、外部来源实际读取回执、引用与主张对应、真实报告文件、预算和凭据脱敏。分析可完成一个明确有缺口的报告，但不能将任务完成等同课程完全覆盖。新证据生成新 Bundle/AnalysisRevision，不覆盖旧证据。离线解析相对 $ref。",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "analysis_id", "analysis_revision", "project_id", "based_bundle_id", "based_bundle_revision", "based_publish_id", "created_at", "execution_status", "agent", "block_processing", "coverage", "assertions", "external_sources", "gaps", "supplement_requests", "main_report_relative_path", "reports", "program_validation"],
+  "properties": {
+    "schema_version": {"const": "1.0-draft"}, "analysis_id": {"$ref": "bundle.schema.json#/$defs/id"}, "analysis_revision": {"$ref": "bundle.schema.json#/$defs/id"}, "project_id": {"$ref": "bundle.schema.json#/$defs/id"}, "based_bundle_id": {"$ref": "bundle.schema.json#/$defs/id"}, "based_bundle_revision": {"$ref": "bundle.schema.json#/$defs/id"}, "based_publish_id": {"$ref": "bundle.schema.json#/$defs/id"}, "created_at": {"$ref": "bundle.schema.json#/$defs/timestamp"}, "execution_status": {"enum": ["running", "partial", "completed", "blocked", "failed"]},
+    "agent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "provider", "model_version", "prompt_version"],
+      "properties": {"mode": {"enum": ["agent_assisted", "api_worker"]}, "provider": {"$ref": "bundle.schema.json#/$defs/providerRef"}, "model_version": {"type": "string", "minLength": 1, "maxLength": 200}, "prompt_version": {"$ref": "bundle.schema.json#/$defs/id"}}
+    },
+    "block_processing": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["block_id", "asset_ref", "status", "priority", "reason", "read_receipt_refs", "exclusion"],
+        "properties": {
+          "block_id": {"$ref": "bundle.schema.json#/$defs/id"}, "asset_ref": {"$ref": "bundle.schema.json#/$defs/assetRef"}, "status": {"enum": ["read", "failed", "pending", "excluded", "not_applicable"]}, "priority": {"enum": ["high", "normal", "low"]}, "reason": {"type": "string", "minLength": 1, "maxLength": 4000}, "read_receipt_refs": {"$ref": "bundle.schema.json#/$defs/idList"},
+          "exclusion": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/exclusion"}]}
+        },
+        "allOf": [
+          {"if": {"properties": {"status": {"const": "read"}}, "required": ["status"]}, "then": {"properties": {"read_receipt_refs": {"minItems": 1}, "exclusion": {"type": "null"}}}},
+          {"if": {"properties": {"status": {"const": "excluded"}}, "required": ["status"]}, "then": {"properties": {"exclusion": {"$ref": "#/$defs/exclusion"}}}}
+        ],
+        "$comment": "所有已发现 block 都登记，包括图片每次出现、页眉页脚、批注、备注、隐藏对象、失败占位。priority 不决定是否登记。read_receipt 须区分文本读取与实际图像/音频打开；模型声称已读不足以证明。"
+      }
+    },
+    "coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scope", "source_inventory_state", "discovered_blocks", "read_blocks", "failed_blocks", "pending_blocks", "excluded_blocks", "not_applicable_blocks", "claim", "limitations"],
+      "properties": {
+        "scope": {"const": "based_bundle_only"}, "source_inventory_state": {"enum": ["complete", "partial", "unknown"]}, "discovered_blocks": {"type": "integer", "minimum": 0}, "read_blocks": {"type": "integer", "minimum": 0}, "failed_blocks": {"type": "integer", "minimum": 0}, "pending_blocks": {"type": "integer", "minimum": 0}, "excluded_blocks": {"type": "integer", "minimum": 0}, "not_applicable_blocks": {"type": "integer", "minimum": 0},
+        "claim": {"enum": ["partial", "all_discovered_accounted", "all_discovered_read"]}, "limitations": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 4000}}
+      },
+      "$comment": "程序验证五类状态计数之和等于发现数，ID 集合与指定 Bundle 完全一致且不重复；排除/不适用不计已读。all_discovered_read 仅指此 Bundle，不证明远端清单完整或稀疏画面未漏短暂细节。"
+    },
+    "assertions": {"type": "array", "items": {"$ref": "#/$defs/assertion"}},
+    "procedure_steps": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["step_id", "title", "preconditions", "inputs", "actions", "expected_outputs", "checks", "failure_recovery", "depends_on_step_ids", "assertion_ids", "evidence_refs", "status"],
+        "properties": {
+          "step_id": {"$ref": "bundle.schema.json#/$defs/id"}, "title": {"type": "string", "minLength": 1, "maxLength": 1000},
+          "preconditions": {"type": "array", "items": {"type": "string", "minLength": 1}}, "inputs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "actions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "expected_outputs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "checks": {"type": "array", "items": {"type": "string", "minLength": 1}}, "failure_recovery": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "depends_on_step_ids": {"$ref": "bundle.schema.json#/$defs/idList"}, "assertion_ids": {"$ref": "bundle.schema.json#/$defs/idList"}, "evidence_refs": {"type": "array", "items": {"$ref": "bundle.schema.json#/$defs/evidenceRef"}},
+          "status": {"enum": ["source_supported", "proposed_extension", "needs_evidence", "blocked"]}
+        },
+        "$comment": "步骤可以没有，不能为两句材料虚构完整教程；proposed_extension 需要对应 inference assertion。程序检查依赖无环、前提引用与来源，展示不等于执行课程中的命令。"
+      }
+    },
+    "usage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "currency", "settled_cost_minor", "reserved_cost_minor", "input_tokens", "output_tokens", "receipt_refs"],
+      "properties": {
+        "status": {"enum": ["recorded", "pending_usage", "not_available"]}, "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+        "settled_cost_minor": {"type": ["integer", "null"], "minimum": 0}, "reserved_cost_minor": {"type": "integer", "minimum": 0}, "input_tokens": {"type": ["integer", "null"], "minimum": 0}, "output_tokens": {"type": ["integer", "null"], "minimum": 0}, "receipt_refs": {"$ref": "bundle.schema.json#/$defs/idList"}
+      },
+      "$comment": "未知用量填null而不是0；已有Agent无单任务账单时标not_available。主控计费台账仍为真相，模型不得自行结算或释放预留。"
+    },
+    "external_sources": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source_id", "title", "source_type", "public_url", "retrieved_at", "read_status", "receipt_ref", "snapshot_relative_path"],
+        "properties": {
+          "source_id": {"$ref": "bundle.schema.json#/$defs/id"}, "title": {"type": "string", "minLength": 1, "maxLength": 1000}, "source_type": {"enum": ["official_documentation", "primary_research", "official_policy", "provider_statement", "other_public_source"]}, "public_url": {"$ref": "bundle.schema.json#/$defs/publicUrl"}, "retrieved_at": {"$ref": "bundle.schema.json#/$defs/timestamp"}, "published_at": {"anyOf": [{"$ref": "bundle.schema.json#/$defs/timestamp"}, {"type": "null"}]}, "read_status": {"enum": ["read", "unavailable", "not_read"]}, "receipt_ref": {"anyOf": [{"$ref": "bundle.schema.json#/$defs/id"}, {"type": "null"}]}, "snapshot_relative_path": {"anyOf": [{"$ref": "bundle.schema.json#/$defs/relativePath"}, {"type": "null"}]}
+        },
+        "allOf": [{"if": {"properties": {"read_status": {"const": "read"}}, "required": ["read_status"]}, "then": {"properties": {"receipt_ref": {"$ref": "bundle.schema.json#/$defs/id"}}}}],
+        "$comment": "外部来源与原教程分层。检索结果未打开、读取失败或只见标题不能作已核验事实。snapshot 可为合法保存的相关节选/结构化记录，不要求存整站。"
+      }
+    },
+    "gaps": {"type": "array", "items": {"$ref": "bundle.schema.json#/$defs/gap"}},
+    "supplement_requests": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["request_id", "gap_ids", "reason", "minimal_targets", "requested_outputs", "priority", "status", "requires_scope_expansion"],
+        "properties": {
+          "request_id": {"$ref": "bundle.schema.json#/$defs/id"}, "gap_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "bundle.schema.json#/$defs/id"}}, "reason": {"type": "string", "minLength": 1, "maxLength": 4000}, "minimal_targets": {"type": "array", "items": {"$ref": "bundle.schema.json#/$defs/evidenceRef"}},
+          "requested_outputs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["inventory", "original_text", "original_image", "page_render", "table", "formula", "audio_window", "transcript", "video_clip", "source_attribution"]}}, "priority": {"enum": ["blocking", "important", "optional"]}, "status": {"enum": ["proposed", "queued_for_collection", "blocked", "fulfilled", "accepted_limitation"]}, "requires_scope_expansion": {"type": "boolean"}
+        },
+        "$comment": "这是交给 A 的补采申请，不是授权或执行命令。无法定位时 minimal_targets 可为空但须解释；A 再做合法清单探测、权限/预算检查。B 不写网盘、不自行扩授权或启用付费备用。fulfilled 须由新 Bundle 的真实产物对账。"
+      }
+    },
+    "main_report_relative_path": {"anyOf": [{"$ref": "bundle.schema.json#/$defs/relativePath"}, {"type": "null"}]},
+    "reports": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["report_id", "kind", "relative_path", "sha256"],
+        "properties": {"report_id": {"$ref": "bundle.schema.json#/$defs/id"}, "kind": {"enum": ["overview", "knowledge_map", "practical_steps", "current_verification", "contact_index", "structured_model", "combined_report"]}, "relative_path": {"$ref": "bundle.schema.json#/$defs/relativePath"}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+      }
+    },
+    "program_validation": {"$ref": "bundle.schema.json#/$defs/validationReceipt"}
+  },
+  "allOf": [{"if": {"properties": {"execution_status": {"const": "completed"}}, "required": ["execution_status"]}, "then": {"properties": {"main_report_relative_path": {"$ref": "bundle.schema.json#/$defs/relativePath"}, "reports": {"minItems": 1}, "program_validation": {"properties": {"status": {"const": "passed"}}, "required": ["status"]}}}}],
+  "$defs": {
+    "exclusion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reason", "basis_refs", "recovery_ref", "restore_action"],
+      "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": 4000}, "basis_refs": {"type": "array", "minItems": 1, "items": {"$ref": "bundle.schema.json#/$defs/evidenceRef"}}, "recovery_ref": {"$ref": "bundle.schema.json#/$defs/id"}, "restore_action": {"const": "requeue_block"}},
+      "$comment": "不能仅凭低优先级、重复主题或含联系方式排除。原始对象与恢复入口仍保留。"
+    },
+    "assertion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["assertion_id", "kind", "statement", "evidence_refs", "external_source_ids", "depends_on_assertion_ids", "verification_status", "uncertainty"],
+      "properties": {
+        "assertion_id": {"$ref": "bundle.schema.json#/$defs/id"}, "kind": {"enum": ["author_claim", "extracted_fact", "external_fact", "inference", "unverified"]}, "statement": {"type": "string", "minLength": 1, "maxLength": 16000}, "author_subject_ref": {"anyOf": [{"$ref": "bundle.schema.json#/$defs/id"}, {"type": "null"}]},
+        "evidence_refs": {"type": "array", "items": {"$ref": "bundle.schema.json#/$defs/evidenceRef"}}, "external_source_ids": {"$ref": "bundle.schema.json#/$defs/idList"}, "depends_on_assertion_ids": {"$ref": "bundle.schema.json#/$defs/idList"}, "verification_status": {"enum": ["supported", "contradicted", "mixed", "unverified"]}, "uncertainty": {"type": "string", "maxLength": 4000}, "valid_as_of": {"anyOf": [{"$ref": "bundle.schema.json#/$defs/timestamp"}, {"type": "null"}]}, "recommended_action": {"type": "string", "maxLength": 4000}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "author_claim"}}, "required": ["kind"]}, "then": {"required": ["author_subject_ref"], "properties": {"evidence_refs": {"minItems": 1}}}},
+        {"if": {"properties": {"kind": {"const": "extracted_fact"}}, "required": ["kind"]}, "then": {"properties": {"evidence_refs": {"minItems": 1}}}},
+        {"if": {"properties": {"kind": {"const": "external_fact"}}, "required": ["kind"]}, "then": {"properties": {"external_source_ids": {"minItems": 1}, "verification_status": {"const": "supported"}}}},
+        {"if": {"properties": {"kind": {"const": "inference"}}, "required": ["kind"]}, "then": {"anyOf": [{"properties": {"evidence_refs": {"minItems": 1}}}, {"properties": {"depends_on_assertion_ids": {"minItems": 1}}}, {"properties": {"external_source_ids": {"minItems": 1}}}]}}
+      ],
+      "$comment": "author_claim 表示作者说了什么，不表示说法为真；supported 的核验维度需在报告说明。external_fact 必须引用实际已读且直接支持的外部来源。inference 不伪装为原话。程序校验引用、依赖无环与来源类型，语义支持仍需证据回读/独立审查。矛盾主张保留各自出处，不改写原资料消除冲突。"
+    }
+  }
+}

@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.worldanalysis.invalid/draft/2026-11-10/bundle.schema.json",
+  "title": "Worldanalysis Bundle 契约草案（未部署）",
+  "$comment": "本文件只验证结构，不证明资料完整、来源真实或已发布。实现必须离线注册本目录三个 schema，不访问 .invalid 域名。程序必须核对身份与源修订、所有已发现对象的集合和唯一 ID、计数与区间并集、真实文件及摘要、图片出现位置、派生产物血缘、联系人原证据、当前权限路径、发布日志/数据库/文件的一致性。不得凭模型自报 verified_complete。所有自由文本另做凭据泄露检查；对象禁止额外字段并不能识别伪装在文本内的 Cookie、token、签名 URL。认证和私有链接只在适配器受限存储中保留不透明引用。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bundle_id", "project_id", "bundle_revision", "source_catalog_revision", "publish_id", "created_at", "publication", "assets", "artifacts", "blocks", "coverage", "gaps", "contacts", "program_validation"],
+  "properties": {
+    "schema_version": {"const": "1.0-draft"},
+    "bundle_id": {"$ref": "#/$defs/id"},
+    "project_id": {"$ref": "#/$defs/id"},
+    "bundle_revision": {"$ref": "#/$defs/id"},
+    "source_catalog_revision": {"$ref": "#/$defs/id"},
+    "publish_id": {"$ref": "#/$defs/id"},
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "publication": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "journal_ref", "manifest_relative_path", "published_at"],
+      "properties": {
+        "state": {"enum": ["staging", "validated", "renamed", "published", "quarantined"]},
+        "journal_ref": {"$ref": "#/$defs/id"},
+        "manifest_relative_path": {"$ref": "#/$defs/relativePath"},
+        "published_at": {"anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]}
+      },
+      "allOf": [{"if": {"properties": {"state": {"const": "published"}}, "required": ["state"]}, "then": {"properties": {"published_at": {"$ref": "#/$defs/timestamp"}}}}],
+      "$comment": "publish_id 必须先写持久发布日志。原子重命名不等于 SQLite 与文件系统的整体事务；启动时对账并幂等恢复。published 只能由程序登记。"
+    },
+    "assets": {"type": "array", "items": {"$ref": "#/$defs/asset"}},
+    "artifacts": {"type": "array", "items": {"$ref": "#/$defs/artifact"}},
+    "blocks": {"type": "array", "items": {"$ref": "#/$defs/block"}},
+    "coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scope", "inventory_state", "claimed_status", "discovered_counts", "per_asset"],
+      "properties": {
+        "scope": {"enum": ["listed_assets", "whole_project"]},
+        "inventory_state": {"enum": ["complete", "partial", "unknown"]},
+        "claimed_status": {"enum": ["unknown", "partial", "verified_complete"]},
+        "discovered_counts": {
+          "type": "object", "additionalProperties": false,
+          "required": ["assets", "blocks", "visual_occurrences"],
+          "properties": {"assets": {"type": "integer", "minimum": 0}, "blocks": {"type": "integer", "minimum": 0}, "visual_occurrences": {"type": "integer", "minimum": 0}}
+        },
+        "per_asset": {
+          "type": "array", "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["asset_ref", "enumeration_state", "processing_status", "metrics", "gap_ids"],
+            "properties": {
+              "asset_ref": {"$ref": "#/$defs/assetRef"},
+              "enumeration_state": {"enum": ["complete", "partial", "unknown"]},
+              "processing_status": {"enum": ["discovered", "partial", "verified_complete", "blocked", "failed", "deferred", "excluded"]},
+              "metrics": {"type": "array", "items": {"$ref": "#/$defs/coverageMetric"}},
+              "gap_ids": {"$ref": "#/$defs/idList"}
+            }
+          }
+        }
+      },
+      "$comment": "程序按对象集合对账，不仅比较总数。完整枚举、处理覆盖和语义理解是不同维度。排除/失败/未知不计为已读；抽帧只声明所采区间和有损策略，不可推导全部视觉内容已覆盖。"
+    },
+    "gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}},
+    "contacts": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["contact_id", "subject_ref", "role", "value_artifact_id", "evidence_refs", "attribution_status", "classification", "classification_reason", "classification_evidence_refs", "disposition"],
+        "properties": {
+          "contact_id": {"$ref": "#/$defs/id"},
+          "subject_ref": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+          "role": {"enum": ["author", "support", "distributor", "unknown"]},
+          "value_artifact_id": {"$ref": "#/$defs/id"},
+          "evidence_refs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidenceRef"}},
+          "attribution_status": {"enum": ["source_supported", "inferred", "unknown"]},
+          "classification": {"enum": ["contact", "possible_promotion", "unrelated_repeated_package", "unclassified"]},
+          "classification_reason": {"type": "string", "minLength": 1, "maxLength": 4000},
+          "classification_evidence_refs": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+          "disposition": {"enum": ["retained", "restricted_local", "learning_weight_reduced"]}
+        },
+        "allOf": [{"if": {"properties": {"classification": {"const": "unrelated_repeated_package"}}, "required": ["classification"]}, "then": {"properties": {"classification_evidence_refs": {"minItems": 2}}}}],
+        "$comment": "原始联系方式保存在真实、受访问控制的 Artifact 中；引用不能替代原证据。两个引用不证明来自无关课程：程序/模型仍须检查不同课程、内容重复及无关联依据。联系人重复本身不是广告证据，不能自动删除。"
+      }
+    },
+    "program_validation": {"$ref": "#/$defs/validationReceipt"}
+  },
+  "allOf": [{"if": {"properties": {"publication": {"properties": {"state": {"const": "published"}}, "required": ["state"]}}, "required": ["publication"]}, "then": {"properties": {"program_validation": {"properties": {"status": {"const": "passed"}}, "required": ["status"]}}}}],
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$", "description": "不透明本地身份/版本/受限记录引用，不是 URL、Cookie 或凭据。"},
+    "idList": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "timestamp": {"type": "string", "format": "date-time", "description": "RFC 3339，必须含时区；实现须启用 format 校验。"},
+    "relativePath": {"type": "string", "minLength": 1, "maxLength": 2000, "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:\\u0000-\\u001F])[^/]+(?:/[^/]+)*$", "description": "以正斜线分隔、相对项目根的文件路径；禁止绝对路径、盘符、点/上级段、反斜线。程序还须 realpath 校验，不允许符号链接或大小写归一化绕出根目录。"},
+    "publicUrl": {"type": "string", "format": "uri", "pattern": "^https?://[^/?#@\\s]+(?:[/?#][^\\s]*)?$", "description": "仅已核验的无凭据公开HTTP(S)来源，不允许userinfo。公开文档版本参数与章节锚点可保留，但查询名称/值须程序白名单核验；拒绝账号令牌、签名、临时下载URL及路径中的凭据。Schema本身不能证明URL公开无敏感信息。"},
+    "assetRef": {"type": "object", "additionalProperties": false, "required": ["asset_id", "asset_revision"], "properties": {"asset_id": {"$ref": "#/$defs/id"}, "asset_revision": {"$ref": "#/$defs/id"}}},
+    "providerRef": {
+      "type": "object", "additionalProperties": false,
+      "required": ["provider_id", "implementation_version", "config_version", "registration_ref", "runtime"],
+      "properties": {
+        "provider_id": {"$ref": "#/$defs/id"}, "implementation_version": {"type": "string", "minLength": 1, "maxLength": 200}, "config_version": {"$ref": "#/$defs/id"}, "registration_ref": {"$ref": "#/$defs/id"},
+        "runtime": {"enum": ["local_cpu", "local_gpu", "approved_agent", "approved_remote_api", "authorized_browser"]}
+      },
+      "$comment": "注册记录须由程序确认允许使用；模型填写注册 ID 并不赋予权限。版本可为 release 或固定 commit，不使用自动 latest。"
+    },
+    "evidenceRef": {
+      "type": "object", "additionalProperties": false,
+      "required": ["project_id", "asset_id", "asset_revision", "locator"],
+      "properties": {
+        "project_id": {"$ref": "#/$defs/id"}, "asset_id": {"$ref": "#/$defs/id"}, "asset_revision": {"$ref": "#/$defs/id"}, "bundle_id": {"$ref": "#/$defs/id"}, "bundle_revision": {"$ref": "#/$defs/id"}, "block_id": {"$ref": "#/$defs/id"}, "artifact_id": {"$ref": "#/$defs/id"}, "locator": {"$ref": "#/$defs/locator"}
+      },
+      "$comment": "必须解析到真实版本。缺少 block/artifact 时只能是源定位，不能声称已经取得内容。跨项目引用只允许已批准且能实际回读的证据。"
+    },
+    "locator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "precision"],
+      "properties": {
+        "kind": {"enum": ["asset", "page", "slide", "sheet", "paragraph", "time", "archive_member", "node"]},
+        "precision": {"enum": ["exact", "approximate", "page_only", "unknown"]},
+        "page_number": {"type": "integer", "minimum": 1}, "slide_number": {"type": "integer", "minimum": 1}, "sheet_name": {"type": "string", "minLength": 1}, "cell_range": {"type": "string", "minLength": 1, "maxLength": 200},
+        "paragraph_index": {"type": "integer", "minimum": 0, "description": "零基段落序号，仅对指定 asset_revision 有效。"}, "char_start": {"type": "integer", "minimum": 0}, "char_end": {"type": "integer", "minimum": 0},
+        "start_ms": {"type": "integer", "minimum": 0}, "end_ms": {"type": "integer", "minimum": 0}, "member_path": {"$ref": "#/$defs/relativePath"}, "node_id": {"type": "string", "minLength": 1, "maxLength": 500},
+        "geometry": {"$ref": "#/$defs/geometry"}, "uncertainty_reason": {"type": "string", "minLength": 1, "maxLength": 2000}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "page"}}, "required": ["kind"]}, "then": {"required": ["page_number"]}},
+        {"if": {"properties": {"kind": {"const": "slide"}}, "required": ["kind"]}, "then": {"required": ["slide_number"]}},
+        {"if": {"properties": {"kind": {"const": "sheet"}}, "required": ["kind"]}, "then": {"required": ["sheet_name"]}},
+        {"if": {"properties": {"kind": {"const": "paragraph"}}, "required": ["kind"]}, "then": {"required": ["paragraph_index"]}},
+        {"if": {"properties": {"kind": {"const": "time"}}, "required": ["kind"]}, "then": {"required": ["start_ms", "end_ms"]}},
+        {"if": {"properties": {"kind": {"const": "archive_member"}}, "required": ["kind"]}, "then": {"required": ["member_path"]}},
+        {"if": {"properties": {"kind": {"const": "node"}}, "required": ["kind"]}, "then": {"required": ["node_id"]}},
+        {"if": {"properties": {"precision": {"enum": ["approximate", "unknown"]}}, "required": ["precision"]}, "then": {"required": ["uncertainty_reason"]}},
+        {"if": {"properties": {"precision": {"enum": ["page_only", "unknown"]}}, "required": ["precision"]}, "then": {"not": {"required": ["geometry"]}}}
+      ],
+      "$comment": "程序验证 end>=start、页/slide/sheet/字符范围存在，时间为源全局毫秒而非窗口相对秒；DOCX 未渲染不得伪造页码。未知坐标不提供 bbox。"
+    },
+    "geometry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reference_object_ref", "coordinate_space", "unit", "origin", "frame_size", "original_size", "rotation_degrees", "bbox_xywh", "transform_to_original"],
+      "properties": {
+        "reference_object_ref": {"$ref": "#/$defs/id"}, "coordinate_space": {"enum": ["original", "derived"]}, "unit": {"enum": ["pixel", "pdf_point", "normalized"]}, "origin": {"enum": ["top_left", "bottom_left", "top_right", "bottom_right"]},
+        "frame_size": {"$ref": "#/$defs/dimensions"},
+        "original_size": {"type": "object", "additionalProperties": false, "required": ["width", "height", "unit"], "properties": {"width": {"type": "number", "exclusiveMinimum": 0}, "height": {"type": "number", "exclusiveMinimum": 0}, "unit": {"enum": ["pixel", "pdf_point"]}}},
+        "rotation_degrees": {"type": "number", "minimum": -360, "maximum": 360, "description": "当前坐标框相对原件的旋转；以 transform_to_original 为实际映射依据。"},
+        "bbox_xywh": {"type": "array", "minItems": 4, "maxItems": 4, "prefixItems": [{"type": "number"}, {"type": "number"}, {"type": "number", "exclusiveMinimum": 0}, {"type": "number", "exclusiveMinimum": 0}], "items": false},
+        "transform_to_original": {
+          "type": "object", "additionalProperties": false,
+          "required": ["method", "operations"],
+          "properties": {
+            "method": {"enum": ["identity", "matrix_3x3", "explicit_mapping"]}, "operations": {"type": "array", "items": {"enum": ["crop", "resize", "rotate", "origin_change", "unit_conversion", "perspective"]}},
+            "matrix": {"type": "array", "minItems": 9, "maxItems": 9, "items": {"type": "number"}, "description": "行优先 3×3 齐次矩阵，将当前坐标映射到 original_size 单位的原件坐标。"}, "mapping_artifact_id": {"$ref": "#/$defs/id"}
+          },
+          "allOf": [
+            {"if": {"properties": {"method": {"const": "matrix_3x3"}}, "required": ["method"]}, "then": {"required": ["matrix"]}},
+            {"if": {"properties": {"method": {"const": "explicit_mapping"}}, "required": ["method"]}, "then": {"required": ["mapping_artifact_id"]}}
+          ]
+        }
+      },
+      "$comment": "程序核对坐标单位、原点、归一化尺寸、bbox 边界、矩阵可用性和映射后区域；单靠 schema 不能证实截取的是正确原图。"
+    },
+    "dimensions": {"type": "object", "additionalProperties": false, "required": ["width", "height"], "properties": {"width": {"type": "number", "exclusiveMinimum": 0}, "height": {"type": "number", "exclusiveMinimum": 0}}},
+    "asset": {
+      "type": "object", "additionalProperties": false,
+      "required": ["asset_id", "asset_revision", "source_ref", "media_type", "size_bytes", "source_binding"],
+      "properties": {
+        "asset_id": {"$ref": "#/$defs/id"}, "asset_revision": {"$ref": "#/$defs/id"}, "source_ref": {"$ref": "#/$defs/id"}, "media_type": {"type": "string", "minLength": 1}, "size_bytes": {"type": ["integer", "null"], "minimum": 0}, "duration_ms": {"type": ["integer", "null"], "minimum": 0},
+        "source_binding": {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {"enum": ["website", "baidu", "local", "archive_member", "other_authorized_storage"]}, "source_share_ref": {"$ref": "#/$defs/id"}, "source_file_id": {"$ref": "#/$defs/id"}, "destination_account_ref": {"$ref": "#/$defs/id"}, "destination_fs_id": {"$ref": "#/$defs/id"},
+            "verified_path": {"type": "string", "minLength": 1, "description": "存储内已核实路径，不是 URL。每次读取仍须再次解析并按路径段校验当前授权根。"}, "verified_at": {"$ref": "#/$defs/timestamp"}, "local_input_ref": {"$ref": "#/$defs/id"}, "parent_asset_ref": {"$ref": "#/$defs/assetRef"}, "member_path": {"$ref": "#/$defs/relativePath"}
+          },
+          "allOf": [
+            {"if": {"properties": {"kind": {"const": "baidu"}}, "required": ["kind"]}, "then": {"required": ["destination_account_ref", "destination_fs_id", "verified_path", "verified_at"]}},
+            {"if": {"properties": {"kind": {"const": "archive_member"}}, "required": ["kind"]}, "then": {"required": ["parent_asset_ref", "member_path"]}}
+          ]
+        }
+      }
+    },
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifact_id", "artifact_revision", "asset_ref", "job_id", "kind", "relative_path", "media_type", "byte_length", "sha256", "created_at", "access_class"],
+      "properties": {
+        "artifact_id": {"$ref": "#/$defs/id"}, "artifact_revision": {"$ref": "#/$defs/id"}, "asset_ref": {"$ref": "#/$defs/assetRef"}, "job_id": {"$ref": "#/$defs/id"}, "kind": {"enum": ["original_small_file", "native_text", "image", "page_render", "table", "formula", "transcript", "keyframe", "clip", "inventory", "contacts", "structured_data", "validation_report"]},
+        "relative_path": {"$ref": "#/$defs/relativePath"}, "media_type": {"type": "string", "minLength": 1}, "byte_length": {"type": "integer", "minimum": 0}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "created_at": {"$ref": "#/$defs/timestamp"}, "access_class": {"enum": ["project_local", "restricted_local"]}, "provider": {"$ref": "#/$defs/providerRef"}
+      },
+      "$comment": "摘要仅针对实际已生成/取得的本地产物；不得为填字段先下载全量远端视频求哈希。程序须打开文件核对格式、长度、摘要、路径和实际可读性。"
+    },
+    "block": {
+      "type": "object", "additionalProperties": false,
+      "required": ["block_id", "asset_ref", "kind", "origin", "locator", "artifact_ids", "processing", "derived_from"],
+      "properties": {
+        "block_id": {"$ref": "#/$defs/id"}, "asset_ref": {"$ref": "#/$defs/assetRef"},
+        "kind": {"enum": ["paragraph", "table", "formula", "image_occurrence", "chart", "code", "audio_segment", "video_segment", "header", "footer", "note", "comment", "hidden_object", "metadata"]},
+        "origin": {"enum": ["unknown", "author_original", "native_extract", "ocr", "asr", "visual_observation", "provider_ai_note", "model_inference"]}, "locator": {"$ref": "#/$defs/locator"}, "artifact_ids": {"$ref": "#/$defs/idList"}, "text": {"type": "string", "maxLength": 16000, "description": "可选小段内容；大文本放 Artifact。原文与模型纠错不得覆盖为同一字段。"},
+        "processing": {
+          "type": "object", "additionalProperties": false,
+          "required": ["status", "reason", "evidence_refs", "recovery_ref"],
+          "properties": {"status": {"enum": ["discovered", "extracted", "failed", "deferred", "excluded", "not_applicable"]}, "reason": {"type": "string", "minLength": 1, "maxLength": 4000}, "evidence_refs": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}}, "recovery_ref": {"$ref": "#/$defs/id"}}
+        },
+        "derived_from": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}}, "producer": {"$ref": "#/$defs/providerRef"}, "uncertainty": {"type": "string", "maxLength": 4000}
+      },
+      "allOf": [
+        {"if": {"properties": {"processing": {"properties": {"status": {"const": "extracted"}}, "required": ["status"]}}, "required": ["processing"]}, "then": {"properties": {"artifact_ids": {"minItems": 1}, "origin": {"not": {"const": "unknown"}}}}},
+        {"if": {"properties": {"origin": {"enum": ["ocr", "asr", "visual_observation", "provider_ai_note", "model_inference"]}}, "required": ["origin"]}, "then": {"required": ["producer", "uncertainty"], "properties": {"derived_from": {"minItems": 1}}}}
+      ],
+      "$comment": "同图多次出现生成独立 occurrence/block，图像字节可复用。派生描述不能取代原图、原音或作者原话；程序校验 derived_from 不自指且可回读。"
+    },
+    "coverageMetric": {
+      "type": "object", "additionalProperties": false,
+      "required": ["unit", "expected", "observed", "processed", "excluded", "method", "ranges"],
+      "properties": {
+        "unit": {"enum": ["page", "slide", "sheet", "block", "visual_occurrence", "millisecond"]}, "expected": {"type": ["integer", "null"], "minimum": 0}, "observed": {"type": "integer", "minimum": 0}, "processed": {"type": "integer", "minimum": 0}, "excluded": {"type": "integer", "minimum": 0},
+        "method": {"enum": ["native_enumeration", "structured_parse", "full_audio_windows", "sparse_visual_sampling", "explicit_ranges", "unknown"]}, "ranges": {"type": "array", "items": {"$ref": "#/$defs/locator"}}
+      },
+      "$comment": "expected=null 表示未知，不能当0。程序计算范围并集去除窗口重叠，校验 processed<=observed、已枚举数量与实体集合一致；文字时间覆盖不等于视觉语义覆盖。"
+    },
+    "gap": {
+      "type": "object", "additionalProperties": false,
+      "required": ["gap_id", "kind", "severity", "status", "reason", "target_refs", "resolution_refs"],
+      "properties": {
+        "gap_id": {"$ref": "#/$defs/id"}, "kind": {"enum": ["access", "missing_asset", "missing_visual", "truncated", "parse_failed", "unreadable", "unprocessed", "temporal_gap", "unknown_inventory", "semantic_gap", "uncertain_origin", "unsupported", "resource_block"]}, "severity": {"enum": ["blocking", "important", "informational"]}, "status": {"enum": ["open", "requested", "resolved", "accepted_limitation"]}, "reason": {"type": "string", "minLength": 1, "maxLength": 4000}, "target_refs": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}}, "resolution_refs": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}}
+      },
+      "allOf": [{"if": {"properties": {"status": {"const": "resolved"}}, "required": ["status"]}, "then": {"properties": {"resolution_refs": {"minItems": 1}}}}]
+    },
+    "validationReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "validator_version", "checked_at", "report_relative_path"],
+      "properties": {"status": {"enum": ["pending", "passed", "failed"]}, "validator_version": {"type": "string", "minLength": 1}, "checked_at": {"anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]}, "report_relative_path": {"anyOf": [{"$ref": "#/$defs/relativePath"}, {"type": "null"}]}},
+      "allOf": [{"if": {"properties": {"status": {"enum": ["passed", "failed"]}}, "required": ["status"]}, "then": {"properties": {"checked_at": {"$ref": "#/$defs/timestamp"}, "report_relative_path": {"$ref": "#/$defs/relativePath"}}}}],
+      "$comment": "只有程序产生的、真实存在且版本匹配的校验回执有效；模型填写 passed 不是验收证明。"
+    }
+  }
+}

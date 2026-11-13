@@ -1,0 +1,147 @@
+{
+  "schema_version": "1.0-draft",
+  "policy_version": "worldanalysis-20261110",
+  "status": "implementation_example_not_an_authorization_grant",
+  "paths": {
+    "workspace_root": "G:\\Worldanalysis",
+    "temporary_directory": "下载暂存",
+    "manual_input_directory": "手动投放",
+    "output_directory": "整理结果",
+    "owned_cloud_roots": ["/apps/教育分析学习/"],
+    "site_allowlist": ["https://wangzjk.com/"],
+    "additional_sources": "register_from_user_instruction_without_rebuilding_pipeline"
+  },
+  "permissions": {
+    "require_current_grant_and_path_check": true,
+    "source_share_policy": "specific_authorized_share_only",
+    "transfer_policy": "existing_grant_plus_verified_destination_manifest",
+    "cloud_delete": false,
+    "cloud_move": false,
+    "public_share_creation": false,
+    "manual_input_move_or_delete": false,
+    "credential_export_to_model": false,
+    "access_denied_action": "block_channel_do_not_bypass",
+    "active_content_execution": false
+  },
+  "analysis": {
+    "execution_mode": "agent_assisted",
+    "provider": "current_user_authorized_general_agent",
+    "standalone_api_configured": false,
+    "reuse_subscription_session_tokens": false,
+    "all_discovered_blocks_need_status": true,
+    "preserve_author_claim_external_fact_inference_distinction": true,
+    "allow_reading_partial_bundles": true,
+    "partial_reports_must_show_gaps": true,
+    "cross_project_synthesis_after_individual_reports": true
+  },
+  "baidu_ai": {
+    "read_existing_artifacts_if_pure_read_verified": true,
+    "request_new_generation": false,
+    "side_effectful_or_unknown_probe": false,
+    "ai_note_equals_full_transcript": false
+  },
+  "new_external_processing": {
+    "enabled": false,
+    "allowed_providers": [],
+    "project_budget_cny": 0,
+    "daily_budget_cny": 0,
+    "upload_scope": [],
+    "require_explicit_existing_approval": true,
+    "unknown_charge_stays_reserved": true,
+    "note": "Limits new parser/ASR/storage calls, not the Agent already authorized in its host. A future approval may establish reusable per-project policy; do not ask again per file."
+  },
+  "resources": {
+    "autodetect_hardware": true,
+    "assume_system_ram_from_vram": false,
+    "gpu_workers": 1,
+    "target_total_vram_fraction": 0.8,
+    "initial_ram_budget_max_bytes": 4294967296,
+    "initial_ram_budget_available_fraction": 0.35,
+    "initial_temp_cache_max_bytes": 8589934592,
+    "initial_temp_cache_free_disk_fraction": 0.2,
+    "cache_policy": "min_of_byte_cap_and_free_disk_fraction_with_backpressure",
+    "final_evidence_budget_separate": true,
+    "delete_verified_evidence_to_make_cache_space": false,
+    "network_workers": 2,
+    "document_workers": 1,
+    "cpu_ocr_workers": 1,
+    "calibrate_before_increasing_concurrency": true,
+    "note": "Conservative starting targets, not measured usage or guaranteed process limits. Agent measures host plus workers and lowers batch/window/concurrency as necessary."
+  },
+  "reader": {
+    "read_chunk_bytes": 1048576,
+    "probe_max_received_bytes": 1048576,
+    "probe_timeout_seconds": 15,
+    "range_requires_206_and_valid_content_range": true,
+    "range_ignored_200_action": "close_response_without_consuming_body",
+    "full_stream_fallback_needs_new_budget_check": true,
+    "full_response_arraybuffer_allowed": false,
+    "temporary_urls_in_model_context": false
+  },
+  "media": {
+    "outer_audio_window_seconds": 300,
+    "overlap_seconds": 2,
+    "inner_window_policy": "backend_limit_and_vad_with_context",
+    "max_pending_audio_windows": 2,
+    "pending_audio_byte_cap": 67108864,
+    "max_pending_image_bytes": 33554432,
+    "mixed_stream_read_once": true,
+    "permanent_full_video_copy": false,
+    "prefer_verified_source_audio_variant": true,
+    "prefer_verified_readable_source_video_variant": true,
+    "local_downscale_counted_as_network_saving": false,
+    "visual_triggers": [
+      "periodic_floor",
+      "scene_change",
+      "local_text_or_parameter_change",
+      "speech_visual_reference",
+      "silent_visual_activity",
+      "contact_code_formula_table_or_amount"
+    ],
+    "global_timestamp_unit": "ms",
+    "keep_silent_visual_evidence": true,
+    "first_calibration_media_seconds": 120
+  },
+  "document": {
+    "prefer_native_extraction": true,
+    "native_then_ocr_by_page_or_region": true,
+    "short_text_is_valid_material": true,
+    "enumerate_embedded_images_and_occurrences": true,
+    "render_vector_or_unreadable_regions": true,
+    "record_headers_footers_notes_comments_hidden_content": true,
+    "small_original_prefer_keep_bytes": 67108864,
+    "large_original_policy": "bounded_read_and_explicit_retention_not_silent_skip",
+    "verify_expected_vs_actual_page_and_image_manifest": true,
+    "archive_max_depth": 3,
+    "archive_expanded_budget_bytes": 8589934592,
+    "archive_reject_path_traversal": true,
+    "archive_limit_hit_action": "partial_with_gap_do_not_delete_original"
+  },
+  "identity": {
+    "deduplicate_only_by_topic": false,
+    "reuse_same_author_content_edition_when_evidenced": true,
+    "retain_different_authors_same_topic": true,
+    "retain_new_edition_and_content_delta": true,
+    "full_video_hash_before_processing": false,
+    "filename_is_identity": false,
+    "retain_all_source_links_without_credentials": true
+  },
+  "contacts_and_promotions": {
+    "preserve_author_contact_and_source": true,
+    "repeat_in_unrelated_projects_is_candidate_not_deletion": true,
+    "auto_delete_promotional_material": false,
+    "classifications": ["author_contact", "course_dependency", "unrelated_promotion_candidate", "uncertain"]
+  },
+  "scheduler": {
+    "max_transient_attempts": 3,
+    "max_route_upgrades_per_region": 2,
+    "respect_server_retry_after": true,
+    "persist_attempt_and_next_run_at": true,
+    "prioritize_small_ready_materials": true,
+    "age_waiting_large_jobs_to_prevent_starvation": true,
+    "publish_incremental_chapter_evidence": true,
+    "retry_submitted_unknown_without_reconciliation": false,
+    "persist_request_id_and_reservation_before_remote_submit": true,
+    "publish_reconcile_on_startup": true
+  }
+}

@@ -1,0 +1,707 @@
+{
+  "document_version": "1.0",
+  "checked_at": "2026-11-10",
+  "timezone": "Asia/Singapore",
+  "scope": "Public repository/source/official documentation research; no account operations, installations or target-device benchmarks.",
+  "source_count": 37,
+  "selection_is_recommendation_not_implementation": true,
+  "version_policy": "Dates are snapshots with explicit meanings. Do not upgrade by date alone. Lock tested dependencies and model licenses during implementation.",
+  "sources": [
+    {
+      "id": "baidu_official_go_sdk",
+      "name": "baidu-drive-sdk-go",
+      "category": "baidu_adapter",
+      "choice": "conditional_primary",
+      "license": "Apache-2.0 (code)",
+      "urls": [
+        "https://github.com/baidu-netdisk/baidu-drive-sdk-go",
+        "https://github.com/baidu-netdisk/baidu-drive-sdk-go/blob/main/baidudriver/api/download_file.go",
+        "https://github.com/baidu-netdisk/baidu-drive-sdk-go/blob/main/baidudriver/api/client.go"
+      ],
+      "evidence": [
+        "Download returns io.ReadCloser; this is not proof of Range, low-bitrate rendition or audio-only access.",
+        "OAuth and authorized directory access require current account verification."
+      ],
+      "observation": {
+        "kind": "default_branch_commit_date",
+        "value": "2026-09-26"
+      },
+      "tested_on_user_account": false
+    },
+    {
+      "id": "bdpan_storage",
+      "name": "bdpan-storage",
+      "category": "baidu_adapter",
+      "choice": "not_enabled_scope_incompatible",
+      "license": "Apache-2.0 (code); review linked terms/telemetry independently",
+      "urls": [
+        "https://github.com/baidu-netdisk/bdpan-storage",
+        "https://github.com/baidu-netdisk/bdpan-storage/blob/main/skills/baidu-drive/SKILL.md",
+        "https://github.com/baidu-netdisk/bdpan-storage/blob/main/skills/baidu-drive/reference/bdpan-commands.md"
+      ],
+      "evidence": [
+        "Application scope /apps/bdpan/ is not the user's /apps/教育分析学习/ permission.",
+        "Content extraction includes text and selected Office/PDF types, with async tasks, quotas, truncation and expiring result URLs; not general image/audio/archive parsing.",
+        "External SKILL was examined as source, not adopted or installed."
+      ],
+      "observation": {
+        "kind": "default_branch_commit_date",
+        "value": "2026-10-29"
+      },
+      "tested_on_user_account": false
+    },
+    {
+      "id": "baidu_pcs_go",
+      "name": "qjfoidnh/BaiduPCS-Go",
+      "category": "baidu_adapter",
+      "choice": "conditional_alternative",
+      "license": "Apache-2.0 (code)",
+      "urls": [
+        "https://github.com/qjfoidnh/BaiduPCS-Go"
+      ],
+      "evidence": [
+        "File operations, transfers and resumable download candidate; only normal authorized and platform-permitted use.",
+        "Do not use a CLI to bypass a current access denial."
+      ],
+      "observation": {
+        "kind": "default_branch_commit_date",
+        "value": "2026-09-09"
+      },
+      "tested_on_user_account": false
+    },
+    {
+      "id": "baidu_ai_batch",
+      "name": "jing1312/baidu-ai-batch",
+      "category": "user_named_reference",
+      "choice": "reference_existing_artifacts_only",
+      "license": "MIT",
+      "urls": [
+        "https://github.com/jing1312/baidu-ai-batch",
+        "https://github.com/jing1312/baidu-ai-batch/tree/master/bin"
+      ],
+      "evidence": [
+        "Browser workflow for Baidu AI artifacts; file listing is current-directory/finite-page/video-oriented.",
+        "PPT click and short wait, DOM text length, or existing output file are insufficient completion tests.",
+        "Read-only artifact detection must be separated from any generation action."
+      ],
+      "observation": {
+        "kind": "default_branch_commit_date",
+        "value": "2026-08-01"
+      },
+      "tested_on_user_account": false
+    },
+    {
+      "id": "skipping_lectures",
+      "name": "jing1312/skipping-lectures",
+      "category": "user_named_reference",
+      "choice": "reference_routing_and_orchestration",
+      "license": "MIT",
+      "urls": [
+        "https://github.com/jing1312/skipping-lectures",
+        "https://github.com/jing1312/skipping-lectures/blob/main/SKILL.md"
+      ],
+      "evidence": [
+        "Specialized orchestration for Xiangzhang and Baidu workflows; not a universal website or mixed-format ingestion engine.",
+        "Reuse the routing idea; keep module A/B boundaries and independent analysis."
+      ],
+      "observation": {
+        "kind": "default_branch_commit_date",
+        "value": "2026-08-01"
+      },
+      "tested_on_user_account": false
+    },
+    {
+      "id": "baidu_transfer_helper",
+      "name": "kola-official/baidu-transfer-helper",
+      "category": "baidu_adapter",
+      "choice": "reference_requires_repairs",
+      "license": "MIT",
+      "urls": [
+        "https://github.com/kola-official/baidu-transfer-helper",
+        "https://github.com/kola-official/baidu-transfer-helper/blob/main/src/core.js"
+      ],
+      "evidence": [
+        "Recursive/paginated transfer and backoff reference.",
+        "Retry with newcopy, missing errno interpretation and absence of complete destination reconciliation require repairs."
+      ],
+      "observation": {
+        "kind": "default_branch_commit_date",
+        "value": "2026-07-12"
+      },
+      "tested_on_user_account": false
+    },
+    {
+      "id": "baidu_knowledge_mcp",
+      "name": "capwitf/baidu-netdisk-knowledge-mcp",
+      "category": "baidu_adapter",
+      "choice": "mcp_interface_reference_only",
+      "license": "MIT",
+      "urls": [
+        "https://github.com/capwitf/baidu-netdisk-knowledge-mcp",
+        "https://github.com/capwitf/baidu-netdisk-knowledge-mcp/blob/main/src/contentReader.ts",
+        "https://github.com/capwitf/baidu-netdisk-knowledge-mcp/blob/main/src/skills.ts",
+        "https://github.com/capwitf/baidu-netdisk-knowledge-mcp/blob/main/src/tools.ts"
+      ],
+      "evidence": [
+        "PDF/DOCX are largely plain-text extraction; arrayBuffer/readFile load full data.",
+        "Heuristic first-character/first-line summaries are not general-model analysis.",
+        "Scope guard must be replaced with exact user-authorized root validation."
+      ],
+      "observation": {
+        "kind": "default_branch_commit_date",
+        "value": "2026-06-17"
+      },
+      "tested_on_user_account": false
+    },
+    {
+      "id": "openlist",
+      "name": "OpenList",
+      "category": "multi_storage",
+      "choice": "defer_until_multiple_storage_providers",
+      "license": "AGPL-3.0",
+      "urls": [
+        "https://github.com/OpenListTeam/OpenList"
+      ],
+      "evidence": [
+        "Multi-storage/WebDAV integration candidate; evaluate only officially authorized access modes.",
+        "Not needed as an additional always-running system for the first single-site closure."
+      ],
+      "observation": {
+        "kind": "default_branch_commit_date",
+        "value": "2026-11-08"
+      },
+      "tested_on_user_account": false
+    },
+    {
+      "id": "bypy",
+      "name": "bypy",
+      "category": "baidu_adapter",
+      "choice": "reject_current_scope",
+      "license": "MIT",
+      "urls": [
+        "https://github.com/houtianze/bypy"
+      ],
+      "evidence": [
+        "Maintenance-mode sync/download tool limited to /apps/bypy; incompatible with current scope."
+      ],
+      "observation": {
+        "kind": "default_branch_commit_date",
+        "value": "2025-04-02"
+      },
+      "tested_on_user_account": false
+    },
+    {
+      "id": "liteparse",
+      "name": "LiteParse",
+      "category": "document",
+      "choice": "primary_fast_pdf_candidate",
+      "license": "Apache-2.0",
+      "urls": [
+        "https://developers.llamaindex.ai/liteparse/",
+        "https://github.com/run-llama/liteparse"
+      ],
+      "evidence": [
+        "Local parsing without LLM/API; text coordinates, complexity analysis and visual assets/regions.",
+        "Office conversion and target operating-system dependencies need deployment check."
+      ],
+      "observation": {
+        "kind": "repository_pushed_at_date",
+        "value": "2026-11-10"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "docling",
+      "name": "Docling",
+      "category": "document",
+      "choice": "primary_complex_document_candidate",
+      "license": "MIT (code; weights/dependencies separately)",
+      "urls": [
+        "https://github.com/docling-project/docling",
+        "https://docling-project.github.io/docling/usage/supported_formats/",
+        "https://docling-project.github.io/docling/usage/advanced_options/",
+        "https://docling-project.github.io/docling/reference/pipeline_options/"
+      ],
+      "evidence": [
+        "Structured multimodal document conversion and provenance.",
+        "Pipeline settings and image export must be explicit; bitmap extraction alone misses vector graphics."
+      ],
+      "observation": {
+        "kind": "repository_pushed_at_date",
+        "value": "2026-11-10"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "markitdown",
+      "name": "MarkItDown",
+      "category": "document",
+      "choice": "lightweight_native_document_candidate",
+      "license": "MIT",
+      "urls": [
+        "https://github.com/microsoft/markitdown"
+      ],
+      "evidence": [
+        "Markdown conversion of common document types is useful but not a full-fidelity evidence format.",
+        "Official OCR plugin can silently skip OCR when no llm_client is configured."
+      ],
+      "observation": {
+        "kind": "repository_pushed_at_date",
+        "value": "2026-11-07"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "mineru",
+      "name": "MinerU",
+      "category": "document",
+      "choice": "conditional_complex_layout_alternative",
+      "license": "Custom Apache-based LICENSE.md; not assumed unmodified Apache-2.0",
+      "urls": [
+        "https://github.com/opendatalab/MinerU",
+        "https://github.com/opendatalab/MinerU/blob/master/LICENSE.md",
+        "https://opendatalab.github.io/MinerU/usage/tiers/",
+        "https://opendatalab.github.io/MinerU/reference/output_files/"
+      ],
+      "evidence": [
+        "Tiered native/CPU/advanced parsing; evaluate the required tier rather than assume all modes need a GPU.",
+        "Current document-library CLI and stateless parsing have differing page defaults; verify complete page set.",
+        "Version 4 and legacy integration compatibility need isolation."
+      ],
+      "observation": {
+        "kind": "repository_pushed_at_date",
+        "value": "2026-11-10"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "unstructured",
+      "name": "Unstructured",
+      "category": "document",
+      "choice": "alternative_if_existing_ecosystem",
+      "license": "Apache-2.0 OSS; hosted offerings commercial",
+      "urls": [
+        "https://github.com/Unstructured-IO/unstructured",
+        "https://docs.unstructured.io/open-source/core-functionality/partitioning",
+        "https://docs.unstructured.io/open-source/how-to/extract-image-block-types"
+      ],
+      "evidence": [
+        "Document partitioning, image/table blocks and structured extraction.",
+        "Do not install a second full parsing stack without need; generated descriptions must not overwrite source tables."
+      ],
+      "observation": {
+        "kind": "repository_pushed_at_date",
+        "value": "2026-11-06"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "llamaparse",
+      "name": "LlamaParse",
+      "category": "commercial_document",
+      "choice": "approved_hard_pages_only",
+      "license": "Commercial service; SDK licenses distinct",
+      "urls": [
+        "https://developers.llamaindex.ai/llamaparse/for-agents/mcp/",
+        "https://developers.llamaindex.ai/llamaparse/parse/guides/response-format/",
+        "https://developers.llamaindex.ai/llamaparse/parse/features/charts-and-figures/",
+        "https://developers.llamaindex.ai/llamaparse/general/pricing/"
+      ],
+      "evidence": [
+        "MCP design exposes estimateFileComplexity, local LiteParse route and advanced parsing route.",
+        "Preserve coordinate transforms, image outputs, task receipts and credits; hosted processing is external data transfer."
+      ],
+      "tested_on_user_account": false
+    },
+    {
+      "id": "azure_document_intelligence",
+      "name": "Azure Document Intelligence",
+      "category": "commercial_document",
+      "choice": "optional_existing_azure_environment",
+      "license": "Commercial service",
+      "urls": [
+        "https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/service-limits?view=doc-intel-4.0.0"
+      ],
+      "evidence": [
+        "Office/HTML embedded or linked images are not analyzed in the documented native path.",
+        "Free F0 can return only the first two pages; successful response is not complete coverage."
+      ],
+      "tested_on_user_account": false
+    },
+    {
+      "id": "azure_content_understanding",
+      "name": "Azure Content Understanding",
+      "category": "commercial_multimodal",
+      "choice": "optional_difficult_materials",
+      "license": "Commercial service",
+      "urls": [
+        "https://learn.microsoft.com/azure/ai-services/content-understanding/pricing-explainer"
+      ],
+      "evidence": [
+        "Multimodal document/audio/video processing with modality units and generative-token costs.",
+        "Do not compare just one advertised price with whole pipeline cost."
+      ],
+      "tested_on_user_account": false
+    },
+    {
+      "id": "google_document_ai",
+      "name": "Google Document AI",
+      "category": "commercial_document",
+      "choice": "optional_existing_gcp_environment",
+      "license": "Commercial service",
+      "urls": [
+        "https://docs.cloud.google.com/document-ai/docs/layout-parse-chunk"
+      ],
+      "evidence": [
+        "Layout parsing of supported documents; format/version and processor limits apply.",
+        "Not a Baidu access connector."
+      ],
+      "tested_on_user_account": false
+    },
+    {
+      "id": "docetl",
+      "name": "DocETL",
+      "category": "analysis",
+      "choice": "map_reduce_resolve_design_reference",
+      "license": "MIT",
+      "urls": [
+        "https://github.com/ucbepic/docetl"
+      ],
+      "evidence": [
+        "LLM batch operations and resolve/cost controls suit structured understanding.",
+        "Not a downloader or OCR; automated optimization needs a bounded budget."
+      ],
+      "observation": {
+        "kind": "repository_pushed_at_date",
+        "value": "2026-11-09"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "rag_anything",
+      "name": "RAG-Anything",
+      "category": "analysis",
+      "choice": "defer_cross_project_retrieval",
+      "license": "MIT (code)",
+      "urls": [
+        "https://github.com/HKUDS/RAG-Anything"
+      ],
+      "evidence": [
+        "Multimodal knowledge retrieval after collection; not proof all course evidence was read.",
+        "Current documented MinerU requirement is 3.x, not interchangeable with 4.x."
+      ],
+      "observation": {
+        "kind": "repository_pushed_at_date",
+        "value": "2026-11-02"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "lightrag",
+      "name": "LightRAG",
+      "category": "analysis",
+      "choice": "defer_cross_project_retrieval",
+      "license": "MIT (code)",
+      "urls": [
+        "https://github.com/HKUDS/LightRAG"
+      ],
+      "evidence": [
+        "Optional later cross-project retrieval/relations; graph construction still uses resources.",
+        "First-course comprehensive reading cannot be replaced with top-k retrieval only."
+      ],
+      "observation": {
+        "kind": "repository_pushed_at_date",
+        "value": "2026-11-10"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "notebooklm_enterprise",
+      "name": "NotebookLM / NotebookLM Enterprise",
+      "category": "commercial_analysis",
+      "choice": "optional_reader_not_pipeline_core",
+      "license": "Commercial product",
+      "urls": [
+        "https://docs.cloud.google.com/gemini/enterprise/notebooklm-enterprise/docs/api-notebooks",
+        "https://docs.cloud.google.com/gemini/enterprise/notebooklm-enterprise/docs/api-notebooks-sources"
+      ],
+      "evidence": [
+        "Notebook/source management APIs are documented; do not infer a complete automated question/report export API.",
+        "Optional reading/comparison endpoint, not acquisition identity or evidence authority."
+      ],
+      "tested_on_user_account": false
+    },
+    {
+      "id": "ffmpeg",
+      "name": "FFmpeg",
+      "category": "media",
+      "choice": "primary_media_core_candidate",
+      "license": "LGPL/GPL depending on components and build",
+      "urls": [
+        "https://github.com/FFmpeg/FFmpeg",
+        "https://github.com/FFmpeg/FFmpeg/blob/master/LICENSE.md"
+      ],
+      "evidence": [
+        "Demux/decode and conversion tool; input stream capabilities remain source dependent.",
+        "Output -vn, local scaling or sparse frames do not by themselves reduce source network bytes."
+      ],
+      "tested_on_user_device": false
+    },
+    {
+      "id": "pyav",
+      "name": "PyAV",
+      "category": "media",
+      "choice": "python_demux_decode_candidate",
+      "license": "BSD-3-Clause; FFmpeg dependencies separately",
+      "urls": [
+        "https://github.com/PyAV-Org/PyAV"
+      ],
+      "evidence": [
+        "Python media/frame access for bounded workers; application must enforce input/queue limits."
+      ],
+      "observation": {
+        "kind": "release",
+        "version": "19.0.2",
+        "value": "2026-10-21"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "faster_whisper",
+      "name": "faster-whisper",
+      "category": "asr",
+      "choice": "initial_general_asr_candidate",
+      "license": "MIT (code; model weights separately)",
+      "urls": [
+        "https://github.com/SYSTRAN/faster-whisper",
+        "https://github.com/SYSTRAN/faster-whisper/blob/master/faster_whisper/audio.py"
+      ],
+      "evidence": [
+        "CTranslate2 and quantized inference; benchmarks are hardware/config specific.",
+        "decode_audio accumulates full PCM before float32 array; outer windowing is mandatory for long courses."
+      ],
+      "observation": {
+        "kind": "release_and_push_distinct",
+        "release_version": "1.2.1",
+        "release_date": "2025-10-31",
+        "repository_pushed_at_date": "2026-11-10"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "sensevoice",
+      "name": "SenseVoice / SenseVoiceSmall",
+      "category": "asr",
+      "choice": "conditional_cpu_chinese_alternative",
+      "license": "Code MIT; model card uses model-license, check full model terms",
+      "urls": [
+        "https://github.com/QwenAudio/SenseVoice",
+        "https://huggingface.co/FunAudioLLM/SenseVoiceSmall",
+        "https://arxiv.org/html/2407.04051"
+      ],
+      "evidence": [
+        "Chinese/Cantonese and other supported languages; direct inference duration and timestamp contracts are version sensitive.",
+        "Published A800 latency is not household-device whole-pipeline latency."
+      ],
+      "tested_on_user_device": false
+    },
+    {
+      "id": "sherpa_onnx",
+      "name": "sherpa-onnx",
+      "category": "asr_runtime",
+      "choice": "conditional_runtime_alternative",
+      "license": "Apache-2.0 (code; models separately)",
+      "urls": [
+        "https://github.com/k2-fsa/sherpa-onnx",
+        "https://k2-fsa.github.io/sherpa/onnx/sense-voice/index.html"
+      ],
+      "evidence": [
+        "ONNX runtime integration with supported SenseVoice models; benchmark actual target CPU."
+      ],
+      "observation": {
+        "kind": "release",
+        "version": "2.0.1",
+        "value": "2026-10-26"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "silero_vad",
+      "name": "Silero VAD",
+      "category": "audio",
+      "choice": "conditional_speech_activity_filter",
+      "license": "MIT",
+      "urls": [
+        "https://github.com/snakers4/silero-vad"
+      ],
+      "evidence": [
+        "Local speech activity detection; VAD silence is not proof of no useful visual or quiet speech content."
+      ],
+      "observation": {
+        "kind": "release",
+        "version": "6.2.3",
+        "value": "2026-09-23"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "rapidocr",
+      "name": "RapidOCR",
+      "category": "ocr",
+      "choice": "shared_cpu_ocr_candidate",
+      "license": "Apache-2.0 code; weights separately",
+      "urls": [
+        "https://github.com/RapidAI/RapidOCR"
+      ],
+      "evidence": [
+        "Lightweight OCR candidate shared across document and video frames; preserve original images."
+      ],
+      "observation": {
+        "kind": "release",
+        "version": "3.10.0",
+        "value": "2026-10-08"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "paddleocr",
+      "name": "PaddleOCR",
+      "category": "ocr",
+      "choice": "conditional_structure_upgrade",
+      "license": "Apache-2.0 code; weights separately",
+      "urls": [
+        "https://github.com/PaddlePaddle/PaddleOCR"
+      ],
+      "evidence": [
+        "Structure/formula/OCR upgrade route; do not load multiple large OCR models by default."
+      ],
+      "observation": {
+        "kind": "release",
+        "version": "3.7.0",
+        "value": "2026-06-11"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "pyscenedetect",
+      "name": "PySceneDetect",
+      "category": "visual_events",
+      "choice": "one_signal_in_adaptive_frame_selection",
+      "license": "BSD-3-Clause",
+      "urls": [
+        "https://github.com/Breakthrough/PySceneDetect",
+        "https://www.scenedetect.com/docs/latest/api/detectors.html"
+      ],
+      "evidence": [
+        "Scene-change detectors; pair with local OCR/text changes, periodic sampling and semantic visual cues."
+      ],
+      "observation": {
+        "kind": "release",
+        "version": "0.7.3",
+        "value": "2026-11-08"
+      },
+      "tested_on_user_device": false
+    },
+    {
+      "id": "qwen_asr_filetrans",
+      "name": "Qwen3-ASR-Flash-Filetrans",
+      "category": "commercial_asr",
+      "choice": "approved_hard_segments_or_cost_latency_tradeoff",
+      "license": "Commercial service",
+      "urls": [
+        "https://help.aliyun.com/zh/model-studio/qwen3-asr-flash-filetrans",
+        "https://help.aliyun.com/zh/model-studio/qwen-asr-api-reference"
+      ],
+      "evidence": [
+        "Asynchronous file transcription and timestamp output; preserve task/usage status.",
+        "Current listed rates used for arithmetic: Beijing CNY 0.00022/second; Singapore CNY 0.00026/second. Excludes storage, networking, retries and LLM analysis."
+      ],
+      "price_observation": {
+        "date": "2026-11-10",
+        "currency": "CNY",
+        "beijing_per_second": 0.00022,
+        "singapore_per_second": 0.00026
+      },
+      "tested_on_user_account": false
+    },
+    {
+      "id": "gemini_video",
+      "name": "Gemini video understanding",
+      "category": "commercial_multimodal",
+      "choice": "approved_short_dynamic_gaps_only",
+      "license": "Commercial API",
+      "urls": [
+        "https://ai.google.dev/gemini-api/docs/video-understanding"
+      ],
+      "evidence": [
+        "Clip, frame-rate and resolution controls; temporal sampling may miss short actions.",
+        "Do not send all courses by default; private Baidu URLs are not automatically fetchable by an external service."
+      ],
+      "tested_on_user_account": false
+    },
+    {
+      "id": "crawlee",
+      "name": "Crawlee",
+      "category": "orchestration",
+      "choice": "crawler_queue_design_reference_or_reuse",
+      "license": "Apache-2.0 (verify chosen SDK/version)",
+      "urls": [
+        "https://github.com/apify/crawlee",
+        "https://crawlee.dev/"
+      ],
+      "evidence": [
+        "Persistent request queues and resource-aware concurrency; storage and purge settings affect restart behavior.",
+        "Do not treat single-machine filesystem storage as a multi-process shared job ledger."
+      ],
+      "tested_on_user_device": false
+    },
+    {
+      "id": "prefect",
+      "name": "Prefect",
+      "category": "orchestration",
+      "choice": "defer_until_execution_console_needed",
+      "license": "Apache-2.0 core; cloud commercial",
+      "urls": [
+        "https://github.com/PrefectHQ/prefect",
+        "https://docs.prefect.io/v3/concepts/server"
+      ],
+      "evidence": [
+        "Self-hosted orchestration; infrastructure requirements vary with deployment scale.",
+        "Do not replace the existing business SQLite merely for a visual workflow."
+      ],
+      "tested_on_user_device": false
+    },
+    {
+      "id": "langgraph",
+      "name": "LangGraph",
+      "category": "orchestration",
+      "choice": "conditional_persistent_agent_branches",
+      "license": "MIT core; hosted offerings separate",
+      "urls": [
+        "https://github.com/langchain-ai/langgraph",
+        "https://docs.langchain.com/oss/python/langgraph/persistence"
+      ],
+      "evidence": [
+        "Checkpointer-based durable execution; in-memory saver does not survive process restart.",
+        "Keep project evidence ledger authoritative when adding framework execution state."
+      ],
+      "tested_on_user_device": false
+    },
+    {
+      "id": "n8n",
+      "name": "n8n",
+      "category": "orchestration",
+      "choice": "optional_outer_notifications_and_api_steps",
+      "license": "Sustainable Use License and other repository license components; not claimed OSI open source",
+      "urls": [
+        "https://github.com/n8n-io/n8n",
+        "https://github.com/n8n-io/n8n/blob/master/LICENSE.md"
+      ],
+      "evidence": [
+        "Possible outer orchestration; large media bytes should not pass through every workflow node.",
+        "Check actual license and intended deployment before external commercial hosting."
+      ],
+      "tested_on_user_device": false
+    }
+  ]
+}

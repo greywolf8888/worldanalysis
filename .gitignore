@@ -1,0 +1,22 @@
+# Runtime, local evidence and credentials are not source code.
+.runtime/
+__pycache__/
+*.py[cod]
+*.sqlite*
+*.db
+.env
+.env.*
+*.cookie*
+*credentials*
+下载暂存/
+手动投放/
+整理结果/
+wangzjk.com/
+_extracted/
+_deliveries/
+_ledger/075/
+_ledger/075-materials.json
+_ledger/pan-tree.json
+_tools/browser-download-fix/
+# Test products are ephemeral; fixture generators stay versioned.
+tests/document_fixtures/generated/
