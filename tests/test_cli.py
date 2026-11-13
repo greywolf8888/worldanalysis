@@ -95,6 +95,21 @@ class CLITests(unittest.TestCase):
                 self.assertEqual(crop.call_args.kwargs['resize'],[9,18])
                 self.assertFalse(json.loads(out.getvalue())['bundle_published'])
 
+    def test_derived_publication_cli_routes_exact_request_and_region(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()) as out:
+            with patch('worldanalysis.store.Store.publish_image_region',return_value={'bundle_id':'new-sealed','semantic_read':False}) as publish:
+                self.assertEqual(main(['--root',temp,'publish-image-region','--project','p','--bundle','b','--block','block','--artifact','a','--bbox','2','3','8','9','--output-relative','补采派生/region.png','--request','r']),0)
+                self.assertEqual(publish.call_args.args,('p','b','block','a',{'unit':'pixel','origin':'top_left','xyxy':[2,3,8,9]}))
+                self.assertEqual(publish.call_args.kwargs,{'output_relative':'补采派生/region.png','resize':None,'request_id':'r'})
+                self.assertFalse(json.loads(out.getvalue())['semantic_read'])
+
+    def test_region_reconciliation_cli_does_not_republish(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()) as out:
+            with patch('worldanalysis.store.Store.reconcile_image_region',return_value={'status':'fulfilled','new_publication':False}) as reconcile:
+                self.assertEqual(main(['--root',temp,'reconcile-image-region','--request','r','--bundle','b']),0)
+                reconcile.assert_called_once_with('r','b')
+                self.assertFalse(json.loads(out.getvalue())['new_publication'])
+
     def test_unknown_inventory_not_zero_complete(self):
         with tempfile.TemporaryDirectory() as temp:
             result=inventory(Path(temp))

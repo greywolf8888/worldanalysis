@@ -470,6 +470,14 @@ class Store:
                 cache.remember(entry,bundle)
         return bundle
 
+    def reconcile_image_region(self, request_id, bundle_id):
+        from .derived_delivery import reconcile_image_region
+        return reconcile_image_region(self,request_id,bundle_id)
+
+    def publish_image_region(self, project_id, source_bundle_id, block_id, artifact_id, bbox, *, output_relative, resize=None, request_id=None):
+        from .derived_publication import publish_image_region
+        return publish_image_region(self,project_id,source_bundle_id,block_id,artifact_id,bbox,output_relative=output_relative,resize=resize,request_id=request_id)
+
     def crop_region(self, project_id, bundle_id, block_id, artifact_id, bbox, output_relative, *, resize=None):
         from .image_region import crop_region
         return crop_region(self,project_id,bundle_id,block_id,artifact_id,bbox,output_relative,resize=resize)

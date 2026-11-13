@@ -98,6 +98,18 @@ def parser():
     window.add_argument('--end-ms', type=int, required=True)
     window.add_argument('--output-relative', required=True)
     window.add_argument('--max-received-bytes', type=int, default=64*1024*1024)
+    reconcile = sub.add_parser('reconcile-image-region', help='仅对账已发布派生图与正式请求；不新解析、不假读或消除缺口')
+    reconcile.add_argument('--request', required=True)
+    reconcile.add_argument('--bundle', required=True)
+    derived = sub.add_parser('publish-image-region', help='正式日志发布局部图像新证据；不自动语义已读或闭合缺口')
+    derived.add_argument('--project', required=True)
+    derived.add_argument('--bundle', required=True)
+    derived.add_argument('--block', required=True)
+    derived.add_argument('--artifact', required=True)
+    derived.add_argument('--bbox', required=True, nargs=4, type=int, metavar=('LEFT','TOP','RIGHT','BOTTOM'))
+    derived.add_argument('--resize', nargs=2, type=int, metavar=('WIDTH','HEIGHT'))
+    derived.add_argument('--output-relative', required=True)
+    derived.add_argument('--request')
     crop = sub.add_parser('crop-region', help='仅对已封存本地图片作有界裁切；不发布Bundle或自标fulfilled')
     crop.add_argument('--project', required=True)
     crop.add_argument('--bundle', required=True)
@@ -213,6 +225,10 @@ def main(argv=None):
                 raise GateError('OUTSIDE_LOCAL_SCOPE') from None
             source = contained_path(Path(args.root),relative)
             display(extract_audio_window(args.root,source,args.output_relative,args.start_ms,args.end_ms,expected_identity=identity(source),max_received_bytes=args.max_received_bytes))
+        elif args.command == 'reconcile-image-region':
+            display(store.reconcile_image_region(args.request,args.bundle))
+        elif args.command == 'publish-image-region':
+            display(store.publish_image_region(args.project,args.bundle,args.block,args.artifact,{'unit':'pixel','origin':'top_left','xyxy':args.bbox},output_relative=args.output_relative,resize=args.resize,request_id=args.request))
         elif args.command == 'crop-region':
             display(store.crop_region(args.project,args.bundle,args.block,args.artifact,{'unit':'pixel','origin':'top_left','xyxy':args.bbox},args.output_relative,resize=args.resize))
         elif args.command == 'supplement-fulfil':
