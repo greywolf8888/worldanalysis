@@ -1,0 +1,15 @@
+{
+  "schema":"worldanalysis.execution-checkpoint.v1",
+  "round":5,
+  "goal_id":"goal-432da048-e464-4fb3-89ff-2927dfba6d37",
+  "goal_revision_observed":6,
+  "goal_phase_observed":"active",
+  "changed_paths_verification":{"run":59,"passed":59,"elapsed_seconds":28.145,"modules":["test_acquisition","test_bundle_merge","test_cli","test_incremental_ingest"],"whole_regression_repeated":false},
+  "mixed_publication":{"project_id":"calibration-synthetic-speech","bundle_id":"bundle-5aae4593a3d64ec8b7f2925a2a1096a7","revision":"v0003","assets":2,"blocks":5,"claimed_status":"partial","reverse_order_reused":true,"jobs_rows_unchanged":true,"media_execution_rows_unchanged":true,"new_ASR_executed":false,"synthetic_calibration_only":true},
+  "implemented":["Same-project already-published native/media evidence composition using the existing immutable publication journal","Automatic mixed ingestion and explicit compose CLI","Producer receipt preservation for reused completed jobs","Complete redacted body contact extraction rather than only 16000-character preview","Fresh live host read-only reauthorization of already verified cloud transfers, without changing old grants/bindings or resubmitting"],
+  "real_cloud_state":{"operation_id":"transfer-a7f9a2ff37a4cb9ff1fbd7419a701ecc","transfer_state":"verified_complete","bindings":18,"new_transfer_requests_this_round":0,"fresh_intro_destination_id":"549801232540792","fresh_intro_size_bytes":1071,"fresh_intro_metadata_http_status":200,"fresh_intro_metadata_errno":0},
+  "download_attempt":{"normal_UI_ticket_http_status":200,"normal_UI_ticket_errno":0,"ticket_available":true,"signed_url_exported":false,"browser_private_resource_read":"BROWSER_READ_UNAVAILABLE","resource_http_status":null,"local_file_written":false,"no_provider_refusal_claim":true,"native_download_protection":"Managed downloads enabled until self-hosted host exit; native/non-HTTP popups and unattributable native downloads denied; files must use dsh_browser_download and its directory admission","directory_save_admission":"not_yet_attempted; no signed URL exported to obtain a tool input","no_alternative_channel_after_failure":true},
+  "remaining":["Privacy-preserving admitted download handoff or user-supplied actual TXT/first-lesson media","Real media accuracy and long-load acceptance","Source-to-local provenance binding and local extraction of the actual newly transferred course","Incremental independent analysis and remaining full-plan acceptance"],
+  "whole_plan_complete":false,
+  "style":"Continue with short real steps and affected tests only; do not resume broad repetitive analysis."
+}

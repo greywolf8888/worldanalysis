@@ -21,7 +21,7 @@ worldanalysis.cmd control collection pause
 worldanalysis.cmd control analysis pause
 ```
 
-`ingest`只接收工作区内明确输入，小原件保留；不移动/删除手动投放，不执行内容。多文件可一次传入。媒体不走64MiB小文件预哈希入口；已自动接单源有界worker与通用Bundle。原媒体仅登记stat描述，不冒称整片摘要/不可变复制；多媒体及文档/媒体组合发布仍明确unsupported。
+`ingest`只接收工作区内明确输入，小原件保留；不移动/删除手动投放，不执行内容。多文件可一次传入。媒体不走64MiB小文件预哈希入口；已自动接单源有界worker与通用Bundle。原媒体仅登记stat描述，不冒称整片摘要/不可变复制；已支持同项目多媒体及文档/媒体组合。ingest自动分流后组合已发布证据，也可用compose命令复用指定Bundle，不重跑提取。
 
 `analysis next`返回真实已发布版本和任务输出目录；当前授权Agent实际读取并产出结果，程序核验身份、全部块状态、引用、读取回执、报告字节和补采请求。**没有配置商业模型API时不会伪造无人值守摘要**。图像必须真实打开并留下像素/字节关联回执，不能拿路径充数。
 
@@ -50,6 +50,6 @@ worldanalysis.cmd --help
 node --test _tools/course-flow.test.mjs _tools/materials-ingest.test.mjs
 ```
 
-尚未全计划验收：真实云盘整链、多源媒体/文档组合Bundle、真实课程与百小时生产校准、真实XLSX与同文件混合PDF样本、复杂页/矢量/公式语义、外部核验reader及更完整增量调度。不要把离线通过、合成语音识别或这两份partial报告说成整个计划完成。
+尚未全计划验收：真实云盘下载与本地提取整链、真实课程与百小时生产校准、真实XLSX与同文件混合PDF样本、复杂页/矢量/公式语义、外部核验reader及更完整增量调度。不要把离线通过、合成语音识别或这两份partial报告说成整个计划完成。
 
-本轮[快速复核](<_ledger/devpack/round3-quick-review.json>)仅跑受改动影响的20项，全部通过，未重复整套测试。真实双PDF已验证新增B只提取B，反序重复不重提取；合成语音已实际ASR→Bundle→Agent partial报告，不是生产课验收。目标实时已为active/armed，保留继续；未创建新目标、定时器或常驻循环。
+本轮[快速复核](<_ledger/devpack/round3-quick-review.json>)仅跑受改动影响的20项，全部通过，未重复整套测试。真实双PDF已验证新增B只提取B，反序重复不重提取；合成语音已实际ASR→Bundle→Agent partial报告，不是生产课验收。目标实时已为active/armed，保留继续；未创建新目标、定时器或常驻循环。第五轮[进展记录](<_ledger/devpack/round5-progress.json>)：混合组合已实跑，相关59项28.145秒全通过；真实云盘18条映射仍保持，正常下载票据已签发但私有读取未成功，文件尚未落地，未导出签名URL。

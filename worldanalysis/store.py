@@ -470,6 +470,10 @@ class Store:
                 cache.remember(entry,bundle)
         return bundle
 
+    def compose(self, project_id, bundle_ids):
+        from .bundle_merge import compose
+        return compose(self, project_id, bundle_ids)
+
     def ingest_media(self, project_id, inputs, extractor=None, *, options=None, config_version=None, resume=False):
         """Publish bounded derived media, not an immutable whole-source copy.
 
@@ -759,8 +763,10 @@ class Store:
                 artifact_ids = [filemap[k]["artifact_id"] for k in b["file_keys"]]
                 block = {"block_id":ident,"asset_ref":ref,"kind":b["kind"],"origin":b["origin"],"locator":loc,"artifact_ids":artifact_ids,
                     "processing":{"status":b["processing_status"],"reason":redact_text(b["reason"])[0] or "extraction observation","evidence_refs":[],"recovery_ref":entry["job_id"]},"derived_from":[]}
+                contact_text = ''
                 if "text" in b:
                     text,sensitive = redact_text(str(b["text"]))
+                    contact_text = text
                     if sensitive:
                         original["access_class"] = "restricted_local"
                         restricted_indexes.append(index)
@@ -782,7 +788,7 @@ class Store:
                     block["derived_from"] = [{"project_id":project_id,**ref,"artifact_id":original["artifact_id"],"locator":{"kind":"asset","precision":"exact"}}]
                 # Keep literal contact evidence with unknown attribution; a
                 # repeated identifier is never automatically called promotion.
-                contact_text = block.get("text", "")
+                # Use the complete redacted source, never only the inline preview.
                 candidates = set(re.findall(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", contact_text))
                 candidates.update(re.findall(r"(?:微信|[Ww]e[Cc]hat|[Qq][Qq]|客服|联系方式|邮箱|电话|手机)[：: ]+([^\s，,；;。]{2,100})", contact_text))
                 candidates.update(re.findall(r"(?<!\d)1[3-9]\d{9}(?!\d)", contact_text))
@@ -952,6 +958,21 @@ class Store:
             job_artifacts = {a["job_id"]:a for a in bundle["artifacts"]}
             for job,artifact in job_artifacts.items():
                 ref = artifact["asset_ref"]
+                existing = self.connection.execute('SELECT state,receipt_json FROM jobs WHERE job_id=?',(job,)).fetchone()
+                if existing and existing['state'] == 'verified_complete':
+                    self._check_extraction_job(row['project_id'],ref,job,artifact['provider'],published=True)
+                    try:
+                        receipt = json.loads(existing['receipt_json'] or '{}')
+                    except (ValueError,TypeError) as exc:
+                        raise ContractError('invalid published extraction receipt') from exc
+                    previous = receipt.get('publish_id') if isinstance(receipt,dict) else None
+                    if not isinstance(previous,str) or not previous:
+                        raise ContractError('published extraction receipt missing')
+                    if previous != publish_id:
+                        owner = self.connection.execute("SELECT 1 FROM publications WHERE publish_id=? AND project_id=? AND state='published'",(previous,row['project_id'])).fetchone()
+                        if not owner:
+                            raise ContractError('published extraction receipt scope/state mismatch')
+                        continue
                 changed = self.connection.execute("UPDATE jobs SET state='verified_complete',receipt_json=?,updated_at=? WHERE job_id=? AND project_id=? AND operation='native_extract' AND state IN ('running','verified_complete') AND input_revision IN (?,?) AND provider_json=?",(canonical({"publish_id":publish_id}).decode(),now(),job,row["project_id"],ref["asset_revision"],ref["asset_id"]+":"+ref["asset_revision"],canonical(artifact["provider"]).decode())).rowcount
                 if changed != 1:
                     raise ContractError("extraction job changed before publication commit")

@@ -92,6 +92,9 @@ def parser():
     ingest.add_argument('--no-asr', action='store_true', help='媒体仅解码/画面；语音仍留未处理缺口，不冒称ASR完成')
     ingest.add_argument('--synthetic-input', action='store_true', help='显式标记自建校准素材；不能作真实课程验收')
     ingest.add_argument('inputs', nargs='+', type=Path)
+    compose = sub.add_parser('compose', help='仅组合本项目已发布证据；不重新提取、不改变旧生产回执')
+    compose.add_argument('--project', required=True)
+    compose.add_argument('--bundle', action='append', required=True)
     verify = sub.add_parser('verify')
     verify.add_argument('--project', required=True)
     verify.add_argument('--bundle')
@@ -153,19 +156,35 @@ def main(argv=None):
                 inputs.append(path)
             import mimetypes
             media = [(mimetypes.guess_type(str(p))[0] or '').startswith(('audio/','video/')) for p in inputs]
-            if any(media):
-                if not all(media):
-                    display({'status':'unsupported','reason':'Native/media composite Bundle is not yet accepted; inputs remain untouched and no worker started'})
-                    return 2
-                options = {'ocr_enabled':not args.no_ocr,'asr_enabled':not args.no_asr,'synthetic':bool(args.synthetic_input)}
-                bundle = store.ingest_media(args.project,inputs,options=options,config_version=media_config_revision(options),resume=args.resume_media)
-            else:
+            collected = []
+            native_inputs = [p for p,is_media in zip(inputs,media) if not is_media]
+            if native_inputs:
                 options = {'ocr': None} if args.no_ocr else None
-                bundle = store.ingest(args.project, inputs, routed_extract, options=options, config_version=route_config_revision(ocr_enabled=not args.no_ocr))
+                native = store.ingest(args.project,native_inputs,routed_extract,options=options,config_version=route_config_revision(ocr_enabled=not args.no_ocr))
+                if 'bundle_id' not in native:
+                    display(native)
+                    return 2
+                collected.append(native)
+            options = {'ocr_enabled':not args.no_ocr,'asr_enabled':not args.no_asr,'synthetic':bool(args.synthetic_input)}
+            config = media_config_revision(options) if any(media) else None
+            for path,is_media in zip(inputs,media):
+                if not is_media:
+                    continue
+                derived = store.ingest_media(args.project,[path],options=options,config_version=config,resume=args.resume_media)
+                if 'bundle_id' not in derived:
+                    display({**derived,'ready_bundle_ids':[b['bundle_id'] for b in collected]})
+                    return 2
+                collected.append(derived)
+            ids = list(dict.fromkeys(b['bundle_id'] for b in collected))
+            bundle = store.compose(args.project,ids) if len(ids) > 1 else collected[0]
             if 'bundle_id' not in bundle:
                 display(bundle)
                 return 2
             display({'project_id':bundle['project_id'],'bundle_id':bundle['bundle_id'],'revision':bundle['bundle_revision'],'publish_id':bundle['publish_id'],'coverage':bundle['coverage'],'gaps':bundle['gaps'],'project_root':store.project_root(args.project),'analysis': 'Ready for independent agent reading; no summary has been fabricated'})
+        elif args.command == 'compose':
+            bundle = store.compose(args.project,args.bundle)
+            display({'status':bundle.get('status','published'),'project_id':args.project,'bundle_id':bundle.get('bundle_id'),'coverage':bundle.get('coverage'),'new_extraction_executed':False})
+            return 0 if 'bundle_id' in bundle else 2
         elif args.command == 'verify':
             bundle = store.get_bundle(args.project,args.bundle)
             display({'project_id':args.project,'bundle_id':bundle['bundle_id'],'revision':bundle['bundle_revision'],'publication':bundle['publication']['state'],'local_file_and_contract_checks':'passed','coverage':bundle['coverage'],'gap_count':len(bundle['gaps'])})

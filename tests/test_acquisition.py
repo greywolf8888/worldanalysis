@@ -67,6 +67,37 @@ class TransferTests(unittest.TestCase):
         self.a.read_verified_asset(self.op['operation_id'],'share-file-1',resolve_asset=lambda _:self.current,open_reader=lambda fid:calls.append(fid))
         self.assertEqual(calls,['dest-file-99'])
 
+    def test_fresh_read_authorization_preserves_verified_transfer(self):
+        self.reconcile()
+        old=dict(self.grant,expires_at='2000-01-01T00:00:00Z')
+        fresh=dict(self.grant,operations=['inventory','read_stream'])
+        a=Acquisition(self.db,grant_resolver=lambda ref:{'user-plan':old,'fresh-host-read':fresh}.get(ref))
+        with self.assertRaises(GateError):
+            a.read_verified_asset(self.op['operation_id'],'share-file-1',resolve_asset=lambda _:self.current,open_reader=lambda _:self.fail('expired reader'))
+        updated=a.reauthorize_verified_read(self.op['operation_id'],grant_ref='fresh-host-read')
+        self.assertEqual(updated['state'],'verified_complete');self.assertFalse(updated['may_submit'])
+        self.assertEqual(updated['manifest'],self.op['manifest'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM cloud_bindings').fetchone()[0],1)
+        calls=[]
+        a.read_verified_asset(self.op['operation_id'],'share-file-1',resolve_asset=lambda _:self.current,open_reader=lambda fid:calls.append(fid))
+        self.assertEqual(calls,['dest-file-99'])
+        with self.assertRaises(GateError):a.before_submit(self.op['operation_id'],resolve_destination=lambda p:p)
+
+    def test_read_reauthorization_cannot_clear_unknown_or_blocked(self):
+        for state in ('queued','submission_unknown','submitted','blocked'):
+            self.db.execute('UPDATE cloud_operations SET state=?',(state,))
+            with self.subTest(state=state),self.assertRaises(GateError):
+                self.a.reauthorize_verified_read(self.op['operation_id'],grant_ref='fresh-host-read')
+            self.assertEqual(self.a.operation(self.op['operation_id'])['state'],state)
+
+    def test_read_reauthorization_requires_both_fresh_scoped_permissions(self):
+        self.reconcile()
+        for grant in (None,dict(self.grant,operations=['inventory']),dict(self.grant,roots=['/apps/教育分析学习/其他']),dict(self.grant,expires_at='2000-01-01T00:00:00Z')):
+            a=Acquisition(self.db,grant_resolver=lambda ref:grant)
+            with self.subTest(grant=grant),self.assertRaises(GateError):
+                a.reauthorize_verified_read(self.op['operation_id'],grant_ref='fresh-host-read')
+            self.assertEqual(a.operation(self.op['operation_id'])['grant_ref'],'user-plan')
+
     def test_move_out_revokes_read_without_invoking_reader(self):
         self.reconcile()
         self.current['path']='/apps/教育分析学习其他/课件.txt'

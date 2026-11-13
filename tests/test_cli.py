@@ -43,14 +43,30 @@ class CLITests(unittest.TestCase):
                 self.assertTrue(call.call_args.kwargs['options']['synthetic'])
                 self.assertFalse(call.call_args.kwargs['options']['asr_enabled'])
 
-    def test_mixed_cli_is_explicitly_not_accepted_without_any_worker(self):
-        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()) as out:
-            (Path(temp)/'sample.wav').write_bytes(b'synthetic fixture')
-            (Path(temp)/'sample.txt').write_text('native fixture')
-            with patch('worldanalysis.store.Store.ingest_media') as media,patch('worldanalysis.store.Store.ingest') as native:
-                self.assertEqual(main(['--root',temp,'ingest','--project','unused','sample.wav','sample.txt']),2)
-                self.assertEqual(json.loads(out.getvalue())['status'],'unsupported')
-                self.assertFalse(media.called);self.assertFalse(native.called)
+    def test_actual_mixed_cli_publishes_native_and_bounded_audio_without_asr_claim(self):
+        import wave
+        import shutil
+        from worldanalysis.store import Store
+        temp=Path(tempfile.mkdtemp())
+        def cleanup():
+            import stat
+            def writable(func,path,error):Path(path).chmod(stat.S_IWRITE);func(path)
+            shutil.rmtree(temp,onerror=writable)
+        self.addCleanup(cleanup)
+        s=Store(temp);s.create_project(project_id='mixed-cli');s.close()
+        (temp/'sample.txt').write_text('Explicit synthetic companion document.',encoding='utf-8')
+        with wave.open(str(temp/'sample.wav'),'wb') as w:
+            w.setnchannels(1);w.setsampwidth(2);w.setframerate(16000);w.writeframes(b'\x00\x00'*1600)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code=main(['--root',str(temp),'ingest','--project','mixed-cli','--synthetic-input','--no-asr','--no-ocr','sample.wav','sample.txt'])
+        self.assertEqual(code,0)
+        summary=json.loads(out.getvalue());self.assertEqual(summary['coverage']['claimed_status'],'partial')
+        s=Store(temp)
+        try:
+            bundle=s.get_bundle('mixed-cli',summary['bundle_id'])
+            self.assertEqual(len(bundle['assets']),2)
+            self.assertFalse(any(b['origin']=='asr' for b in bundle['blocks']))
+        finally:s.close()
 
     def test_unknown_inventory_not_zero_complete(self):
         with tempfile.TemporaryDirectory() as temp:

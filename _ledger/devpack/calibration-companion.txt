@@ -1,0 +1,3 @@
+Explicit synthetic calibration companion.
+Preserve source locators and original evidence.
+This is not a production course or an accuracy benchmark.

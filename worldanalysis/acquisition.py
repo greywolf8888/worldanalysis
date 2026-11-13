@@ -291,6 +291,23 @@ class Acquisition:
             self.connection.execute('UPDATE cloud_operations SET state=?,reason=?,updated_at=? WHERE operation_id=?', ('verified_complete', 'Every source item bound to an actual current destination identity and path', now(), operation_id))
         return {'state': 'verified_complete', 'verified_items': len(bindings), 'operation_id': operation_id}
 
+    def reauthorize_verified_read(self, operation_id: str, *, grant_ref: str) -> dict:
+        """Bind a fresh live host grant to completed evidence, never resubmit it.
+
+        Old grant records remain immutable; a Plan or an expired grant cannot
+        renew itself. Blocked/unknown/incomplete operations are not unblocked.
+        """
+        op = self.operation(operation_id)
+        if op['state'] != 'verified_complete':
+            raise GateError('TRANSFER_NOT_RECONCILED')
+        self._require_grant(grant_ref, op['share_ref'], op['destination'], 'inventory')
+        self._require_grant(grant_ref, op['share_ref'], op['destination'], 'read_stream')
+        with self.connection:
+            changed = self.connection.execute('UPDATE cloud_operations SET grant_ref=?,reason=?,updated_at=? WHERE operation_id=? AND state=? AND grant_ref=?', (grant_ref, 'Fresh host read authorization; existing transfer and bindings unchanged, no resubmission', now(), operation_id, 'verified_complete', op['grant_ref'])).rowcount
+            if changed != 1:
+                raise GateError('OPERATION_CHANGED')
+        return self.operation(operation_id)
+
     def read_verified_asset(self, operation_id: str, source_file_id: str, *, resolve_asset, open_reader):
         op = self.operation(operation_id)
         if op['state'] != 'verified_complete':
