@@ -113,6 +113,11 @@ def parser():
     read.add_argument('--task', required=True)
     read.add_argument('--block', action='append', required=True)
     read.add_argument('--max-chars', type=int, default=16000)
+    delta = actions.add_parser('delta', help='严格比对同项目同模型已验收版本，仅给出可复用阅读与变化范围')
+    delta.add_argument('--task', required=True)
+    reuse = actions.add_parser('reuse', help='显式复用已验证历史阅读；不伪造本次文本/图像读取')
+    reuse.add_argument('--task', required=True)
+    reuse.add_argument('--block', action='append', required=True)
     complete = actions.add_parser('complete')
     complete.add_argument('--task', required=True)
     complete.add_argument('result', type=Path)
@@ -203,6 +208,12 @@ def main(argv=None):
                 display(worker.claim(project_id=args.project,model_version=args.model_version,prompt_version=args.prompt_version,mode='agent_assisted'))
             elif args.analysis_action == 'read':
                 display(worker.read(args.task,args.block,max_chars=args.max_chars))
+            elif args.analysis_action == 'delta':
+                from .incremental_analysis import prepare
+                display(prepare(worker,args.task))
+            elif args.analysis_action == 'reuse':
+                from .incremental_analysis import reuse
+                display(reuse(worker,args.task,args.block))
             else:
                 display(worker.complete(args.task,args.result))
     return 0

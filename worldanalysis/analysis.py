@@ -234,6 +234,11 @@ class Analysis:
             if r["task_id"] != task["task_id"] or r["block_id"] != block["block_id"]:
                 raise ContractError("receipt belongs to a different task/block")
             receipts.append(r)
+        if any(r['kind'] == 'reused' for r in receipts):
+            from .incremental_analysis import validate_reused
+            if len(receipts) != 1:
+                raise ContractError('historical reuse receipt must stand alone')
+            return validate_reused(self,task,block,bundle,receipts[0])
         artifacts = {a["artifact_id"]:a for a in bundle["artifacts"]}
         images = {i for i in block["artifact_ids"] if artifacts[i]["kind"] in {"image","page_render","keyframe"}}
         opened = {i for r in receipts if r["kind"] == "image" for i in r["artifact_hashes"]}

@@ -68,6 +68,18 @@ class CLITests(unittest.TestCase):
             self.assertFalse(any(b['origin']=='asr' for b in bundle['blocks']))
         finally:s.close()
 
+    def test_incremental_cli_is_explicit_and_does_not_fall_through_to_complete(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()) as out:
+            with patch('worldanalysis.incremental_analysis.prepare',return_value={'status':'prepared','task_id':'task-routing'}) as plan:
+                self.assertEqual(main(['--root',temp,'analysis','delta','--task','task-routing']),0)
+                self.assertEqual(plan.call_args.args[1],'task-routing')
+                self.assertEqual(json.loads(out.getvalue())['status'],'prepared')
+            out.seek(0);out.truncate(0)
+            with patch('worldanalysis.incremental_analysis.reuse',return_value={'status':'reused','task_id':'task-routing'}) as reused:
+                self.assertEqual(main(['--root',temp,'analysis','reuse','--task','task-routing','--block','block-one']),0)
+                self.assertEqual(reused.call_args.args[1:],('task-routing',['block-one']))
+                self.assertEqual(json.loads(out.getvalue())['status'],'reused')
+
     def test_unknown_inventory_not_zero_complete(self):
         with tempfile.TemporaryDirectory() as temp:
             result=inventory(Path(temp))
