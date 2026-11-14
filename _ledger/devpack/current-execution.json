@@ -1,0 +1,23 @@
+{
+  "schema":"worldanalysis.current-execution.v1",
+  "source":"direct human request: assess current stage, update goal, carry out whole plan continuously",
+  "goal_id":"goal-432da048-e464-4fb3-89ff-2927dfba6d37",
+  "goal_revision":10,
+  "host_phase":"paused",
+  "activation":"disarmed",
+  "resume_attempt":"the model cannot resume a paused goal; the user must resume it",
+  "replacement_goal_created":false,
+  "current_directly_authorized_work_allowed":true,
+  "development_output_temp_cache_root":"G:/Worldanalysis",
+  "other_disks":"Do not scan private sources, develop or write temporary/generated files outside the authorized root; existing installed runtimes may be used read-only.",
+  "current_stage":"Implementation plus incomplete real acceptance; historical synthetic/unit success is not whole-plan completion.",
+  "latest_batch_evidence":"_ledger/devpack/resume-20261114-progress.json",
+  "prior_scope_refresh":{"regular_files_scanned":2121,"excluded_directories":25,"candidate_files":23,"scope":"published glob excludes hidden/dependency/build/link paths; do not call this every physical file on G drive","archive_directory_entries":1309,"archive_candidates":14,"archive_candidates_kind":"PDFs already represented in current local paths; no media/XLSX candidate listed; no extraction performed"},
+  "pdf_page_screening":{"state":"completed_read_only","files":14,"pages":126,"text_pages":125,"image_only_pages_in_separate_one_page_file":1,"same_original_mixed_page_candidate":false,"mixed_text_and_image_pages":"Insight PDF p3,p6,p9, not scanned-page evidence","store_or_source_write":false},
+  "real_recovery_verification":{"source_task_id":"analysis-task-7d1e66e19ca942f197d10aeb31b265c9","request_id":"restore-pptx-template-accounting-local","recovery_task_id":"analysis-recovery-de1870971fc54584b13cc45deddec29a","target_block_id":"block-d81061dfbc9d467a85c1693be1a41656","state":"running; all23 fresh pending, not semantic completion","request_repeat_idempotent":true,"same_agent_and_publish":true,"receipts":0,"gaps_retained":19,"pub_job_counts_before":[3,2],"pub_job_counts_after":[3,2],"old_result_unchanged":true},
+  "verification_job":{"job_id":"bash-7b2cb56c1640495b","state":"completed_exit0_71tests_passed_304.287seconds_before_gap_validation_fix","modules":["test_analysis_recovery","test_analysis","test_incremental_analysis","test_cli"],"temporary_root":"Unique .recovery-checks- directory inside G:/Worldanalysis; TEMP/TMP/TMPDIR and Python tempfile redirected there","scope":"Targeted affected compatibility, not whole-plan production acceptance"},
+  "independent_review":{"agent":"independent-review","state":"passed_after_fix_single_G_local_case","scope":"Only recovery module plus thin Analysis/CLI hooks; static gap-loss finding fixed with source-gap preservation helper;7 post-fix tests passed22.990s"},
+  "current_parallel_work":[{"agent":"source-review","task":"Read-only page-level screening of 14 real local original PDFs for a genuine same-file text/image page case","writes":"none; any necessary temp only authorized G root"},{"agent":"recovery-entry","task":"Verify whether requeue_block is executable; if absent implement a minimal persistent recoverable queue using the existing business SQLite","write_scope":["worldanalysis/analysis_recovery.py","tests/test_analysis_recovery.py"],"real_business_db_write":false}],
+  "lead_scope":"Integrate only after review; narrow relevant tests, no old accepted/source mutation. Advance other legal branches when a specific input/channel is unavailable.",
+  "completion_gate":"All original P0-P4 and original 06 acceptance scope genuinely achieved; never mark complete for synthetic-only tests, exclusions or partial reports."
+}

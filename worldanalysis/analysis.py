@@ -26,6 +26,10 @@ class Analysis:
         self.connection = store.connection
         self.api_worker = api_worker
 
+    def requeue_block(self, source_task_id, block_id, *, reason, request_id=None):
+        from .analysis_recovery import requeue_block
+        return requeue_block(self,source_task_id,block_id,reason=reason,request_id=request_id)
+
     def claim(self, project_id=None, *, model_version=None, prompt_version="general-analyzer-v1", mode="agent_assisted", provider_id="operator-agent", provider_version="agent-bridge-v1"):
         if self.store.pipeline_state("analysis") != "running":
             return {"status":"blocked","reason":"analysis paused"}
@@ -41,6 +45,10 @@ class Analysis:
         scan_secrets(agent)
         if project_id:
             self.store.project_root(project_id)
+        from .analysis_recovery import claim_pending
+        pending_recovery = claim_pending(self,project_id,agent)
+        if pending_recovery is not None:
+            return self._envelope(pending_recovery)
         # Only the latest published version of each project is newly scheduled.
         query = "SELECT p.* FROM publications p WHERE p.state='published' AND NOT EXISTS(SELECT 1 FROM publications newer WHERE newer.project_id=p.project_id AND newer.state='published' AND newer.revision>p.revision)"
         rows = self.connection.execute(query+(" AND p.project_id=?" if project_id else "")+" ORDER BY p.created_at,p.project_id",(project_id,) if project_id else ()).fetchall()
@@ -84,7 +92,7 @@ class Analysis:
         output = root / task["output_relative_path"]
         output.mkdir(parents=True,exist_ok=True)
         safe_path(root,task["output_relative_path"]+"/placeholder",must_exist=False)
-        return {"status":task["state"],"task_id":task["task_id"],"project_id":task["project_id"],
+        base = {"status":task["state"],"task_id":task["task_id"],"project_id":task["project_id"],
             "bundle_id":bundle["bundle_id"],"bundle_revision":bundle["bundle_revision"],"publish_id":bundle["publish_id"],
             "source_catalog_revision":bundle["source_catalog_revision"],"agent":json.loads(task["agent_json"]),
             "project_root":str(root),"manifest_relative_path":bundle["publication"]["manifest_relative_path"],
@@ -92,6 +100,8 @@ class Analysis:
             "blocks":[{"block_id":b["block_id"],"asset_ref":b["asset_ref"],"kind":b["kind"],"locator":b["locator"],"processing":b["processing"]} for b in bundle["blocks"]],
             "gaps":bundle["gaps"],"source_inventory_state":bundle["coverage"]["inventory_state"],
             "instructions":["Read all blocks or explicitly account for failed/pending/excluded/not_applicable.","read() is text only; image evidence requires open_image() with a real byte-consuming viewer.","Submit the original analysis schema JSON plus nonempty report files under output_relative_path.","No API is invoked in agent_assisted mode. No subscription credentials may be extracted."]}
+        from .analysis_recovery import envelope
+        return envelope(self,task,base)
 
     def resume(self,task_id):
         if self.store.pipeline_state("analysis") != "running":
@@ -263,6 +273,8 @@ class Analysis:
                 raise ContractError("analysis task/bundle/publish/project version mismatch")
         if result["agent"] != json.loads(task["agent_json"]):
             raise ContractError("analysis model/provider/prompt version mismatch")
+        from .analysis_recovery import validate_result as validate_recovery_result
+        validate_recovery_result(self,task,result)
         blocks = {b["block_id"]:b for b in bundle["blocks"]}
         processing = unique(result["block_processing"],"block_id","analysis block")
         if processing.keys() != blocks.keys():

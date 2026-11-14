@@ -150,6 +150,13 @@ def parser():
     claim.add_argument('--project')
     claim.add_argument('--model-version', required=True)
     claim.add_argument('--prompt-version', default='general-analyzer-20261110')
+    restore = actions.add_parser('requeue-block', help='将已接受的可恢复排除项放入真实新分析队列；不改旧报告，不假造阅读')
+    restore.add_argument('--source-task', required=True)
+    restore.add_argument('--block', required=True)
+    restore.add_argument('--reason', required=True)
+    restore.add_argument('--request')
+    resume = actions.add_parser('resume', help='显式续已有running分析任务，不重复领取')
+    resume.add_argument('--task', required=True)
     read = actions.add_parser('read')
     read.add_argument('--task', required=True)
     read.add_argument('--block', action='append', required=True)
@@ -270,6 +277,10 @@ def main(argv=None):
             worker = Analysis(store)
             if args.analysis_action == 'next':
                 display(worker.claim(project_id=args.project,model_version=args.model_version,prompt_version=args.prompt_version,mode='agent_assisted'))
+            elif args.analysis_action == 'requeue-block':
+                display(worker.requeue_block(args.source_task,args.block,reason=args.reason,request_id=args.request))
+            elif args.analysis_action == 'resume':
+                display(worker.resume(args.task))
             elif args.analysis_action == 'read':
                 display(worker.read(args.task,args.block,max_chars=args.max_chars))
             elif args.analysis_action == 'delta':

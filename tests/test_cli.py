@@ -120,6 +120,15 @@ class CLITests(unittest.TestCase):
                 self.assertEqual(main(['--root',temp,'reconcile-audio-window','--request','r','--bundle','b']),0)
                 reconcile.assert_called_once_with('r','b')
 
+    def test_explicit_block_restore_and_analysis_resume_cli(self):
+        with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stdout(io.StringIO()):
+            with patch('worldanalysis.analysis.Analysis.requeue_block',return_value={'status':'queued','semantic_read_performed':False}) as restore:
+                self.assertEqual(main(['--root',temp,'analysis','requeue-block','--source-task','t','--block','b','--reason','Review the retained source again','--request','r']),0)
+                restore.assert_called_once_with('t','b',reason='Review the retained source again',request_id='r')
+            with patch('worldanalysis.analysis.Analysis.resume',return_value={'status':'running','task_id':'t'}) as resume:
+                self.assertEqual(main(['--root',temp,'analysis','resume','--task','t']),0)
+                resume.assert_called_once_with('t')
+
     def test_unknown_inventory_not_zero_complete(self):
         with tempfile.TemporaryDirectory() as temp:
             result=inventory(Path(temp))
