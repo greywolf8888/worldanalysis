@@ -401,18 +401,138 @@ class Store:
             return {"status":"blocked","reason":"collection paused","project_id":project_id}
         if not inputs:
             raise ContractError("at least one actual input is required")
+        # The callable is supplied by the local operator; fingerprint once per
+        # input batch, before registering any source/asset on identity errors.
+        callable_name = re.sub(r"[^A-Za-z0-9_.:-]", "-", getattr(extractor,"__name__","extractor"))
+        module = sys.modules.get(getattr(extractor,"__module__",""))
+        implementation = _config_value(extractor)
+        version = getattr(extractor,"provider_version",None) or getattr(module,"PROVIDER_VERSION",None) or "callable-"+digest(implementation)[:40]
+        provider_id = getattr(extractor,"provider_id",None) or getattr(module,"PROVIDER_ID",None) or "local-callable-"+callable_name
+        if config_version:
+            config = check_id(config_version)
+        else:
+            # This is not complete cross-module dependency/model-weight tracking.
+            # Opaque implementations or mutable dependencies need an explicit version.
+            module_source = getattr(module,"__file__",None)
+            if (not getattr(extractor,"__code__",None) or not isinstance(module_source,(str,Path))
+                    or Path(module_source).suffix.lower() != ".py"):
+                raise ContractError("native extractor needs Python source or an explicit config_version")
+            # Snapshot actual defaults only for implicit configuration. Do not use
+            # _config_value here: callable/opaque defaults are not reliable data.
+            default_error = "native extractor defaults need reliable data or an explicit config_version"
+            default_seen = set()
+            def default_value(value, depth=0):
+                kind = type(value)
+                if depth > 32:
+                    raise ContractError(default_error)
+                if kind in (str,int,bool,type(None)):
+                    return [kind.__name__,value]
+                if kind is float:
+                    if value != value or value in (float("inf"),float("-inf")):
+                        raise ContractError(default_error)
+                    return ["float",value.hex()]
+                if kind not in (list,tuple,dict) or id(value) in default_seen:
+                    raise ContractError(default_error)
+                default_seen.add(id(value))  # Reject cycles/shared mutable graphs.
+                if kind is dict:
+                    if any(type(key) is not str for key in value):
+                        raise ContractError(default_error)
+                    return ["dict",[[key,default_value(item,depth+1)] for key,item in value.items()]]
+                return [kind.__name__,[default_value(item,depth+1) for item in value]]
+            defaults = default_value(getattr(extractor,"__defaults__",None))
+            kwdefaults = default_value(getattr(extractor,"__kwdefaults__",None))
+            try:
+                canonical([defaults,kwdefaults])
+            except (TypeError,ValueError) as exc:
+                raise ContractError(default_error) from exc
+            module_path = Path(module_source).absolute()
+            source_limit = 1024 * 1024
+            try:
+                reject_links(module_path)
+                info = module_path.stat()
+                if not stat.S_ISREG(info.st_mode) or info.st_size > source_limit:
+                    raise ContractError("native extractor source must be regular and <=1 MiB; use explicit config_version")
+                with module_path.open("rb") as stream:
+                    before = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(before.st_mode) or before.st_size > source_limit:
+                        raise ContractError("native extractor source bound exceeded; use explicit config_version")
+                    module_bytes = stream.read(source_limit + 1)
+                    after = os.fstat(stream.fileno())
+                reject_links(module_path)
+                if (len(module_bytes) > source_limit or len(module_bytes) != before.st_size
+                        or (before.st_size,before.st_mtime_ns) != (after.st_size,after.st_mtime_ns)):
+                    raise ContractError("native extractor source changed/exceeded bound; use explicit config_version")
+            except OSError as exc:
+                raise ContractError("native extractor source unavailable; use explicit config_version") from exc
+            # Compile, never execute/import, this one trusted source module.
+            # Compare Python code only; globals/weights/other runtime state still
+            # need explicit versions, not a claim of complete dependency tracking.
+            from types import CodeType, FunctionType, MethodType
+            code_error = "native extractor Python code is inconsistent/unverifiable; use explicit config_version"
+            entry_code = getattr(extractor,"__code__",None)
+            if not isinstance(entry_code,CodeType):
+                raise ContractError(code_error)
+            try:
+                compiled = compile(module_bytes,entry_code.co_filename,"exec",dont_inherit=True)
+            except (SyntaxError,ValueError,TypeError,RecursionError) as exc:
+                raise ContractError(code_error) from exc
+            candidates, pending_codes, code_count = {}, [compiled], 0
+            while pending_codes:
+                code = pending_codes.pop()
+                code_count += 1
+                if code_count > 2048:
+                    raise ContractError(code_error)
+                candidates.setdefault(code.co_qualname,set()).add(hashlib.sha256(marshal.dumps(code,0)).digest())
+                for item in code.co_consts:
+                    if isinstance(item,CodeType):
+                        if code_count + len(pending_codes) >= 2048:
+                            raise ContractError(code_error)
+                        pending_codes.append(item)
+            def check_code(code):
+                try:
+                    matched = hashlib.sha256(marshal.dumps(code,0)).digest() in candidates.get(code.co_qualname,())
+                except (TypeError,ValueError) as exc:
+                    raise ContractError(code_error) from exc
+                if not matched:
+                    raise ContractError(code_error)
+            check_code(entry_code)
+            module_symbols = vars(module)
+            if len(module_symbols) > 4096:
+                raise ContractError(code_error)
+            pending_symbols, symbol_count, seen_classes = list(module_symbols.values()), 0, set()
+            module_name = module.__name__
+            while pending_symbols:
+                value = pending_symbols.pop()
+                symbol_count += 1
+                if symbol_count > 4096:
+                    raise ContractError(code_error)
+                if isinstance(value,(classmethod,staticmethod,MethodType)):
+                    value = value.__func__
+                if isinstance(value,FunctionType):
+                    if value.__module__ == module_name:
+                        check_code(value.__code__)
+                elif isinstance(value,type):
+                    members = type.__getattribute__(value,"__dict__")
+                    if members.get("__module__") == module_name and id(value) not in seen_classes:
+                        seen_classes.add(id(value))
+                        bases = type.__getattribute__(value,"__bases__")
+                        if symbol_count + len(pending_symbols) + len(members) + len(bases) > 4096:
+                            raise ContractError(code_error)
+                        pending_symbols.extend(members.values())
+                        pending_symbols.extend(bases)
+                elif isinstance(value,property):
+                    pending_symbols.extend(accessor for accessor in (value.fget,value.fset,value.fdel) if accessor is not None)
+                elif callable(value) and type.__getattribute__(type(value),"__dict__").get("__module__") == module_name:
+                    raise ContractError(code_error)
+            config = "config-"+digest({"policy":"native-config-implementation-v2",
+                "options":_config_value(options),"implementation":implementation,
+                "defaults":defaults,"kwdefaults":kwdefaults,
+                "module_sha256":hashlib.sha256(module_bytes).hexdigest()})[:32]
         entries = []
         prepared = []
         for path in inputs:
             entry = self._register_input(project_id,path)
             asset = entry["asset"]
-            # The callable itself is explicitly supplied by the local operator.
-            callable_name = re.sub(r"[^A-Za-z0-9_.:-]", "-", getattr(extractor,"__name__","extractor"))
-            module = sys.modules.get(getattr(extractor,"__module__",""))
-            implementation = _config_value(extractor)
-            version = getattr(extractor,"provider_version",None) or getattr(module,"PROVIDER_VERSION",None) or "callable-"+digest(implementation)[:40]
-            provider_id = getattr(extractor,"provider_id",None) or getattr(module,"PROVIDER_ID",None) or "local-callable-"+callable_name
-            config = check_id(config_version) if config_version else "config-"+digest(_config_value(options))[:32]
             executor = self.register_provider(provider_id,version,config_version=config)
             job = self.queue_job(project_id,"native_extract",executor,asset["asset_id"]+":"+asset["asset_revision"],config_version=config,estimated_cost_minor=0)
             if job["state"] in {"submission_unknown","submitted","waiting"}:
