@@ -1069,6 +1069,7 @@ def _pdf(r: _Result):
         page_info = {"page_number": page_no, "width_points": float(page.mediabox.width),
                      "height_points": float(page.mediabox.height), "rotation_degrees": int(page.get("/Rotate", 0)),
                      "text_characters": 0, "image_occurrences": 0, "vector_operations": 0,
+                     "vector_path_operations": 0, "clip_operations": 0,
                      "route": "unknown", "native_text_extracted": False}
         spans = []
         try:
@@ -1118,8 +1119,15 @@ def _pdf(r: _Result):
                             r.gap("parse_failed", "Unbalanced PDF graphics-state restore on page " + str(page_no))
                     elif operator == b"cm":
                         ctm = _pdf_matrix(ctm, tuple(float(x) for x in operands))
-                    if operator in (b"m", b"l", b"c", b"v", b"y", b"re", b"S", b"s", b"f", b"F", b"f*", b"B", b"B*", b"b", b"b*", b"sh"):
+                    # Constructing/clipping a path changes state without painting.
+                    # Keep those facts, but reserve vector_operations for paint;
+                    # even a paint instruction does not establish visible pixels.
+                    if operator in (b"S", b"s", b"f", b"F", b"f*", b"B", b"B*", b"b", b"b*", b"sh"):
                         page_info["vector_operations"] += 1
+                    elif operator in (b"m", b"l", b"c", b"v", b"y", b"h", b"re"):
+                        page_info["vector_path_operations"] += 1
+                    elif operator in (b"W", b"W*"):
+                        page_info["clip_operations"] += 1
                     names = None
                     source = None
                     if operator == b"Do":
@@ -1206,6 +1214,14 @@ def _pdf(r: _Result):
                     r.deferred("hidden_object", loc, "Textless vector-only PDF page needs a renderer/OCR; pypdf cannot rasterize it", gap="missing_visual")
             elif native_failed:
                 page_info["route"] = "native_text_failed"
+            elif page_info["vector_path_operations"] or page_info["clip_operations"]:
+                page_info["route"] = "path_clip_only_native"
+                key = r.structured({"page_number": page_no,
+                                    "vector_path_operations": page_info["vector_path_operations"],
+                                    "clip_operations": page_info["clip_operations"],
+                                    "native_paint_discovered": False}, "inventory")
+                r.block("metadata", loc, files=[key],
+                        text="Native path/clipping operations discovered without readable text/image/paint; visual blankness not inferred")
             else:
                 page_info["route"] = "blank_native"
                 key = r.structured({"page_number": page_no, "blank_by_native_enumeration": True}, "inventory")

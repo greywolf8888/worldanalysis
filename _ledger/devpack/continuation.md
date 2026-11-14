@@ -6,7 +6,7 @@
 - 原目标 `goal-432da048-e464-4fb3-89ff-2927dfba6d37` 已按用户要求修订到revision 10。宿主实际phase **paused/disarmed**，`update_goal resume`返回模型不得恢复、需用户在目标面板恢复；不建替代goal。此次用户直接授权的工作正常继续，但不得宣称自动循环已恢复。
 - 当前事实与本批并行分工见 [current-execution.json](<current-execution.json>)。source-review已只读完成14原PDF/126页：125页有文本，单独框架p1图像页，没有同一原PDF的数字/仅图片分页组合；洞察力3/6/9是图文共页，不伪装扫描样本。
 - 不依赖新样本的真实恢复代码缺口已补齐，见[本批记录](<resume-20261114-progress.json>)：`Analysis.requeue_block`＋CLI真实同agent/原publication pending task，同请求幂等。实际PPT task7d1e...恢复到analysis-recovery-de187...，23freshpending/0回执/19gaps，pub/job仍3,2，未新读/新采或改旧accepted。该恢复任务尚未语义完成，不冒充已验收报告。71项基线相关测试pass304.287s；独立审查发现history-only gap可漏，已补提交时逐source gap canonical保留，修后7tests pass22.990s＋独立同case拒绝pass，全部G-temp。普通任务no-op，旧schema不改。
-- 后续继续实际本地PDF分支：real-pdf-review正处理洞察力9页source（188474B/SHA199ce5...747a），目前只核实原件、尚未开真实Store，遇纯RO解释器启动超时延长等待一次，不重放业务写。Root暂停真实Store操作直到该worker回报。旧“下一轮立即全目标blocked”指令已被当前直接用户授权与修订目标取代，不机械重放，不重复全面盘点/全回归。
+- 最新实际PDF分支见[裁剪路由记录](<pdf-clipping-20261114-progress.json>)：洞察力source188474B/SHA199ce5...747a正常发布v1，taska9f...accepted partial，9text3236字+3tinyJPEG实际读，12read2pending/7gaps；Root get_result通过，native2.4826s/CPU1.46875/RSS60334080B。p9两条re/W*/n真实仅clip，零paint，旧documents.py误chart；3小hunk分paint/path/clip＋path_clip_only_native，不称视觉空白。7窄tests1.261s＋独立reviewpass，冻结docSHA916833...958c，Root正式v2 bundle2a026.../pub1300...，13blocks6gaps/3images，OC Watermark默认ON仍保留未读。4.1837s/CPU1.234375，未OCR/render，原件/旧accepted不动，同config重放pub/job2,2不增。目前real-pdf-review独占真实Store写窗口对v2同agent真正阅读接受；Root不要并发Store，别把新解析已发布称分析已通过。旧“下一轮立即全目标blocked”已被当前用户授权取代，不机械重放，不重复全面盘点/全回归。
 
 ## 历史事实（不能替代上面实时控制状态）
 
