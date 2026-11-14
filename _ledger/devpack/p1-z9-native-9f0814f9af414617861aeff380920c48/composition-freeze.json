@@ -1,0 +1,135 @@
+{
+  "record_kind": "real_native_plus_immutable_composition",
+  "created_at": "2026-11-14T09:54:25.438942+00:00",
+  "project_id": "real-pdf-163545",
+  "old": {
+    "project_id": "real-pdf-163545",
+    "bundle_id": "bundle-cf15d7e6d2d9414fafc06fbbb96832dc",
+    "publish_id": "publish-41c8f84224dd47d4b93d8caada7a7e3e",
+    "bundle_revision": "v0007",
+    "assets": 3,
+    "blocks": 29,
+    "gaps": 23,
+    "artifacts": 45,
+    "coverage_status": "partial"
+  },
+  "single_native": {
+    "project_id": "real-pdf-163545",
+    "bundle_id": "bundle-3ff6db8e68ef46958c17943284e6c568",
+    "publish_id": "publish-fba29b8a1d0f46cf9a29bdeba57042d9",
+    "bundle_revision": "v0008",
+    "assets": 1,
+    "blocks": 13,
+    "gaps": 8,
+    "artifacts": 19,
+    "coverage_status": "partial"
+  },
+  "latest": {
+    "project_id": "real-pdf-163545",
+    "bundle_id": "bundle-ccb029a7e38b45458b1a427ca848ee00",
+    "publish_id": "publish-0a78fc1b14c2434097f8566f2c30fbd9",
+    "bundle_revision": "v0009",
+    "assets": 4,
+    "blocks": 42,
+    "gaps": 31,
+    "artifacts": 67,
+    "coverage_status": "partial"
+  },
+  "explicit_native_config_version": "native-only-79bcd6efca6a0552467075bb3874221f5c34ade160c70a05",
+  "native_job_ids": [
+    "job-26dba02acc684e7fa7fe0d8ad32b9a5a"
+  ],
+  "composition_created_native_jobs": 0,
+  "old_asset_ids": [
+    "asset-2117b8c71c564056b1e69bfe65765a4d",
+    "asset-701c96ef29bc4b69ad8ad2e3589fe878",
+    "asset-c689cc2d5e0549b394ec939704ce9ad2"
+  ],
+  "new_asset_ids": [
+    "asset-e78d0c581f0444e687f7f885b3572b22"
+  ],
+  "new_block_ids": [
+    "block-30e949d815c44cb787f7a9f9b067d803",
+    "block-94377ce1b35748dcb31cf15f500987cc",
+    "block-4458cc8bd5c044c8be3f06d45eb92ce5",
+    "block-bc9ad80da89e4970b81971022b0bb53a",
+    "block-a0de40ad7fd44735af263a067486649a",
+    "block-c54faa6eda314183a7700920406491f5",
+    "block-a7a816c64ea14d028a39f178607dae06",
+    "block-263a091160ad4942a45e1aa1246d3269",
+    "block-699442483b5f40c99301ae8e13f5aeb1",
+    "block-34869ada5a2947cf83296b528a8afcdc",
+    "block-b5815e0822a8416ebc18f04df9b5ee8b",
+    "block-9c95625fd71c4e58a309d95ae92c79a5",
+    "block-abb5ee5230c1485d8c4065cad1fb935c"
+  ],
+  "new_gap_ids": [
+    "gap-f57cf0f8d9c5483a8aa1ad16410c68dd",
+    "gap-5bbd3a9461f34e50bef1ce17d0f7e58d",
+    "gap-d3d240bb06744132a8d16267e64ae032",
+    "gap-f3432b5dfd8e4db09916468079b17711",
+    "gap-9fedf09f22854704bc31d28b5094d35d",
+    "gap-99b1e1e7b887483ca3b456c1fa588312",
+    "gap-b6ee5032c7c64b078678254ac7a0fb4b",
+    "gap-2c83a300951946d99fe22b81c4a9b6aa"
+  ],
+  "old_published_count": 7,
+  "protected_file_count": 179,
+  "protected_file_fingerprint": "a2090c2868581e161d26bb8c594a2e362c0f99a96fa9c02b33fa3dfa14ad7ad4",
+  "old_published_and_accepted_unchanged": true,
+  "old_external_sources_unchanged": true,
+  "old_job_rows_unchanged": true,
+  "old_blocks_gaps_refs_preserved_except_current_snapshot_pins": true,
+  "project_identity_unchanged": true,
+  "counts_before": {
+    "projects": 7,
+    "sources": 9,
+    "assets": 9,
+    "asset_revisions": 9,
+    "jobs": 17,
+    "publications": 19,
+    "plans": 21,
+    "analysis_tasks": 13,
+    "read_receipts": 133,
+    "analyses": 13
+  },
+  "counts_after": {
+    "projects": 7,
+    "sources": 10,
+    "assets": 10,
+    "asset_revisions": 10,
+    "jobs": 18,
+    "publications": 21,
+    "plans": 23,
+    "analysis_tasks": 13,
+    "read_receipts": 133,
+    "analyses": 13
+  },
+  "baseline": {
+    "relative_path": "_ledger/devpack/p1-z9-native-9f0814f9af414617861aeff380920c48/baseline.json",
+    "sha256": "229c0fa5acba40a294d070cc03e7e59317a69a3b8d7133d455eea197374f49c9"
+  },
+  "native_resource": {
+    "relative_path": "_ledger/devpack/p1-z9-native-9f0814f9af414617861aeff380920c48/native-resource.json",
+    "sha256": "b67cc634c06a873b4a566deac0ea4796bf9f0e89a5ec86a7ab45438e8b103ce2"
+  },
+  "source_sha256_before_after": "bd8ed1d451a16d658df8288272f826b2cd82f278a4a6f75a7c27401790e22c9b",
+  "source_bytes": 135757,
+  "pages": 7,
+  "all_temp_cache_root": "_ledger/devpack/p1-z9-native-9f0814f9af414617861aeff380920c48",
+  "agent_claimed": false,
+  "new_agent_reads": 0,
+  "product_code_unchanged": true,
+  "code_sha256": {
+    "store.py": "31eed5073186a20c572e4115b715eec338464a4ff023b2260e8eb732baab6298",
+    "__main__.py": "ca3ce4e27aa8dcfd580862429e72af4bb790c35daa0ffd592e9bb8d8cd114f0c",
+    "documents.py": "916833085e58fd1e694a91cb7090f4d8062120dee7a9e6a081324d03a1aa958c",
+    "ocr.py": "eca931cd3d3a77aac7aac8b010a3ee338f4a6712e92538f1473cd3c7e03e5748",
+    "pdf_render.py": "d962e5c4eb1753c79da53ddc97e51751efa4ef1928b277846af9a228a8f44684",
+    "policy.py": "2998f0f52c688ccf430b3b2cdb55582fecba019275cdca7d90d44590e8893b47",
+    "contracts.py": "21fa88c4554a8276e08b0386e510bb950e1f6ad0a0b6a90c6756246139ecba01",
+    "bundle_merge.py": "639c2c3ada0be0815858541c9ac67f0f0852253a3a9c5d7ddeff2f12ac0db97c"
+  },
+  "db_sha256_after_close": "2cf84fc43c7b1648206147e512a1fb5780a521399468b24dd137ee9b4bc2ebf7",
+  "wal_exists_after_close": false
+}

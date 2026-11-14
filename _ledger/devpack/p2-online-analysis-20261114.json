@@ -1,0 +1,23 @@
+{
+  "schema":"worldanalysis.execution-checkpoint.v1",
+  "project_id":"site-163378-ai-video",
+  "source_chain_receipt":"_ledger/devpack/p2-browser-local-20261114.json",
+  "extraction_receipt":"_ledger/devpack/p2-first-real-20s-20261114.json",
+  "reader":"Current authorized online subagent, genuine modelgpt-6.1-sol, general-analyzer-20261114; existing text/pixels only, no new local renderer/ASR/OCR/ingest/resume/download/external verification",
+  "task_id":"analysis-task-2a84fd7d82f94d90afde8c60030bfa88",
+  "based_bundle":"bundle-89fa9f146601442f9dc6e1c684da35bb",
+  "based_publish":"publish-d39309c081ef482f96a230209f3b73a3",
+  "execution_status":"partial",
+  "publication_state":"committed",
+  "root_get_result_verification":"passed",
+  "coverage":{"discovered":24,"read":22,"pending":2,"excluded":0,"reused":0,"text_blocks":16,"actual_text_characters":959,"asr_characters":109,"ocr_characters":850,"unique_png_viewed":6,"text_receipts":16,"image_scope_receipts":12,"image_receipt_scope":"Same6PNG link both frame andOCR blocks; not12differentpictures"},
+  "gaps":{"all_open":7,"source_canonical_gaps_unchanged":6,"new_analysis_only":1,"new_gap_purpose":"ASR fidelity and timestamp boundary uncertainty; do not silently correct raw 第一想 using visible 第一讲 or pretend to have listened"},
+  "unheard_blocks":["block-6dc9cd009c2c44f1a08c7ed0891aab43","block-3535d15e39304a96813e72486b40a9da"],
+  "source_media_execution":"job-b6bff66b1b304c478692c8d5e3e165d4 stillpaused after0-20000ms; no implicit resume",
+  "result_sha256":"820aa3becca2d3bc2f912cae48f9d609d40de2df98d842f9ad91fd3c4ef0bbf3",
+  "report_sha256":"3b31ff931fee9f12612eeb201b30adb2ad33c56f1bef81e156b3a0ffb7c09cbc",
+  "report":"整理结果/site-163378-ai-video/分析/analysis-task-2a84fd7d82f94d90afde8c60030bfa88/accepted/report-00.md",
+  "limits":"Only sparse6frames and first20s extracted hypotheses of115.88s video; original audio unheard, remaining95.88s not processed; no whole course, original-native courseware, human fidelity or external fact verification claim. MediaRegistration remains stat-only despite separately verified downloaded fullSHA. Tokens/actual cost unavailable, not invented0.",
+  "next_online_work":"real-pdf-review owns sole Analysis writer window for existing real-pdf-163545 v11/48blocks/37sourcegaps plus2retargeted prior analysis-only gaps; reuse existing6PDF PNG and text, no new local rendering.",
+  "goal":"Original goal13active/armed, wholeP0-P4 and21scenarios incomplete"
+}

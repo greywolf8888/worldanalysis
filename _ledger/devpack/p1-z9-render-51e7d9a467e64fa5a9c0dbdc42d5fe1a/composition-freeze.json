@@ -1,0 +1,172 @@
+{
+  "record_kind": "real_vector_render_plus_immutable_composition",
+  "created_at": "2026-11-14T10:23:27.464623+00:00",
+  "project_id": "real-pdf-163545",
+  "old": {
+    "project_id": "real-pdf-163545",
+    "bundle_id": "bundle-cf15d7e6d2d9414fafc06fbbb96832dc",
+    "publish_id": "publish-41c8f84224dd47d4b93d8caada7a7e3e",
+    "bundle_revision": "v0007",
+    "assets": 3,
+    "blocks": 29,
+    "gaps": 23,
+    "artifacts": 45,
+    "coverage_status": "partial"
+  },
+  "single_native": {
+    "project_id": "real-pdf-163545",
+    "bundle_id": "bundle-50f7914601414bc4ab4b9960b1e5a3ba",
+    "publish_id": "publish-9db3f7cd585e4e4db4482ac38d756b2f",
+    "bundle_revision": "v0010",
+    "assets": 1,
+    "blocks": 19,
+    "gaps": 14,
+    "artifacts": 25,
+    "coverage_status": "partial"
+  },
+  "latest": {
+    "project_id": "real-pdf-163545",
+    "bundle_id": "bundle-0345e30bd13e428f9f3e1556485ae734",
+    "publish_id": "publish-93d8e5f0650f4b5abfac5504682352a0",
+    "bundle_revision": "v0011",
+    "assets": 4,
+    "blocks": 48,
+    "gaps": 37,
+    "artifacts": 73,
+    "coverage_status": "partial"
+  },
+  "explicit_native_config_version": "render-only-130e8b5b3832080c968f6245402eb85dcdc43da2f8f0d23d",
+  "native_job_ids": [
+    "job-a2a537f404fe4a7d8af538c11a5386b7"
+  ],
+  "composition_created_native_jobs": 0,
+  "old_asset_ids": [
+    "asset-2117b8c71c564056b1e69bfe65765a4d",
+    "asset-701c96ef29bc4b69ad8ad2e3589fe878",
+    "asset-c689cc2d5e0549b394ec939704ce9ad2"
+  ],
+  "new_asset_ids": [],
+  "enhanced_asset_ref": {
+    "asset_id": "asset-e78d0c581f0444e687f7f885b3572b22",
+    "asset_revision": "asset-bd8ed1d451a16d658df8288272f826b2cd82f278a4a6f75a7c27401790e22c9b"
+  },
+  "previous_native_only_bundle_id": "bundle-3ff6db8e68ef46958c17943284e6c568",
+  "previous_latest_bundle_id": "bundle-ccb029a7e38b45458b1a427ca848ee00",
+  "old_native_only_blocks_excluded_from_latest": true,
+  "new_block_ids": [
+    "block-b103882e598041639718dbb7d9a9f775",
+    "block-4e84ed79b405486782fc761449de4ec8",
+    "block-e30cb5e0b32049cc8b87055641d49489",
+    "block-11cc2aa50db34422bbe3444b9f0d5e81",
+    "block-121bea48b00f4e419eae10fffc16582a",
+    "block-070347d5cb05410cb6cbbc8aaff2a8e9",
+    "block-592b5d74e09249838e40cf61aae117b1",
+    "block-1431c07b2f864cd59888241fc7dbd912",
+    "block-69b777b3046846e5a592e90e2e13a076",
+    "block-7ecc8c32c78b465ca99eb9e0a171f524",
+    "block-f55349d284554eff87f59aafed921e39",
+    "block-370acfd5418f40048c934be3579b28ec",
+    "block-7af5d6afc5fb4525a99c2c64305c015b",
+    "block-8f7c067d2c3946358dfc1e392b27beef",
+    "block-8a21b6ea0da148eb9bc484417b3d1fde",
+    "block-cb9e41fff337416cba07a7137650f2a3",
+    "block-bca0b62949474395871755adadbbe607",
+    "block-1f2022dbf95e410db4f849e78f1f7de2",
+    "block-1f0d71bf8aab4ee79e163f1bfeea24a4"
+  ],
+  "new_gap_ids": [
+    "gap-ff33c1eb6e4b4a79af9c0bf6e1ed377e",
+    "gap-610d6d62ac19470cb03158621c782737",
+    "gap-4a02e41a46eb451988095166b56a1ab6",
+    "gap-ce1546fcee644680a2ee3adb1f6e24d4",
+    "gap-1c07d64b70154462a4f05648a48c9f07",
+    "gap-13a2c1382e2d42bf97e900983511c353",
+    "gap-e7f40776021b4e06b3cc874cdb6b5b38",
+    "gap-3e0f3c3f6b6d407f87bc8f1635f479f1",
+    "gap-4895232297ac453c9ab257257c0fae6d",
+    "gap-668e2024d6ba43dab889ed9de8b3b5bf",
+    "gap-7728ed0fcc5c4ce0b1c82b6ceabfcd7e",
+    "gap-c8f4579c1c9c4c7190831da8d9e1e43b",
+    "gap-ff567e559c214b01af366871277079aa",
+    "gap-7dcb9045d3424108bc08d7506010d90e"
+  ],
+  "old_published_count": 9,
+  "protected_file_count": 203,
+  "protected_file_fingerprint": "4ad4c483ed42258a4a8719e1862a166d268b568820fee2bd353c4c2f8a433247",
+  "old_published_and_accepted_unchanged": true,
+  "old_external_sources_unchanged": true,
+  "old_job_rows_unchanged": true,
+  "old_blocks_gaps_refs_preserved_except_current_snapshot_pins": true,
+  "project_identity_unchanged": true,
+  "counts_before": {
+    "projects": 7,
+    "sources": 10,
+    "assets": 10,
+    "asset_revisions": 10,
+    "jobs": 18,
+    "publications": 21,
+    "plans": 23,
+    "analysis_tasks": 13,
+    "read_receipts": 133,
+    "analyses": 13
+  },
+  "counts_after": {
+    "projects": 7,
+    "sources": 10,
+    "assets": 10,
+    "asset_revisions": 10,
+    "jobs": 19,
+    "publications": 23,
+    "plans": 25,
+    "analysis_tasks": 13,
+    "read_receipts": 133,
+    "analyses": 13
+  },
+  "baseline": {
+    "relative_path": "_ledger/devpack/p1-z9-render-51e7d9a467e64fa5a9c0dbdc42d5fe1a/baseline.json",
+    "sha256": "4b5c0f123253849378846e756f22fa72bf357eb7cd518e148a6e8470a28cc0b9"
+  },
+  "native_resource": {
+    "relative_path": "_ledger/devpack/p1-z9-render-51e7d9a467e64fa5a9c0dbdc42d5fe1a/render-resource.json",
+    "sha256": "dfd1812dcbe6560adc6cd0075e8e01326f915a1774d2f1dc07076fb4ffae0bd1"
+  },
+  "source_sha256_before_after": "bd8ed1d451a16d658df8288272f826b2cd82f278a4a6f75a7c27401790e22c9b",
+  "source_bytes": 135757,
+  "pages": 7,
+  "all_temp_cache_root": "_ledger/devpack/p1-z9-render-51e7d9a467e64fa5a9c0dbdc42d5fe1a",
+  "render_attempt_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "render_success_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "render_failed_pages": [],
+  "render_png_total_bytes": 883377,
+  "ocr_executed": false,
+  "p7_rendered": false,
+  "agent_claimed": false,
+  "new_agent_reads": 0,
+  "product_code_unchanged": true,
+  "code_sha256": {
+    "store.py": "31eed5073186a20c572e4115b715eec338464a4ff023b2260e8eb732baab6298",
+    "__main__.py": "ca3ce4e27aa8dcfd580862429e72af4bb790c35daa0ffd592e9bb8d8cd114f0c",
+    "documents.py": "916833085e58fd1e694a91cb7090f4d8062120dee7a9e6a081324d03a1aa958c",
+    "ocr.py": "eca931cd3d3a77aac7aac8b010a3ee338f4a6712e92538f1473cd3c7e03e5748",
+    "pdf_render.py": "d962e5c4eb1753c79da53ddc97e51751efa4ef1928b277846af9a228a8f44684",
+    "policy.py": "2998f0f52c688ccf430b3b2cdb55582fecba019275cdca7d90d44590e8893b47",
+    "contracts.py": "21fa88c4554a8276e08b0386e510bb950e1f6ad0a0b6a90c6756246139ecba01",
+    "bundle_merge.py": "639c2c3ada0be0815858541c9ac67f0f0852253a3a9c5d7ddeff2f12ac0db97c"
+  },
+  "db_sha256_after_close": "57fc93f79d88e188cbdb49a0ffb27cb425ecde0452f94f028a07118b37087486",
+  "wal_exists_after_close": false
+}

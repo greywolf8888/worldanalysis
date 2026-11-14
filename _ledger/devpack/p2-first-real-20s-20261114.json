@@ -1,0 +1,2858 @@
+{
+  "schema": "worldanalysis.first-real-media-calibration.v1",
+  "project_id": "site-163378-ai-video",
+  "config_version": "site-163378-first-real-20s-v1",
+  "options": {
+    "window_seconds": 20,
+    "overlap_seconds": 2,
+    "max_windows": 1,
+    "asr_enabled": true,
+    "ocr_enabled": true,
+    "synthetic": false,
+    "device": "cpu",
+    "cpu_threads": 2,
+    "language": "zh",
+    "model_dir": "G:\\Worldanalysis\\.runtime\\site-packages\\_worldanalysis_models\\faster-whisper-tiny",
+    "read_chunk_bytes": 65536,
+    "probe_max_received_bytes": 1048576,
+    "input_byte_cap": 67108864,
+    "pending_audio_byte_cap": 4194304,
+    "pending_image_byte_cap": 16777216,
+    "cache_byte_cap": 33554432,
+    "ram_byte_cap": 2147483648,
+    "final_evidence_byte_cap": 134217728,
+    "frame_max_pixels": 2073600,
+    "visual_probe_seconds": 1,
+    "visual_period_seconds": 5,
+    "max_records": 256,
+    "max_result_bytes": 8388608,
+    "wall_timeout_seconds": 300
+  },
+  "source_download_receipt": "_ledger\\devpack\\p2-browser-local-20261114.json",
+  "source_download_receipt_sha256": "cec46852b684b67bd85ff92f0fb20306924224c0a1cfa2c451b0571ec909b3ed",
+  "authorization": "lead explicitly granted exclusive Store writer for first20s and 0-5000ms WAV only",
+  "no_network": true,
+  "no_install_or_download": true,
+  "no_browser_or_credentials": true,
+  "no_full_source_hash_in_this_run": true,
+  "no_whole_source_copy": true,
+  "no_resume_in_this_run": true,
+  "no_semantic_analysis_or_listening_claim": true,
+  "started_epoch_seconds": 1794666889.787336,
+  "steps": [
+    {
+      "phase": "source_receipt_verified_before_store",
+      "epoch_seconds": 1794666894.2055383
+    },
+    {
+      "phase": "exclusive_store_open",
+      "epoch_seconds": 1794666894.2700405
+    },
+    {
+      "phase": "existing_ingest_media_first20s_once",
+      "epoch_seconds": 1794666907.087472
+    },
+    {
+      "phase": "existing_publish_audio_window_0_5000_once",
+      "epoch_seconds": 1794666932.217008
+    },
+    {
+      "phase": "verification_complete_no_resume",
+      "epoch_seconds": 1794666937.8134823
+    }
+  ],
+  "source_relative": "wangzjk.com/163378_AI视频创作/059-20261105-AI视频创作从入门到实操课程，从认知避坑、画布工具，到写剧本、做角色卡、场景堪景，从零搭建完整创作思路【更多资源www.abab9.cn】/01.第一讲：创作中AI与我们的关系 (1).mp4",
+  "source_download_sha256_external_receipt_only": "a998bc9e92af1fd44631fb5315738735a2a37955a465943771d10855c4fd6967",
+  "source_bytes": 4110632,
+  "prior_source_executions": [],
+  "project_root": "整理结果\\site-163378-ai-video",
+  "asset": {
+    "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+    "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+    "media_type": "video/mov",
+    "size_bytes": 4110632,
+    "source_binding": {
+      "kind": "local",
+      "local_input_ref": "source-bdfcdc09c08b426397567d7ba0cf843b"
+    },
+    "source_ref": "source-bdfcdc09c08b426397567d7ba0cf843b"
+  },
+  "native_bundle": {
+    "bundle_id": "bundle-9dc0ae66fae942e1a162fb75ada2e6d4",
+    "publish_id": "publish-63758c0d34b84a7b8eec113ca5e9b6b1",
+    "bundle_revision": "v0001",
+    "coverage": {
+      "claimed_status": "partial",
+      "discovered_counts": {
+        "assets": 1,
+        "blocks": 23,
+        "visual_occurrences": 6
+      },
+      "inventory_state": "partial",
+      "per_asset": [
+        {
+          "asset_ref": {
+            "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+            "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+          },
+          "enumeration_state": "partial",
+          "gap_ids": [
+            "gap-320dca7a8f964122a383d361c8a8642f",
+            "gap-81f11e3f9766496b90b0804d67f578bd",
+            "gap-b1806c1eec604c8aa1fc31aeb4492796",
+            "gap-63d04a414b3640be9e5abdca062dc1a4",
+            "gap-63a36104ff294ca2aa7c67c34a658a43"
+          ],
+          "metrics": [
+            {
+              "excluded": 0,
+              "expected": 115867,
+              "method": "full_audio_windows",
+              "observed": 20000,
+              "processed": 20000,
+              "ranges": [
+                {
+                  "end_ms": 20000,
+                  "kind": "time",
+                  "precision": "exact",
+                  "start_ms": 0
+                }
+              ],
+              "unit": "millisecond"
+            },
+            {
+              "excluded": 0,
+              "expected": null,
+              "method": "structured_parse",
+              "observed": 23,
+              "processed": 23,
+              "ranges": [],
+              "unit": "block"
+            },
+            {
+              "excluded": 0,
+              "expected": null,
+              "method": "structured_parse",
+              "observed": 6,
+              "processed": 6,
+              "ranges": [],
+              "unit": "visual_occurrence"
+            }
+          ],
+          "processing_status": "partial"
+        }
+      ],
+      "scope": "listed_assets"
+    }
+  },
+  "native_gaps": [
+    {
+      "gap_id": "gap-320dca7a8f964122a383d361c8a8642f",
+      "kind": "semantic_gap",
+      "reason": "Lossy periodic + sampled scene/local-pixel changes; no guarantee of all visual operations, brief text, speech pointers or semantics",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": []
+    },
+    {
+      "gap_id": "gap-81f11e3f9766496b90b0804d67f578bd",
+      "kind": "temporal_gap",
+      "reason": "PauseMedia: CHECKPOINT_PAUSE: configured new-window limit",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": []
+    },
+    {
+      "gap_id": "gap-b1806c1eec604c8aa1fc31aeb4492796",
+      "kind": "semantic_gap",
+      "reason": "Original media remains a scoped local source; registration uses stat metadata, not a full content hash or immutable whole-media copy. Published derived files are independently hashed.",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": []
+    },
+    {
+      "gap_id": "gap-63d04a414b3640be9e5abdca062dc1a4",
+      "kind": "semantic_gap",
+      "reason": "Images preserved; image meaning has not been read by the analysis agent.",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": [
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-290cd52119b944ebb6cd22f686c3b33b",
+          "locator": {
+            "end_ms": 0,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-965a74c7e31943d3a5910446cc6f1ee4",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 0
+          },
+          "project_id": "site-163378-ai-video"
+        },
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-c1e23fe1781d4252afede6fa1badcc36",
+          "locator": {
+            "end_ms": 1000,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-afe305e0a7a4400795086b84a9c92f3d",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 1000
+          },
+          "project_id": "site-163378-ai-video"
+        },
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-f8e32765fe6d4c80a9766de0b7a8f33a",
+          "locator": {
+            "end_ms": 4000,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-cadf600fbffa4b61822f2c99d77a2e7e",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 4000
+          },
+          "project_id": "site-163378-ai-video"
+        },
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-bf78aa1a380c46479b4f092611b7cb63",
+          "locator": {
+            "end_ms": 5000,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-7690e9febcaa44bda73336985931aeb3",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 5000
+          },
+          "project_id": "site-163378-ai-video"
+        },
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-d22bb78199334a93bb8f2e871d2336a5",
+          "locator": {
+            "end_ms": 10000,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-e3541c421acc4644b41e04714af14b30",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 10000
+          },
+          "project_id": "site-163378-ai-video"
+        },
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-f2c54ab383904157adea2223284ee5af",
+          "locator": {
+            "end_ms": 15000,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-e859524d711143a4af1c43795b0e30b9",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 15000
+          },
+          "project_id": "site-163378-ai-video"
+        }
+      ]
+    },
+    {
+      "gap_id": "gap-63a36104ff294ca2aa7c67c34a658a43",
+      "kind": "unknown_inventory",
+      "reason": "Extraction inventory is not proven complete.",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": []
+    }
+  ],
+  "media_execution": {
+    "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+    "project_id": "site-163378-ai-video",
+    "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+    "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+    "worker_relative_path": "媒体工作/job-b6bff66b1b304c478692c8d5e3e165d4",
+    "state": "paused",
+    "received_bytes": 956013,
+    "reserved_bytes": 0,
+    "bundle_id": "bundle-9dc0ae66fae942e1a162fb75ada2e6d4",
+    "reason": "Actual result/accounting reconciled; not a semantic completion claim",
+    "updated_at": "2026-11-14T14:35:32.134613Z",
+    "job_state": "verified_complete"
+  },
+  "worker_dir": "整理结果\\site-163378-ai-video\\媒体工作\\job-b6bff66b1b304c478692c8d5e3e165d4",
+  "native_artifacts": [
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-6d1dfbb01d1145e285c059b5ff8bcd02",
+      "artifact_revision": "sha256-337631bd0bc80ce017426e24227ed33155dac1fcdaa1de698f96c6ff99153b35",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 732,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "inventory",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "原始材料/asset-aab2747e98814a74b5bd2e08f2caa6eb/asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a.source.json",
+      "sha256": "337631bd0bc80ce017426e24227ed33155dac1fcdaa1de698f96c6ff99153b35"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-ec9b375c5c834da7a482e3df9d72743d",
+      "artifact_revision": "sha256-d63a9f6af1d729f37f2ac77112dd1a811c2fc208297249c50250e84b58c2c757",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 227,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "inventory",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-0.json",
+      "sha256": "d63a9f6af1d729f37f2ac77112dd1a811c2fc208297249c50250e84b58c2c757"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+      "artifact_revision": "sha256-009153a2023ccfed1d9f52d5cbe35b66337652e715ea7e184df56104d20acafd",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 4774,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "transcript",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-1.json",
+      "sha256": "009153a2023ccfed1d9f52d5cbe35b66337652e715ea7e184df56104d20acafd"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-965a74c7e31943d3a5910446cc6f1ee4",
+      "artifact_revision": "sha256-c237f89575b6807e964d04306087ad8bb298aa9e68d26f2ef51629be3713411a",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 1114958,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-2.png",
+      "sha256": "c237f89575b6807e964d04306087ad8bb298aa9e68d26f2ef51629be3713411a"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-eee46d688f104838b3e0a608108360ed",
+      "artifact_revision": "sha256-d40c49d449f7912689bd78a00dbc3872f0d70c55efb99f805a9b8bcc5ead6b63",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 3695,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "structured_data",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-3.json",
+      "sha256": "d40c49d449f7912689bd78a00dbc3872f0d70c55efb99f805a9b8bcc5ead6b63"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-afe305e0a7a4400795086b84a9c92f3d",
+      "artifact_revision": "sha256-c80d2deabc62ba889757173c230b032e671132906816b0f698db1a7608ea66e6",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 335337,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-4.png",
+      "sha256": "c80d2deabc62ba889757173c230b032e671132906816b0f698db1a7608ea66e6"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-8e5d925c287b47d48e8a1a70593f3684",
+      "artifact_revision": "sha256-857b7e97fd2f7d4bdab135e91123ce541e4448aaa7bec01750401035dbfc297b",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 8785,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "structured_data",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-5.json",
+      "sha256": "857b7e97fd2f7d4bdab135e91123ce541e4448aaa7bec01750401035dbfc297b"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-cadf600fbffa4b61822f2c99d77a2e7e",
+      "artifact_revision": "sha256-08351b4496b0d5c6134d166a38861ef0f8d0eba7b17fc1fc5ed27cf46173ac4e",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 325323,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-6.png",
+      "sha256": "08351b4496b0d5c6134d166a38861ef0f8d0eba7b17fc1fc5ed27cf46173ac4e"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-1d0d0d6ec1ce46c78ff31f11d20c4d21",
+      "artifact_revision": "sha256-958366c8c53a81e23e706387432e94b629e9ea50d9c16d344449e1befcf45150",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 7107,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "structured_data",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-7.json",
+      "sha256": "958366c8c53a81e23e706387432e94b629e9ea50d9c16d344449e1befcf45150"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-7690e9febcaa44bda73336985931aeb3",
+      "artifact_revision": "sha256-8ebdb20ac8846b7908b5d182a22eb84306d153d2e246fc96f80d9c6a21f4dcd9",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 379894,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-8.png",
+      "sha256": "8ebdb20ac8846b7908b5d182a22eb84306d153d2e246fc96f80d9c6a21f4dcd9"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-8b1121d28dce410187035023a48fbcc8",
+      "artifact_revision": "sha256-617baa90856f5c780852e6765447a7d3d788549012a7d765526dc7fc88b9ba8a",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 9127,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "structured_data",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-9.json",
+      "sha256": "617baa90856f5c780852e6765447a7d3d788549012a7d765526dc7fc88b9ba8a"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-e3541c421acc4644b41e04714af14b30",
+      "artifact_revision": "sha256-f2789e7fab3e76bfec4c000d9b8e04e0fd37cf1290572265ee50f16dd77e4e68",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 288165,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-10.png",
+      "sha256": "f2789e7fab3e76bfec4c000d9b8e04e0fd37cf1290572265ee50f16dd77e4e68"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-40b9fbdec98645e6afe810112f1089a4",
+      "artifact_revision": "sha256-48162f502254973314d08d273038861fe386e3245eb4ffcd7e02824a0a867ec8",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 9397,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "structured_data",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-11.json",
+      "sha256": "48162f502254973314d08d273038861fe386e3245eb4ffcd7e02824a0a867ec8"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-e859524d711143a4af1c43795b0e30b9",
+      "artifact_revision": "sha256-043e88b85a8457f6ae87354e95be56dcd2f15b6c5c153e6d3eec20b653576085",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 303984,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "keyframe",
+      "media_type": "image/png",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-12.png",
+      "sha256": "043e88b85a8457f6ae87354e95be56dcd2f15b6c5c153e6d3eec20b653576085"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-7e95fb0133ed4c2d92726dd90243f4e7",
+      "artifact_revision": "sha256-fb0858b9c39e8e9809f5e550baf7b0c68bfe2a181749dd7df284d11965c5cffe",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 8694,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "structured_data",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/files/asset-aab2747e98814a74b5bd2e08f2caa6eb-13.json",
+      "sha256": "fb0858b9c39e8e9809f5e550baf7b0c68bfe2a181749dd7df284d11965c5cffe"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-596080cfcbb645ef9abd195fd4cd4105",
+      "artifact_revision": "sha256-ddb884a0130d7aeed7b9e8f62e2659e3108b9f543dad254151597a25bab5a4f1",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 7617,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "structured_data",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/metadata/asset-aab2747e98814a74b5bd2e08f2caa6eb.json",
+      "sha256": "ddb884a0130d7aeed7b9e8f62e2659e3108b9f543dad254151597a25bab5a4f1"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-fb5b97c2b03e4bc2bc834e6c38659d42",
+      "artifact_revision": "sha256-95006d441f6bc6616ac29a6557846dbd10976dd7f0bbc7c1a145c9afb368ccf3",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 36,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-e7f1dd4725e4493f84257e7fba190983.txt",
+      "sha256": "95006d441f6bc6616ac29a6557846dbd10976dd7f0bbc7c1a145c9afb368ccf3"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-ad19a9f3e19a451a97de5d3f91034843",
+      "artifact_revision": "sha256-4e095fef193b32e20f7b5edd4316e5bafcd70c86612a23ea2137e64c300f592b",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 29,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-a60d756810ae4e8b91312afc7e379121.txt",
+      "sha256": "4e095fef193b32e20f7b5edd4316e5bafcd70c86612a23ea2137e64c300f592b"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-569a495e2ebb499bba510f639c70c875",
+      "artifact_revision": "sha256-225f4f02531eaee041904116007b842207be8585657f00259266226ba06ab21f",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 39,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-6a3e77c768da40b48a6c3eb2e31683cd.txt",
+      "sha256": "225f4f02531eaee041904116007b842207be8585657f00259266226ba06ab21f"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-3b16533f48c14209aab004dff56968f8",
+      "artifact_revision": "sha256-a9c89e1687e356b6908edfef1b02e6d1a8ffc016f4ad0c5ad6c0f187035d11b5",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 35,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-a09213f4469749e59263e4d95cae8bff.txt",
+      "sha256": "a9c89e1687e356b6908edfef1b02e6d1a8ffc016f4ad0c5ad6c0f187035d11b5"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-c6add96ab78347bcbca86a42c7ff11f9",
+      "artifact_revision": "sha256-48fe22b17cdc89f162382c3bf93e16a705b84de739ad86701b0d27a3219b6a75",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 27,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-4aa5181acec246ea8248713eadea3d12.txt",
+      "sha256": "48fe22b17cdc89f162382c3bf93e16a705b84de739ad86701b0d27a3219b6a75"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-05fd05e246204abea9b9230ec4ea9070",
+      "artifact_revision": "sha256-45cf94cbb8cc9f35a28e80096b2680cfc0cf81a073395a783b601e3c6070f545",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 27,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-d21cd801d1be49fbb76b3355914ee7c1.txt",
+      "sha256": "45cf94cbb8cc9f35a28e80096b2680cfc0cf81a073395a783b601e3c6070f545"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-6957a945b25f4db9bf35b47e9b4f3513",
+      "artifact_revision": "sha256-98362b9badffed745069767b43413a2d6c4d72e7f175dd0ae16e668d6863a31e",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 30,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-42f59633e0184586881c06702ae0764c.txt",
+      "sha256": "98362b9badffed745069767b43413a2d6c4d72e7f175dd0ae16e668d6863a31e"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-43ea06a6a54647e781d9f0d02994cc5c",
+      "artifact_revision": "sha256-d47f08e52a988970748370c269a3c0fa6f982bd9fd5aa44b824bb4a93884e7b1",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 27,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-970d4b0f3d5942f28fe37b9c79942e26.txt",
+      "sha256": "d47f08e52a988970748370c269a3c0fa6f982bd9fd5aa44b824bb4a93884e7b1"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-5383b513930c40d8a8b5ec0972418e8d",
+      "artifact_revision": "sha256-3a543cea6754e37a95a22da2091dbf50680d73ead02d20914fb672030565dd5f",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 45,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-912bc12f69134bfd996fe5753b546ec4.txt",
+      "sha256": "3a543cea6754e37a95a22da2091dbf50680d73ead02d20914fb672030565dd5f"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-ab5c1f7fc23044d692b766b39994c61f",
+      "artifact_revision": "sha256-1130753f016fb1aed351de2b18a986ec6959fc5781a2fbd2359cf8014e019da1",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 24,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-6de794de4c144637a4dadf0ac86d73d7.txt",
+      "sha256": "1130753f016fb1aed351de2b18a986ec6959fc5781a2fbd2359cf8014e019da1"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-247d7918e6ab444bb5ce6bf4bf781d70",
+      "artifact_revision": "sha256-9179aae280b0f6ab8583c692748d0a28f58faf1bd2e1e73e9d9396735602727e",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 132,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-93179e5ef55d42a8830fe2f5697075c4.txt",
+      "sha256": "9179aae280b0f6ab8583c692748d0a28f58faf1bd2e1e73e9d9396735602727e"
+    },
+    {
+      "access_class": "restricted_local",
+      "artifact_id": "artifact-913b29623ace4cbe8b219749764c4dee",
+      "artifact_revision": "sha256-9b16554d09dbf1718c5c333f2c4bb23331fe41ff695ceea6fbfb102f0766f626",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 10,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "contacts",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/contacts/contact-9012d4d01a09456ea25e4de36f84a447.txt",
+      "sha256": "9b16554d09dbf1718c5c333f2c4bb23331fe41ff695ceea6fbfb102f0766f626"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-2226edfeb4b9463f803e6bf8ee021a77",
+      "artifact_revision": "sha256-4624e2087fb819ab9570a0d5e3ada7137377192394b880b2810d9e0f2db92dad",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 318,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-c5c07c2dc19f455490f861469708b7fd.txt",
+      "sha256": "4624e2087fb819ab9570a0d5e3ada7137377192394b880b2810d9e0f2db92dad"
+    },
+    {
+      "access_class": "restricted_local",
+      "artifact_id": "artifact-803cee3558a34b13a6f01d5b97274eb1",
+      "artifact_revision": "sha256-9b16554d09dbf1718c5c333f2c4bb23331fe41ff695ceea6fbfb102f0766f626",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 10,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "contacts",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/contacts/contact-548aba0a4a5b48ac9f5fcc2c9f3e7b94.txt",
+      "sha256": "9b16554d09dbf1718c5c333f2c4bb23331fe41ff695ceea6fbfb102f0766f626"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-a93ec199ed684fe2adf61544ccc037d8",
+      "artifact_revision": "sha256-9cd57d245eb75f08ef19827f2540bd0b5e87b0e7b8a6a876c31f0b092ec15d3e",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 224,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-e807a72fc1d7437ba137e57317e57ad7.txt",
+      "sha256": "9cd57d245eb75f08ef19827f2540bd0b5e87b0e7b8a6a876c31f0b092ec15d3e"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-876f401a21f74520b0bd21048a906acc",
+      "artifact_revision": "sha256-aed88ab88e514bc1d8d834b2f79b6662aaa13512c9cc06b869106256208c3081",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 335,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-dbc95725f9d44db18766a422845d837b.txt",
+      "sha256": "aed88ab88e514bc1d8d834b2f79b6662aaa13512c9cc06b869106256208c3081"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-41d0c28031dd48a3a136f0a24a95de0e",
+      "artifact_revision": "sha256-a3fe4cc73def3be394cb1bd09e98f8e1c302bb3a41fdf58d96f6def2e1f2ca2e",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 335,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-348f05b374e140cda6ed64f054e6af99.txt",
+      "sha256": "a3fe4cc73def3be394cb1bd09e98f8e1c302bb3a41fdf58d96f6def2e1f2ca2e"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-e0b29e294ac74677894538dc71380b34",
+      "artifact_revision": "sha256-b14ad73cbf44103ec067d218ed77b6b2caf19f1aa042c790f34be06cba946004",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 284,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "native_text",
+      "media_type": "text/plain",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/text/block-4f16cde642494527a3a569c4a182f2d0.txt",
+      "sha256": "b14ad73cbf44103ec067d218ed77b6b2caf19f1aa042c790f34be06cba946004"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-7cf809cd3cdc44ba9dec95cb1add34b3",
+      "artifact_revision": "sha256-70e5e8fcc94f3ddd7eec60dcb87459f9c25c5f9f089bdfe7226e0de7379928ae",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 4319,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "structured_data",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/plan.json",
+      "sha256": "70e5e8fcc94f3ddd7eec60dcb87459f9c25c5f9f089bdfe7226e0de7379928ae"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-9d8125d8e96049a1b162327c6a81183c",
+      "artifact_revision": "sha256-68c1cea0d238cbf155fc7f53a047c10cfde15191b848c34e8458d43ec1c23344",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 34215,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "structured_data",
+      "media_type": "application/x-ndjson",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/blocks.jsonl",
+      "sha256": "68c1cea0d238cbf155fc7f53a047c10cfde15191b848c34e8458d43ec1c23344"
+    },
+    {
+      "access_class": "project_local",
+      "artifact_id": "artifact-4fc0c18c00f640928303305735821905",
+      "artifact_revision": "sha256-031cd631841d5b52f1214187219121439f984d825aab4144f885fe9efc732d0e",
+      "asset_ref": {
+        "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+        "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+      },
+      "byte_length": 257,
+      "created_at": "2026-11-14T14:35:29.251299Z",
+      "job_id": "job-b6bff66b1b304c478692c8d5e3e165d4",
+      "kind": "validation_report",
+      "media_type": "application/json",
+      "provider": {
+        "config_version": "site-163378-first-real-20s-v1",
+        "implementation_version": "p3.3",
+        "provider_id": "bounded-pyav-faster-whisper",
+        "registration_ref": "registration-fd8964e90de5a7a6036887be",
+        "runtime": "local_cpu"
+      },
+      "relative_path": "证据/v0001/validation.json",
+      "sha256": "031cd631841d5b52f1214187219121439f984d825aab4144f885fe9efc732d0e"
+    }
+  ],
+  "native_blocks_index": [
+    {
+      "block_id": "block-6dc9cd009c2c44f1a08c7ed0891aab43",
+      "kind": "audio_segment",
+      "origin": "native_extract",
+      "locator": {
+        "end_ms": 20000,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 0
+      },
+      "artifact_ids": [
+        "artifact-ec9b375c5c834da7a482e3df9d72743d"
+      ]
+    },
+    {
+      "block_id": "block-e7f1dd4725e4493f84257e7fba190983",
+      "kind": "audio_segment",
+      "origin": "asr",
+      "locator": {
+        "end_ms": 1740,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 0
+      },
+      "artifact_ids": [
+        "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+        "artifact-fb5b97c2b03e4bc2bc834e6c38659d42"
+      ]
+    },
+    {
+      "block_id": "block-a60d756810ae4e8b91312afc7e379121",
+      "kind": "audio_segment",
+      "origin": "asr",
+      "locator": {
+        "end_ms": 3880,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 1740
+      },
+      "artifact_ids": [
+        "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+        "artifact-ad19a9f3e19a451a97de5d3f91034843"
+      ]
+    },
+    {
+      "block_id": "block-6a3e77c768da40b48a6c3eb2e31683cd",
+      "kind": "audio_segment",
+      "origin": "asr",
+      "locator": {
+        "end_ms": 6580,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 3880
+      },
+      "artifact_ids": [
+        "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+        "artifact-569a495e2ebb499bba510f639c70c875"
+      ]
+    },
+    {
+      "block_id": "block-a09213f4469749e59263e4d95cae8bff",
+      "kind": "audio_segment",
+      "origin": "asr",
+      "locator": {
+        "end_ms": 8500,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 6580
+      },
+      "artifact_ids": [
+        "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+        "artifact-3b16533f48c14209aab004dff56968f8"
+      ]
+    },
+    {
+      "block_id": "block-4aa5181acec246ea8248713eadea3d12",
+      "kind": "audio_segment",
+      "origin": "asr",
+      "locator": {
+        "end_ms": 9720,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 8500
+      },
+      "artifact_ids": [
+        "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+        "artifact-c6add96ab78347bcbca86a42c7ff11f9"
+      ]
+    },
+    {
+      "block_id": "block-d21cd801d1be49fbb76b3355914ee7c1",
+      "kind": "audio_segment",
+      "origin": "asr",
+      "locator": {
+        "end_ms": 10960,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 9720
+      },
+      "artifact_ids": [
+        "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+        "artifact-05fd05e246204abea9b9230ec4ea9070"
+      ]
+    },
+    {
+      "block_id": "block-42f59633e0184586881c06702ae0764c",
+      "kind": "audio_segment",
+      "origin": "asr",
+      "locator": {
+        "end_ms": 12820,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 10960
+      },
+      "artifact_ids": [
+        "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+        "artifact-6957a945b25f4db9bf35b47e9b4f3513"
+      ]
+    },
+    {
+      "block_id": "block-970d4b0f3d5942f28fe37b9c79942e26",
+      "kind": "audio_segment",
+      "origin": "asr",
+      "locator": {
+        "end_ms": 14700,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 12820
+      },
+      "artifact_ids": [
+        "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+        "artifact-43ea06a6a54647e781d9f0d02994cc5c"
+      ]
+    },
+    {
+      "block_id": "block-912bc12f69134bfd996fe5753b546ec4",
+      "kind": "audio_segment",
+      "origin": "asr",
+      "locator": {
+        "end_ms": 18040,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 14700
+      },
+      "artifact_ids": [
+        "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+        "artifact-5383b513930c40d8a8b5ec0972418e8d"
+      ]
+    },
+    {
+      "block_id": "block-6de794de4c144637a4dadf0ac86d73d7",
+      "kind": "audio_segment",
+      "origin": "asr",
+      "locator": {
+        "end_ms": 19980,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 18040
+      },
+      "artifact_ids": [
+        "artifact-78a3b6882fe24f91aa39aeea4f46b2b0",
+        "artifact-ab5c1f7fc23044d692b766b39994c61f"
+      ]
+    },
+    {
+      "block_id": "block-290cd52119b944ebb6cd22f686c3b33b",
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "end_ms": 0,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-965a74c7e31943d3a5910446cc6f1ee4",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 0
+      },
+      "artifact_ids": [
+        "artifact-965a74c7e31943d3a5910446cc6f1ee4"
+      ]
+    },
+    {
+      "block_id": "block-93179e5ef55d42a8830fe2f5697075c4",
+      "kind": "paragraph",
+      "origin": "ocr",
+      "locator": {
+        "end_ms": 0,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-965a74c7e31943d3a5910446cc6f1ee4",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 0
+      },
+      "artifact_ids": [
+        "artifact-eee46d688f104838b3e0a608108360ed",
+        "artifact-965a74c7e31943d3a5910446cc6f1ee4",
+        "artifact-247d7918e6ab444bb5ce6bf4bf781d70"
+      ]
+    },
+    {
+      "block_id": "block-c1e23fe1781d4252afede6fa1badcc36",
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "end_ms": 1000,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-afe305e0a7a4400795086b84a9c92f3d",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 1000
+      },
+      "artifact_ids": [
+        "artifact-afe305e0a7a4400795086b84a9c92f3d"
+      ]
+    },
+    {
+      "block_id": "block-c5c07c2dc19f455490f861469708b7fd",
+      "kind": "paragraph",
+      "origin": "ocr",
+      "locator": {
+        "end_ms": 1000,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-afe305e0a7a4400795086b84a9c92f3d",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 1000
+      },
+      "artifact_ids": [
+        "artifact-8e5d925c287b47d48e8a1a70593f3684",
+        "artifact-afe305e0a7a4400795086b84a9c92f3d",
+        "artifact-2226edfeb4b9463f803e6bf8ee021a77"
+      ]
+    },
+    {
+      "block_id": "block-f8e32765fe6d4c80a9766de0b7a8f33a",
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "end_ms": 4000,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-cadf600fbffa4b61822f2c99d77a2e7e",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 4000
+      },
+      "artifact_ids": [
+        "artifact-cadf600fbffa4b61822f2c99d77a2e7e"
+      ]
+    },
+    {
+      "block_id": "block-e807a72fc1d7437ba137e57317e57ad7",
+      "kind": "paragraph",
+      "origin": "ocr",
+      "locator": {
+        "end_ms": 4000,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-cadf600fbffa4b61822f2c99d77a2e7e",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 4000
+      },
+      "artifact_ids": [
+        "artifact-1d0d0d6ec1ce46c78ff31f11d20c4d21",
+        "artifact-cadf600fbffa4b61822f2c99d77a2e7e",
+        "artifact-a93ec199ed684fe2adf61544ccc037d8"
+      ]
+    },
+    {
+      "block_id": "block-bf78aa1a380c46479b4f092611b7cb63",
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "end_ms": 5000,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-7690e9febcaa44bda73336985931aeb3",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 5000
+      },
+      "artifact_ids": [
+        "artifact-7690e9febcaa44bda73336985931aeb3"
+      ]
+    },
+    {
+      "block_id": "block-dbc95725f9d44db18766a422845d837b",
+      "kind": "paragraph",
+      "origin": "ocr",
+      "locator": {
+        "end_ms": 5000,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-7690e9febcaa44bda73336985931aeb3",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 5000
+      },
+      "artifact_ids": [
+        "artifact-8b1121d28dce410187035023a48fbcc8",
+        "artifact-7690e9febcaa44bda73336985931aeb3",
+        "artifact-876f401a21f74520b0bd21048a906acc"
+      ]
+    },
+    {
+      "block_id": "block-d22bb78199334a93bb8f2e871d2336a5",
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "end_ms": 10000,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-e3541c421acc4644b41e04714af14b30",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 10000
+      },
+      "artifact_ids": [
+        "artifact-e3541c421acc4644b41e04714af14b30"
+      ]
+    },
+    {
+      "block_id": "block-348f05b374e140cda6ed64f054e6af99",
+      "kind": "paragraph",
+      "origin": "ocr",
+      "locator": {
+        "end_ms": 10000,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-e3541c421acc4644b41e04714af14b30",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 10000
+      },
+      "artifact_ids": [
+        "artifact-40b9fbdec98645e6afe810112f1089a4",
+        "artifact-e3541c421acc4644b41e04714af14b30",
+        "artifact-41d0c28031dd48a3a136f0a24a95de0e"
+      ]
+    },
+    {
+      "block_id": "block-f2c54ab383904157adea2223284ee5af",
+      "kind": "image_occurrence",
+      "origin": "native_extract",
+      "locator": {
+        "end_ms": 15000,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-e859524d711143a4af1c43795b0e30b9",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 15000
+      },
+      "artifact_ids": [
+        "artifact-e859524d711143a4af1c43795b0e30b9"
+      ]
+    },
+    {
+      "block_id": "block-4f16cde642494527a3a569c4a182f2d0",
+      "kind": "paragraph",
+      "origin": "ocr",
+      "locator": {
+        "end_ms": 15000,
+        "geometry": {
+          "bbox_xywh": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "coordinate_space": "original",
+          "frame_size": {
+            "height": 1080,
+            "width": 1920
+          },
+          "origin": "top_left",
+          "original_size": {
+            "height": 1080,
+            "unit": "pixel",
+            "width": 1920
+          },
+          "reference_object_ref": "artifact-e859524d711143a4af1c43795b0e30b9",
+          "rotation_degrees": 0,
+          "transform_to_original": {
+            "method": "identity",
+            "operations": []
+          },
+          "unit": "pixel"
+        },
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 15000
+      },
+      "artifact_ids": [
+        "artifact-7e95fb0133ed4c2d92726dd90243f4e7",
+        "artifact-e859524d711143a4af1c43795b0e30b9",
+        "artifact-e0b29e294ac74677894538dc71380b34"
+      ]
+    }
+  ],
+  "actual_media_metadata": {
+    "audio_observed_ranges": [
+      {
+        "end_ms": 20000,
+        "kind": "time",
+        "precision": "exact",
+        "start_ms": 0
+      }
+    ],
+    "audio_windows": [
+      {
+        "asr_elapsed_seconds": 1.1399999999998727,
+        "asr_status": "extracted",
+        "decode_elapsed_seconds": 15.969000000000051,
+        "end_ms": 20000,
+        "input_bytes_received": 956013,
+        "pcm_bytes": 640000,
+        "start_ms": 0
+      }
+    ],
+    "decoder_padding_trimmed_samples": 0,
+    "derivations": [
+      {
+        "block_indexes": [
+          1
+        ],
+        "provider_id": "faster-whisper",
+        "provider_version": "1.2.1",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          0
+        ],
+        "source_file_keys": [],
+        "uncertainty": "ASR may omit or hallucinate words; boundary hypotheses retained"
+      },
+      {
+        "block_indexes": [
+          2
+        ],
+        "provider_id": "faster-whisper",
+        "provider_version": "1.2.1",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          0
+        ],
+        "source_file_keys": [],
+        "uncertainty": "ASR may omit or hallucinate words; boundary hypotheses retained"
+      },
+      {
+        "block_indexes": [
+          3
+        ],
+        "provider_id": "faster-whisper",
+        "provider_version": "1.2.1",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          0
+        ],
+        "source_file_keys": [],
+        "uncertainty": "ASR may omit or hallucinate words; boundary hypotheses retained"
+      },
+      {
+        "block_indexes": [
+          4
+        ],
+        "provider_id": "faster-whisper",
+        "provider_version": "1.2.1",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          0
+        ],
+        "source_file_keys": [],
+        "uncertainty": "ASR may omit or hallucinate words; boundary hypotheses retained"
+      },
+      {
+        "block_indexes": [
+          5
+        ],
+        "provider_id": "faster-whisper",
+        "provider_version": "1.2.1",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          0
+        ],
+        "source_file_keys": [],
+        "uncertainty": "ASR may omit or hallucinate words; boundary hypotheses retained"
+      },
+      {
+        "block_indexes": [
+          6
+        ],
+        "provider_id": "faster-whisper",
+        "provider_version": "1.2.1",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          0
+        ],
+        "source_file_keys": [],
+        "uncertainty": "ASR may omit or hallucinate words; boundary hypotheses retained"
+      },
+      {
+        "block_indexes": [
+          7
+        ],
+        "provider_id": "faster-whisper",
+        "provider_version": "1.2.1",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          0
+        ],
+        "source_file_keys": [],
+        "uncertainty": "ASR may omit or hallucinate words; boundary hypotheses retained"
+      },
+      {
+        "block_indexes": [
+          8
+        ],
+        "provider_id": "faster-whisper",
+        "provider_version": "1.2.1",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          0
+        ],
+        "source_file_keys": [],
+        "uncertainty": "ASR may omit or hallucinate words; boundary hypotheses retained"
+      },
+      {
+        "block_indexes": [
+          9
+        ],
+        "provider_id": "faster-whisper",
+        "provider_version": "1.2.1",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          0
+        ],
+        "source_file_keys": [],
+        "uncertainty": "ASR may omit or hallucinate words; boundary hypotheses retained"
+      },
+      {
+        "block_indexes": [
+          10
+        ],
+        "provider_id": "faster-whisper",
+        "provider_version": "1.2.1",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          0
+        ],
+        "source_file_keys": [],
+        "uncertainty": "ASR may omit or hallucinate words; boundary hypotheses retained"
+      },
+      {
+        "block_indexes": [
+          12
+        ],
+        "provider_id": "rapidocr_onnxruntime",
+        "provider_version": "1.4.4",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          11
+        ],
+        "source_file_keys": [
+          "frames-frame-000000000000-png"
+        ],
+        "uncertainty": "OCR does not interpret the entire image"
+      },
+      {
+        "block_indexes": [
+          14
+        ],
+        "provider_id": "rapidocr_onnxruntime",
+        "provider_version": "1.4.4",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          13
+        ],
+        "source_file_keys": [
+          "frames-frame-000000001000-png"
+        ],
+        "uncertainty": "OCR does not interpret the entire image"
+      },
+      {
+        "block_indexes": [
+          16
+        ],
+        "provider_id": "rapidocr_onnxruntime",
+        "provider_version": "1.4.4",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          15
+        ],
+        "source_file_keys": [
+          "frames-frame-000000004000-png"
+        ],
+        "uncertainty": "OCR does not interpret the entire image"
+      },
+      {
+        "block_indexes": [
+          18
+        ],
+        "provider_id": "rapidocr_onnxruntime",
+        "provider_version": "1.4.4",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          17
+        ],
+        "source_file_keys": [
+          "frames-frame-000000005000-png"
+        ],
+        "uncertainty": "OCR does not interpret the entire image"
+      },
+      {
+        "block_indexes": [
+          20
+        ],
+        "provider_id": "rapidocr_onnxruntime",
+        "provider_version": "1.4.4",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          19
+        ],
+        "source_file_keys": [
+          "frames-frame-000000010000-png"
+        ],
+        "uncertainty": "OCR does not interpret the entire image"
+      },
+      {
+        "block_indexes": [
+          22
+        ],
+        "provider_id": "rapidocr_onnxruntime",
+        "provider_version": "1.4.4",
+        "runtime": "local_cpu",
+        "source_block_indexes": [
+          21
+        ],
+        "source_file_keys": [
+          "frames-frame-000000015000-png"
+        ],
+        "uncertainty": "OCR does not interpret the entire image"
+      }
+    ],
+    "full_input_hash_performed": false,
+    "input_byte_attribution": "actual reader bytes since previous audio emission, includes buffered/index/seek reads; not intrinsic per-time encoded size",
+    "input_bytes_not_attributed_to_audio_windows": 0,
+    "input_bytes_received": 956013,
+    "network_saving_claim": false,
+    "overlap_deduplication": "time-and-text/word alignment; raw segment and word hypotheses retained",
+    "peak_pcm_bytes": 640000,
+    "probe": {
+      "duration_ms": 115880,
+      "input_bytes_received": 262157,
+      "media_type": "video/mov",
+      "processing_status": "extracted",
+      "provider_id": "pyav",
+      "provider_version": "16.0.1",
+      "reason": "LOCAL_CONTAINER_METADATA_PROBED_NOT_CONTENT_ACCEPTANCE",
+      "size_bytes": 4110632,
+      "source_capabilities": {
+        "authorized_connector_reader": false,
+        "http_range": "unsupported_not_probed",
+        "kind": "local_file",
+        "network_saving_claim": false,
+        "seekable": true
+      },
+      "streams": [
+        {
+          "codec": "h264",
+          "display_rotation_degrees": "0",
+          "duration_ms": 115880,
+          "height": 1080,
+          "index": 0,
+          "start_ms": 0,
+          "type": "video",
+          "width": 1920
+        },
+        {
+          "channels": 2,
+          "codec": "aac",
+          "duration_ms": 115867,
+          "index": 1,
+          "sample_rate": 44100,
+          "start_ms": 0,
+          "type": "audio"
+        }
+      ],
+      "timeline_origin_ms": 0
+    },
+    "production_acceptance": "pending_real_authorized_course_input",
+    "queue": {
+      "audio_byte_cap": 4194304,
+      "backpressure": "synchronous sinks stop demux reads",
+      "cache_byte_cap": 33554432,
+      "image_byte_cap": 16777216,
+      "max_pending_audio_windows": 1,
+      "max_pending_images": 1,
+      "read_chunk_byte_cap": 65536
+    },
+    "ram": {
+      "device": "cpu",
+      "enforcement": "Windows JobObject aggregate commit",
+      "hard_cap_bytes": 2147483648,
+      "host_available_ram_at_admission": 9977176064,
+      "includes": "decode, ASR, OCR, queue; parent transport bounded separately",
+      "peak_worker_commit_bytes": 665640960,
+      "workers": 1
+    },
+    "recovery_policy": "Completed decode windows and prepared inference receipts are idempotent. A provider/config/source revision change needs a new output revision; deterministic failed windows are not silently re-inferred.",
+    "runs": [
+      {
+        "elapsed_seconds": 20.297000000000025,
+        "input_bytes_received": 956013,
+        "max_read_bytes": 65536,
+        "mixed_source_demux_passes": 1,
+        "read_calls": 29,
+        "resume_seek_ms": 0,
+        "seek_calls": 12
+      }
+    ],
+    "source_identity": {
+      "device": 9010812912146678753,
+      "inode": 1688849860263983,
+      "method": "local_stat_revision_not_full_content_hash",
+      "mtime_ns": 1794654877483438700,
+      "path": "G:\\Worldanalysis\\wangzjk.com\\163378_AI视频创作\\059-20261105-AI视频创作从入门到实操课程，从认知避坑、画布工具，到写剧本、做角色卡、场景堪景，从零搭建完整创作思路【更多资源www.abab9.cn】\\01.第一讲：创作中AI与我们的关系 (1).mp4",
+      "size": 4110632
+    },
+    "source_registration": {
+      "basis": "local_stat_snapshot_not_full_content_hash",
+      "source_content_sha256": null,
+      "source_ref": "source-bdfcdc09c08b426397567d7ba0cf843b",
+      "whole_source_copy_retained": false
+    },
+    "synthetic": false,
+    "timestamp_unit": "ms",
+    "visual_content_completeness": "unknown_lossy",
+    "visual_frames": [
+      {
+        "size": {
+          "height": 1080,
+          "width": 1920
+        },
+        "time_ms": 0,
+        "triggers": [
+          "periodic_floor"
+        ]
+      },
+      {
+        "size": {
+          "height": 1080,
+          "width": 1920
+        },
+        "time_ms": 1000,
+        "triggers": [
+          "sampled_scene_change",
+          "sampled_local_pixel_change_including_silent_activity"
+        ]
+      },
+      {
+        "size": {
+          "height": 1080,
+          "width": 1920
+        },
+        "time_ms": 4000,
+        "triggers": [
+          "sampled_local_pixel_change_including_silent_activity"
+        ]
+      },
+      {
+        "size": {
+          "height": 1080,
+          "width": 1920
+        },
+        "time_ms": 5000,
+        "triggers": [
+          "sampled_local_pixel_change_including_silent_activity"
+        ]
+      },
+      {
+        "size": {
+          "height": 1080,
+          "width": 1920
+        },
+        "time_ms": 10000,
+        "triggers": [
+          "periodic_floor"
+        ]
+      },
+      {
+        "size": {
+          "height": 1080,
+          "width": 1920
+        },
+        "time_ms": 15000,
+        "triggers": [
+          "periodic_floor"
+        ]
+      }
+    ]
+  },
+  "raw_enumeration_state": "partial",
+  "actual_counts": {
+    "audio_windows": 1,
+    "keyframes": 6,
+    "asr_blocks": 10,
+    "ocr_blocks": 6,
+    "transcript_artifacts": 1
+  },
+  "native_published_artifact_hashes_verified": true,
+  "audio_bundle": {
+    "bundle_id": "bundle-89fa9f146601442f9dc6e1c684da35bb",
+    "publish_id": "publish-d39309c081ef482f96a230209f3b73a3",
+    "bundle_revision": "v0002",
+    "coverage": {
+      "claimed_status": "partial",
+      "discovered_counts": {
+        "assets": 1,
+        "blocks": 24,
+        "visual_occurrences": 6
+      },
+      "inventory_state": "partial",
+      "per_asset": [
+        {
+          "asset_ref": {
+            "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+            "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+          },
+          "enumeration_state": "partial",
+          "gap_ids": [
+            "gap-320dca7a8f964122a383d361c8a8642f",
+            "gap-81f11e3f9766496b90b0804d67f578bd",
+            "gap-b1806c1eec604c8aa1fc31aeb4492796",
+            "gap-63d04a414b3640be9e5abdca062dc1a4",
+            "gap-63a36104ff294ca2aa7c67c34a658a43",
+            "gap-aa45228d67b04db28989dfbe26d95663"
+          ],
+          "metrics": [
+            {
+              "excluded": 0,
+              "expected": 115867,
+              "method": "full_audio_windows",
+              "observed": 20000,
+              "processed": 20000,
+              "ranges": [
+                {
+                  "end_ms": 20000,
+                  "kind": "time",
+                  "precision": "exact",
+                  "start_ms": 0
+                }
+              ],
+              "unit": "millisecond"
+            },
+            {
+              "excluded": 0,
+              "expected": null,
+              "method": "structured_parse",
+              "observed": 24,
+              "processed": 24,
+              "ranges": [],
+              "unit": "block"
+            },
+            {
+              "excluded": 0,
+              "expected": null,
+              "method": "structured_parse",
+              "observed": 6,
+              "processed": 6,
+              "ranges": [],
+              "unit": "visual_occurrence"
+            },
+            {
+              "excluded": 0,
+              "expected": 5000,
+              "method": "explicit_ranges",
+              "observed": 5000,
+              "processed": 5000,
+              "ranges": [
+                {
+                  "end_ms": 5000,
+                  "kind": "time",
+                  "precision": "exact",
+                  "start_ms": 0
+                }
+              ],
+              "unit": "millisecond"
+            }
+          ],
+          "processing_status": "partial"
+        }
+      ],
+      "scope": "listed_assets"
+    }
+  },
+  "audio_gaps": [
+    {
+      "gap_id": "gap-320dca7a8f964122a383d361c8a8642f",
+      "kind": "semantic_gap",
+      "reason": "Lossy periodic + sampled scene/local-pixel changes; no guarantee of all visual operations, brief text, speech pointers or semantics",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": []
+    },
+    {
+      "gap_id": "gap-81f11e3f9766496b90b0804d67f578bd",
+      "kind": "temporal_gap",
+      "reason": "PauseMedia: CHECKPOINT_PAUSE: configured new-window limit",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": []
+    },
+    {
+      "gap_id": "gap-b1806c1eec604c8aa1fc31aeb4492796",
+      "kind": "semantic_gap",
+      "reason": "Original media remains a scoped local source; registration uses stat metadata, not a full content hash or immutable whole-media copy. Published derived files are independently hashed.",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": []
+    },
+    {
+      "gap_id": "gap-63d04a414b3640be9e5abdca062dc1a4",
+      "kind": "semantic_gap",
+      "reason": "Images preserved; image meaning has not been read by the analysis agent.",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": [
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-290cd52119b944ebb6cd22f686c3b33b",
+          "locator": {
+            "end_ms": 0,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-965a74c7e31943d3a5910446cc6f1ee4",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 0
+          },
+          "project_id": "site-163378-ai-video"
+        },
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-c1e23fe1781d4252afede6fa1badcc36",
+          "locator": {
+            "end_ms": 1000,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-afe305e0a7a4400795086b84a9c92f3d",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 1000
+          },
+          "project_id": "site-163378-ai-video"
+        },
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-f8e32765fe6d4c80a9766de0b7a8f33a",
+          "locator": {
+            "end_ms": 4000,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-cadf600fbffa4b61822f2c99d77a2e7e",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 4000
+          },
+          "project_id": "site-163378-ai-video"
+        },
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-bf78aa1a380c46479b4f092611b7cb63",
+          "locator": {
+            "end_ms": 5000,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-7690e9febcaa44bda73336985931aeb3",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 5000
+          },
+          "project_id": "site-163378-ai-video"
+        },
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-d22bb78199334a93bb8f2e871d2336a5",
+          "locator": {
+            "end_ms": 10000,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-e3541c421acc4644b41e04714af14b30",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 10000
+          },
+          "project_id": "site-163378-ai-video"
+        },
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-f2c54ab383904157adea2223284ee5af",
+          "locator": {
+            "end_ms": 15000,
+            "geometry": {
+              "bbox_xywh": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "coordinate_space": "original",
+              "frame_size": {
+                "height": 1080,
+                "width": 1920
+              },
+              "origin": "top_left",
+              "original_size": {
+                "height": 1080,
+                "unit": "pixel",
+                "width": 1920
+              },
+              "reference_object_ref": "artifact-e859524d711143a4af1c43795b0e30b9",
+              "rotation_degrees": 0,
+              "transform_to_original": {
+                "method": "identity",
+                "operations": []
+              },
+              "unit": "pixel"
+            },
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 15000
+          },
+          "project_id": "site-163378-ai-video"
+        }
+      ]
+    },
+    {
+      "gap_id": "gap-63a36104ff294ca2aa7c67c34a658a43",
+      "kind": "unknown_inventory",
+      "reason": "Extraction inventory is not proven complete.",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": []
+    },
+    {
+      "gap_id": "gap-aa45228d67b04db28989dfbe26d95663",
+      "kind": "unprocessed",
+      "reason": "New native audio window is unheard; extraction/delivery proves neither semantic listening nor original whole-media content SHA.",
+      "resolution_refs": [],
+      "severity": "important",
+      "status": "open",
+      "target_refs": [
+        {
+          "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+          "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a",
+          "block_id": "block-3535d15e39304a96813e72486b40a9da",
+          "locator": {
+            "end_ms": 5000,
+            "kind": "time",
+            "precision": "exact",
+            "start_ms": 0
+          },
+          "project_id": "site-163378-ai-video"
+        }
+      ]
+    }
+  ],
+  "wav_checks": [
+    {
+      "path": "窗口派生\\site-163378-first-real-000000-005000.wav",
+      "sample_rate": 16000,
+      "sample_width": 2,
+      "channels": 1,
+      "sample_count": 80000,
+      "compression": "NONE",
+      "bytes": 160044,
+      "pcm_bytes_read_for_verification": 160000,
+      "sha256": "977eaf39b1dbd095571db32ea301498aac9f7696034cc6f1069c4e35e61e7c06"
+    },
+    {
+      "path": "整理结果\\site-163378-ai-video\\证据\\v0002\\window.wav",
+      "sample_rate": 16000,
+      "sample_width": 2,
+      "channels": 1,
+      "sample_count": 80000,
+      "compression": "NONE",
+      "bytes": 160044,
+      "pcm_bytes_read_for_verification": 160000,
+      "sha256": "977eaf39b1dbd095571db32ea301498aac9f7696034cc6f1069c4e35e61e7c06"
+    }
+  ],
+  "wav_artifact": {
+    "access_class": "project_local",
+    "artifact_id": "artifact-881cf176b84d4ee2afda72b7f21bb15a",
+    "artifact_revision": "sha256-977eaf39b1dbd095571db32ea301498aac9f7696034cc6f1069c4e35e61e7c06",
+    "asset_ref": {
+      "asset_id": "asset-aab2747e98814a74b5bd2e08f2caa6eb",
+      "asset_revision": "asset-stat-5f72799b6e9d446e754435b2c0fca55df2adb8dc642d65f7093613d613b3b74a"
+    },
+    "byte_length": 160044,
+    "created_at": "2026-11-14T14:35:32.704301Z",
+    "job_id": "job-eec1d2bffba844699b197a5bfbe63e22",
+    "kind": "clip",
+    "media_type": "audio/wav",
+    "provider": {
+      "config_version": "audio-edc8cfb37528d22f3a6d5a0c740fc851382cab0e",
+      "implementation_version": "window-1936c68d0c6ce9a53b63714bf5ac92d8",
+      "provider_id": "local_audio_window",
+      "registration_ref": "registration-4b444031ef2bc18d68b23f5d",
+      "runtime": "local_cpu"
+    },
+    "relative_path": "证据/v0002/window.wav",
+    "sha256": "977eaf39b1dbd095571db32ea301498aac9f7696034cc6f1069c4e35e61e7c06"
+  },
+  "wav_primitive_manifest": {
+    "actual_first_decoded_offset_ms": 0.0,
+    "actual_offset_basis": "decoded_frame_pts_minus_container_origin",
+    "asr_executed": false,
+    "audio_stream_index": 1,
+    "byte_length": 160044,
+    "channels": 1,
+    "coverage_method": "contiguous_timestamped_samples_half_open_no_gap_fill",
+    "decoded_frames": 216,
+    "does_not_prove_whole_source_content_sha": true,
+    "duration_ms": 5000,
+    "max_read_bytes": 86170,
+    "peak_frame_bytes": 16384,
+    "processing_status": "extracted",
+    "read_calls": 13,
+    "real_course_acceptance": false,
+    "received_bytes": 446631,
+    "received_bytes_scope": "actual_container_bytes_including_probe_seek_rereads_and_mixed_streams",
+    "request": {
+      "end_ms": 5000,
+      "expected_identity": {
+        "basis": "local_stat_snapshot_not_full_content_hash",
+        "device": 9010812912146678753,
+        "inode": 1688849860263983,
+        "mtime_ns": 1794654877483438700,
+        "size_bytes": 4110632
+      },
+      "max_output_bytes": 9600044,
+      "max_received_bytes": 16777216,
+      "output_relative": "窗口派生/site-163378-first-real-000000-005000.wav",
+      "root": "G:\\Worldanalysis",
+      "source_relative": "wangzjk.com/163378_AI视频创作/059-20261105-AI视频创作从入门到实操课程，从认知避坑、画布工具，到写剧本、做角色卡、场景堪景，从零搭建完整创作思路【更多资源www.abab9.cn】/01.第一讲：创作中AI与我们的关系 (1).mp4",
+      "start_ms": 0
+    },
+    "sample_count": 80000,
+    "sample_format": "s16le",
+    "sample_rate": 16000,
+    "schema": "worldanalysis.audio-window.v1",
+    "seek_calls": 12,
+    "seek_requested_ms": 0,
+    "sha256": "977eaf39b1dbd095571db32ea301498aac9f7696034cc6f1069c4e35e61e7c06",
+    "sha256_scope": "derived_window_wav_bytes_only_not_original_media",
+    "source_content_sha256": null,
+    "source_copy_retained": false,
+    "source_stat_fingerprint": {
+      "device": 9010812912146678753,
+      "inode": 1688849860263983,
+      "method": "local_stat_revision_not_full_content_hash",
+      "mtime_ns": 1794654877483438700,
+      "path": "G:\\Worldanalysis\\wangzjk.com\\163378_AI视频创作\\059-20261105-AI视频创作从入门到实操课程，从认知避坑、画布工具，到写剧本、做角色卡、场景堪景，从零搭建完整创作思路【更多资源www.abab9.cn】\\01.第一讲：创作中AI与我们的关系 (1).mp4",
+      "size": 4110632
+    },
+    "vad_applied": false
+  },
+  "native_bundle_readback_id": "bundle-9dc0ae66fae942e1a162fb75ada2e6d4",
+  "audio_bundle_readback_id": "bundle-89fa9f146601442f9dc6e1c684da35bb",
+  "status": "first20s_resources_and_first5s_wav_published_verified",
+  "scope_limits": [
+    "not whole115.88s extraction",
+    "not human corrected transcript",
+    "not listened audio",
+    "sparse frames not complete teaching visuals",
+    "no semantic analysis",
+    "source registration remains stat descriptor"
+  ],
+  "store_closed": true,
+  "finished_epoch_seconds": 1794666937.8160055,
+  "elapsed_seconds": 48.028669357299805
+}

@@ -1,0 +1,170 @@
+{
+  "record_kind": "real_single_pdf_native_ingest",
+  "created_at": "2026-11-14T09:54:21.736751+00:00",
+  "source_relative_path": "wangzjk.com/163545 抖音全域付费起号特训课/配套文档和加入框架/泽9.pdf",
+  "source_sha256": "bd8ed1d451a16d658df8288272f826b2cd82f278a4a6f75a7c27401790e22c9b",
+  "source_bytes": 135757,
+  "project_id": "real-pdf-163545",
+  "bundle": {
+    "project_id": "real-pdf-163545",
+    "bundle_id": "bundle-3ff6db8e68ef46958c17943284e6c568",
+    "publish_id": "publish-fba29b8a1d0f46cf9a29bdeba57042d9",
+    "bundle_revision": "v0008",
+    "assets": 1,
+    "blocks": 13,
+    "gaps": 8,
+    "artifacts": 19,
+    "coverage_status": "partial"
+  },
+  "asset_ref": {
+    "asset_id": "asset-e78d0c581f0444e687f7f885b3572b22",
+    "asset_revision": "asset-bd8ed1d451a16d658df8288272f826b2cd82f278a4a6f75a7c27401790e22c9b"
+  },
+  "native_job_ids": [
+    "job-26dba02acc684e7fa7fe0d8ad32b9a5a"
+  ],
+  "plan_id": "plan-a1d5ff61e4fa44888927e729a49e9a9c",
+  "local_grant_ref": "local-input-source-9e0cfa6483de4b08857b13ea027bcd34",
+  "route_revision": "route-b8e01a5458bff75cf4091f0d04d918ca8dcd6ae380a5dbec2d236913e02ec2ac",
+  "explicit_config_version": "native-only-79bcd6efca6a0552467075bb3874221f5c34ade160c70a05",
+  "options": {
+    "ocr": null,
+    "render_pdf_page": null,
+    "max_input_bytes": 16777216,
+    "max_output_bytes": 16777216,
+    "max_pages": 7
+  },
+  "code_sha256": {
+    "store.py": "31eed5073186a20c572e4115b715eec338464a4ff023b2260e8eb732baab6298",
+    "__main__.py": "ca3ce4e27aa8dcfd580862429e72af4bb790c35daa0ffd592e9bb8d8cd114f0c",
+    "documents.py": "916833085e58fd1e694a91cb7090f4d8062120dee7a9e6a081324d03a1aa958c",
+    "ocr.py": "eca931cd3d3a77aac7aac8b010a3ee338f4a6712e92538f1473cd3c7e03e5748",
+    "pdf_render.py": "d962e5c4eb1753c79da53ddc97e51751efa4ef1928b277846af9a228a8f44684",
+    "policy.py": "2998f0f52c688ccf430b3b2cdb55582fecba019275cdca7d90d44590e8893b47",
+    "contracts.py": "21fa88c4554a8276e08b0386e510bb950e1f6ad0a0b6a90c6756246139ecba01",
+    "bundle_merge.py": "639c2c3ada0be0815858541c9ac67f0f0852253a3a9c5d7ddeff2f12ac0db97c"
+  },
+  "pages": 7,
+  "page_metrics": [
+    {
+      "page_number": 1,
+      "text_characters": 306,
+      "image_occurrences": 0,
+      "vector_operations": 1,
+      "vector_path_operations": 62,
+      "clip_operations": 61,
+      "route": "native_text"
+    },
+    {
+      "page_number": 2,
+      "text_characters": 275,
+      "image_occurrences": 0,
+      "vector_operations": 2,
+      "vector_path_operations": 78,
+      "clip_operations": 76,
+      "route": "native_text"
+    },
+    {
+      "page_number": 3,
+      "text_characters": 387,
+      "image_occurrences": 0,
+      "vector_operations": 1,
+      "vector_path_operations": 79,
+      "clip_operations": 78,
+      "route": "native_text"
+    },
+    {
+      "page_number": 4,
+      "text_characters": 262,
+      "image_occurrences": 0,
+      "vector_operations": 3,
+      "vector_path_operations": 75,
+      "clip_operations": 72,
+      "route": "native_text"
+    },
+    {
+      "page_number": 5,
+      "text_characters": 247,
+      "image_occurrences": 0,
+      "vector_operations": 3,
+      "vector_path_operations": 61,
+      "clip_operations": 58,
+      "route": "native_text"
+    },
+    {
+      "page_number": 6,
+      "text_characters": 284,
+      "image_occurrences": 0,
+      "vector_operations": 2,
+      "vector_path_operations": 70,
+      "clip_operations": 68,
+      "route": "native_text"
+    },
+    {
+      "page_number": 7,
+      "text_characters": 175,
+      "image_occurrences": 0,
+      "vector_operations": 0,
+      "vector_path_operations": 78,
+      "clip_operations": 78,
+      "route": "native_text"
+    }
+  ],
+  "original_images_by_media_type": {},
+  "gap_kinds": {
+    "missing_visual": 6,
+    "semantic_gap": 1,
+    "unprocessed": 1
+  },
+  "ocr_executed": false,
+  "render_executed": false,
+  "measurement_scope": "one Store.ingest native-only end-to-end call, including registration/copy/publication/validation, not parser-exclusive",
+  "wall_seconds": 1.9899960000038845,
+  "process_cpu_seconds": 1.125,
+  "python_memory_before": {
+    "available": true,
+    "working_set_bytes": 55508992,
+    "private_commit_bytes": 64667648,
+    "process_lifetime_peak_working_set_bytes": 57208832,
+    "phase_peak_not_measured": true
+  },
+  "python_memory_after": {
+    "available": true,
+    "working_set_bytes": 63791104,
+    "private_commit_bytes": 72675328,
+    "process_lifetime_peak_working_set_bytes": 64905216,
+    "phase_peak_not_measured": true
+  },
+  "agent_tokens": null,
+  "agent_cost_minor": null,
+  "agent_usage_note": "No agent usage metering; do not infer tokens or cost from native runtime.",
+  "all_temp_cache_root": "_ledger/devpack/p1-z9-native-9f0814f9af414617861aeff380920c48",
+  "counts_before": {
+    "projects": 7,
+    "sources": 9,
+    "assets": 9,
+    "asset_revisions": 9,
+    "jobs": 17,
+    "publications": 19,
+    "plans": 21,
+    "analysis_tasks": 13,
+    "read_receipts": 133,
+    "analyses": 13
+  },
+  "counts_after_native": {
+    "projects": 7,
+    "sources": 10,
+    "assets": 10,
+    "asset_revisions": 10,
+    "jobs": 18,
+    "publications": 20,
+    "plans": 22,
+    "analysis_tasks": 13,
+    "read_receipts": 133,
+    "analyses": 13
+  },
+  "baseline": {
+    "relative_path": "_ledger/devpack/p1-z9-native-9f0814f9af414617861aeff380920c48/baseline.json",
+    "sha256": "229c0fa5acba40a294d070cc03e7e59317a69a3b8d7133d455eea197374f49c9"
+  }
+}
