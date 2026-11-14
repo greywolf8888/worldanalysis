@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">Worldanalysis — Evidence before understanding</title>
+  <desc id="desc">A local-first workflow connects documents, traceable evidence, and independent understanding on a dark blue background.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1224"/>
+      <stop offset="1" stop-color="#14283e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#5eead4"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#94a3b8" stroke-opacity="0.06"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="360" rx="24" fill="url(#background)"/>
+  <rect width="1280" height="360" rx="24" fill="url(#grid)"/>
+  <circle cx="1175" cy="32" r="220" fill="#38bdf8" fill-opacity="0.035"/>
+  <circle cx="940" cy="350" r="180" fill="#5eead4" fill-opacity="0.035"/>
+  <rect x="60" y="57" width="150" height="28" rx="14" fill="#38bdf8" fill-opacity="0.12" stroke="#38bdf8" stroke-opacity="0.3"/>
+  <circle cx="77" cy="71" r="4" fill="#5eead4"/>
+  <text x="91" y="76" fill="#b9eafc" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" letter-spacing="1.3">LOCAL-FIRST</text>
+  <text x="58" y="155" fill="#f1f5f9" font-family="Segoe UI, Arial, sans-serif" font-size="55" font-weight="700" letter-spacing="-1.8">WORLDANALYSIS</text>
+  <rect x="60" y="178" width="72" height="4" rx="2" fill="url(#accent)"/>
+  <text x="60" y="218" fill="#cbd5e1" font-family="Segoe UI, Arial, sans-serif" font-size="20">Evidence before understanding.</text>
+  <text x="60" y="248" fill="#94a3b8" font-family="Segoe UI, Arial, sans-serif" font-size="15">Traceable materials. Independent analysis.</text>
+  <text x="60" y="305" fill="#647f99" font-family="Segoe UI, Arial, sans-serif" font-size="12" letter-spacing="1.7">COLLECT / VERIFY / UNDERSTAND / REUSE</text>
+  <g stroke="#38bdf8" stroke-opacity="0.48" stroke-width="2" fill="none">
+    <path d="M 824 172 H 876"/>
+    <path d="m 869 167 7 5 -7 5"/>
+    <path d="M 1024 172 H 1076"/>
+    <path d="m 1069 167 7 5 -7 5"/>
+    <path d="M 1148 242 V 285 H 750 V 242" stroke-dasharray="5 6" stroke-opacity="0.22"/>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">
+    <rect x="678" y="103" width="146" height="140" rx="18" fill="#14243a" stroke="#334963"/>
+    <rect x="878" y="103" width="146" height="140" rx="18" fill="#123247" stroke="#38bdf8" stroke-opacity="0.55"/>
+    <rect x="1078" y="103" width="146" height="140" rx="18" fill="#153139" stroke="#5eead4" stroke-opacity="0.45"/>
+    <g fill="none" stroke="#a5c9e8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 735 132 H 755 L 768 145 V 175 H 735 Z"/>
+      <path d="M 755 132 V 145 H 768 M 743 154 H 760 M 743 162 H 756"/>
+    </g>
+    <g fill="none" stroke="#7dd3fc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m 951 131 21 12 v 24 l -21 12 -21 -12 v -24 Z"/>
+      <path d="m 930 143 21 12 21 -12 M 951 155 V 179"/>
+      <path d="m 943 153 6 6 11 -13" stroke="#cffafe" stroke-width="2.5"/>
+    </g>
+    <g fill="none" stroke="#5eead4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 1151 132 a 17 17 0 0 0 -12 29 c 4 4 5 6 5 10 h 14 c 0 -4 1 -6 5 -10 a 17 17 0 0 0 -12 -29 Z"/>
+      <path d="M 1145 178 H 1157 M 1148 184 H 1154 M 1151 122 V 117 M 1176 132 l 4 -4 M 1126 132 l -4 -4"/>
+    </g>
+    <text x="751" y="210" fill="#cbd5e1" font-size="13" font-weight="600">DOCUMENTS</text>
+    <text x="951" y="210" fill="#bae6fd" font-size="13" font-weight="600">EVIDENCE</text>
+    <text x="1151" y="210" fill="#99f6e4" font-size="12" font-weight="600">UNDERSTANDING</text>
+    <text x="951" y="311" fill="#647f99" font-size="11" letter-spacing="1.6">INCREMENTAL BY DESIGN</text>
+  </g>
+</svg>

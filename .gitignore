@@ -1,5 +1,7 @@
 # Runtime, local evidence and credentials are not source code.
 .runtime/
+# Isolated environment used by the README quick start.
+.venv/
 __pycache__/
 *.py[cod]
 *.sqlite*
