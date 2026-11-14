@@ -1,0 +1,14 @@
+{
+  "schema":"worldanalysis.source-review.v1",
+  "evidence_kind":"actual_original_PPTX_XML_read_only_review_not_a_new_block_read_receipt",
+  "source":"_ledger/075/exported/25033022845706.pptx",
+  "source_sha256":"1d1e4f9665a112b246200596a5baa5cb4a49aa13faeee3468a2606b85296a693",
+  "source_unchanged":true,
+  "recovery_task_id":"analysis-recovery-de1870971fc54584b13cc45deddec29a",
+  "target_block_id":"block-d81061dfbc9d467a85c1693be1a41656",
+  "layout":{"part":"ppt/slideLayouts/slideLayout7.xml","type":"blank","nodes":[{"shape_index":0,"id":"2","placeholder":"dt idx10","field_type":"datetimeFigureOut","cached_text":"1/27/13","blip_count":0},{"shape_index":1,"id":"3","placeholder":"ftr idx11","text":[],"blip_count":0},{"shape_index":2,"id":"4","placeholder":"sldNum idx12","field_type":"slidenum","cached_text":"‹#›","blip_count":0}]},
+  "master":{"part":"ppt/slideMasters/slideMaster1.xml","nodes":[{"shape_index":0,"id":"2","placeholder":"title","text":["Click to edit Master title style"],"blip_count":0},{"shape_index":1,"id":"3","placeholder":"body idx1","text":["Click to edit Master text styles","Second level","Third level","Fourth level","Fifth level"],"blip_count":0},{"shape_index":2,"id":"4","placeholder":"dt idx2","field_type":"datetimeFigureOut","cached_text":"1/27/13","blip_count":0},{"shape_index":3,"id":"5","placeholder":"ftr idx3","text":[],"blip_count":0},{"shape_index":4,"id":"6","placeholder":"sldNum idx4","field_type":"slidenum","cached_text":"‹#›","blip_count":0}]},
+  "interpretation":"Eight source template definitions instantiated across two slides account for the sixteen originally excluded instances. Explicit date/page-number caches, master-edit sample strings and empty footer definitions are not course propositions. The date cache must not be asserted as course date or human confirmation.",
+  "limits":"This is source-structure review, not new raster/text receipt creation. Shape-property elements exist; empty text or absent blip does not establish visual emptiness, lack of geometry, overlay absence, PowerPoint fidelity or rendering. Keep all original19 gaps, source bytes and recovery entries.",
+  "planned_disposition":"After the exact-source strict reuse path is verified, the Agent may explicitly re-exclude the template instances using original block/locator/artifact basis and recovery refs; do not auto-exclude based on low priority, manufacture read status, or resolve gaps."
+}

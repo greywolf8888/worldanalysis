@@ -136,6 +136,17 @@ def claim_pending(analysis, project_id, agent):
         return analysis._task(task["task_id"])
 
 
+def reuse_binding(analysis, task):
+    """Read the sole validated recovery source; callers cannot select a source."""
+    row = analysis.connection.execute("SELECT * FROM analysis_recovery_requests WHERE recovery_task_id=?", (task["task_id"],)).fetchone() if _exists(analysis) else None
+    if row is None:
+        return None
+    current, _ = _validate_attempt(analysis, row)
+    if dict(task) != dict(current):
+        raise ContractError("recovery reuse task scope/version mismatch")
+    return {"source_task_id": row["source_task_id"], "block_id": row["block_id"]}
+
+
 def validate_result(analysis, task, result):
     """Recovery may append gaps, but cannot erase or revise source acceptance."""
     row = analysis.connection.execute("SELECT * FROM analysis_recovery_requests WHERE recovery_task_id=?", (task["task_id"],)).fetchone() if _exists(analysis) else None

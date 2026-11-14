@@ -589,12 +589,19 @@ def _assertions(prior, current, reusable):
 
 def _plan(run, task, policy=_POLICY_V2):
     current = run.source(task)
-    row = run.conn.execute("""SELECT t.task_id FROM analyses a
-        JOIN analysis_tasks t ON t.task_id=a.task_id
-        JOIN publications p ON p.publish_id=t.publish_id
-        WHERE t.project_id=? AND p.revision<? ORDER BY p.revision DESC,t.completed_at DESC,t.task_id LIMIT 1""",
-        (task["project_id"], current["revision"])).fetchone()
-    prior = run.accepted(run.task(row[0])) if row else None
+    from .analysis_recovery import reuse_binding
+    binding = reuse_binding(run.analysis, task)
+    if binding:
+        if policy != _POLICY_V2:
+            raise ContractError("same-publication recovery reuse requires v2")
+        prior = run.accepted(run.task(binding["source_task_id"]))
+    else:
+        row = run.conn.execute("""SELECT t.task_id FROM analyses a
+            JOIN analysis_tasks t ON t.task_id=a.task_id
+            JOIN publications p ON p.publish_id=t.publish_id
+            WHERE t.project_id=? AND p.revision<? ORDER BY p.revision DESC,t.completed_at DESC,t.task_id LIMIT 1""",
+            (task["project_id"], current["revision"])).fetchone()
+        prior = run.accepted(run.task(row[0])) if row else None
     now_blocks = current["blocks"]
     old_blocks = prior["source"]["blocks"] if prior else {}
     shared = now_blocks.keys() & old_blocks.keys()
@@ -605,6 +612,8 @@ def _plan(run, task, policy=_POLICY_V2):
     reusable, proofs = set(), {}
     if same_agent:
         for ident in shared - changed:
+            if binding and ident == binding["block_id"]:
+                continue
             if ident not in current_proven or ident not in old_proven:
                 continue
             entry = prior["entries"][ident]
@@ -737,9 +746,16 @@ def validate_reused(analysis, task, currentBlock, currentBundle, receipt):
         source_task = run.task(actual["source_task_id"])
         if source_task["project_id"] != stored_task["project_id"] or source_task["task_id"] == stored_task["task_id"]:
             raise ContractError("historical reuse source task project/scope mismatch")
+        from .analysis_recovery import reuse_binding
+        binding = reuse_binding(analysis, stored_task)
+        if binding and (source_task["task_id"] != binding["source_task_id"] or ident == binding["block_id"]):
+            raise ContractError("historical reuse does not match fixed recovery source/target")
         prior = run.accepted(source_task)
         if prior["source"]["revision"] >= current["revision"]:
-            raise ContractError("historical reuse source version is not prior")
+            if not (binding and actual.get("reuse_policy") == _POLICY_V2
+                    and prior["source"]["revision"] == current["revision"]
+                    and source_task["publish_id"] == stored_task["publish_id"]):
+                raise ContractError("historical reuse source version is not prior")
         if _loads(stored_task["agent_json"], 4096) != prior["result"]["agent"]:
             raise ContractError("historical reuse agent/provider/model/prompt mismatch")
         if ident not in prior["entries"] or prior["entries"][ident]["status"] != "read":
