@@ -1,0 +1,36 @@
+{
+  "schema": "worldanalysis.platform-first-execution.v1",
+  "recorded_at_utc": "2026-11-15T16:51:26Z",
+  "task_timezone": "Asia/Shanghai",
+  "user_selected_route": "enumerate_all_videos_then_acquire_manuscript_and_courseware_then_supplement_only_confirmed_gaps",
+  "selected_root": "/apps/教育分析学习/待分析/163378_AI视频创作",
+  "include_descendants": true,
+  "historical_inventory": {
+    "reference": "_ledger/devpack/p2-real-target-readback-20261114.json",
+    "video_count": 7,
+    "current_inventory_verified": false
+  },
+  "live_attempt": {
+    "operation": "open_selected_course_folder",
+    "browser": "connected Chrome",
+    "domain": "pan.baidu.com",
+    "result": "blocked_by_host_site_safety_policy",
+    "content_observation_authorized": false,
+    "user_permission_prompt_shown": false,
+    "automatic_approval_review_attempted": false,
+    "alternate_access_attempted": false
+  },
+  "actual_first_pass": {
+    "state": "not_started_access_blocked",
+    "current_enumeration_complete": false,
+    "videos_visited": 0,
+    "manuscripts_acquired": 0,
+    "courseware_files_acquired": 0,
+    "generation_requests": 0,
+    "paid_api_requests": 0,
+    "full_media_files_downloaded": 0,
+    "supplement_jobs_executed": 0
+  },
+  "resume_condition": "The authorized browser channel must actually regain site access; then enumerate the selected directory afresh. Do not bypass the current site-safety refusal through another channel.",
+  "not_evidence_of": ["course_complete", "first_pass_complete", "remote_full_coverage", "browser_cache_audited"]
+}
