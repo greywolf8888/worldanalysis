@@ -1,0 +1,222 @@
+# Worldanalysis 课程教材生产开发文档
+
+给定一个已经下载的课程文件夹，Worldanalysis 对原件做独立入库，准备转写、附件和观察画面，由整理者逐集对照原视频、撰写教材、走查实际步骤，再由脚本验收和发布。每个课程包有且只有一篇可交付教材 `课件/00 开始学习.md`。
+
+教材正文按原课顺序用老师第一人称讲准备、动作、参数、真实案例、纠错与可见结果。关键帧或附件原图紧跟对应步骤。段落与原图的出处保存在 Markdown 注释里，原片和附件入口放在文末默认折叠的「原课与配套资料」。本地入口由现有的[课程整理 Skill](../.agents/skills/course-material-archive/SKILL.md) 接续，编辑判定见[写作流程](../.agents/skills/course-material-archive/workflow.md#本地教材工作流)和[验收说明](../.agents/skills/course-material-archive/acceptance.md#本地教材验收)。
+
+~~~mermaid
+flowchart TD
+    A["课程原件文件夹"] --> B["start · 入库与画音、附件准备"]
+    B --> C["逐集核对原片和附件 · 写教材与取原图"]
+    C --> D["preview · 编译带图预览"]
+    D --> E["只读跟做并填写验收记录"]
+    E --> F["accept · 核验同版证据和 Obsidian 阅读"]
+    F --> G["00 开始学习.md · verify 复验"]
+    E -->|发现缺项| C
+~~~
+
+## 1. 从课程文件夹开始
+
+在 Worldanalysis 根目录打开 PowerShell。源文件夹可在其他盘。路径中有空格时加引号。入库复制原始文件并比较 SHA-256，保留输入目录供以后核对。默认输出为 `整理结果/课程教材/<原件文件夹名>`。同名课程可用 `--output` 指明独立包目录。
+
+~~~powershell
+$courseTool = '_tools/course_production/course.ps1'
+& $courseTool start 'D:\课程原件\一门课'
+& $courseTool start 'D:\课程原件\另一门课' --output 'G:\课程教材\另一门课'
+~~~
+
+`start` 自动完成原件盘点、附件读取、视频转写和画音候选扫描。随后从它回报的课程包继续。重复 `start` 会核对输入和入库快照，复用可用的处理结果。拿到已有课程包时可直接从快照续作。
+
+~~~powershell
+$course = 'G:\Worldanalysis\整理结果\课程教材\一门课'
+& $courseTool status $course
+& $courseTool prepare $course
+~~~
+
+`status` 只列出课程包和现有产物。 `verify` 用于核实正式发布件。课程文件发生变化时，为新输入建独立包，或者恢复已登记的快照来续作旧包。
+
+### 运行环境
+
+- **Python 3.12**。Windows 包装脚本优先使用 `WORLDANALYSIS_PYTHON`，再尝试仓库内的 `.venv` 或 `py -3.12`。也可直接用兼容解释器执行 `_tools/course_production/course.py`。项目本地模块和模型从 `.runtime` 读入。安装或更新第三方依赖时用项目锁定版本。 [依赖清单](../requirements-lock.txt)
+- **视频**。需要 PATH 中的 `ffmpeg`、`ffprobe`，以及 PyAV、OpenCV、Pillow、NumPy。CPU 音频转写和人声检测使用 `.runtime/course-method-sensevoice/model` 的已校验 SenseVoiceSmall、词表和 Silero VAD。
+- **附件**。PDF 用 pypdf 和 pypdfium2，扫描页和常规图片由 RapidOCR 辅助。旧 DOC 需要 Node.js 和现有的本地 `word-extractor`。提取状态和缺口保存在文档记录。图片识别的数值与小字回原图核对。
+- **阅读验收**。需要支持 WebSocket 的 Node.js 和桌面 Obsidian。可用 `accept --obsidian-exe <路径>` 或 `OBSIDIAN_EXE` 指定安装位置。Windows 也会检查本机常见安装目录。验收使用临时独立阅读环境。
+- **可选 GPU**。用已安装的 CrispASR Vulkan 和本地权重。缺省 CPU 路径可以继续完成。传入 GPU 路径时应同时给出对应权重。执行例见第 3 节。
+
+新检出仓库时，在兼容的 Python 3.12 环境安装项目锁定依赖与 `sherpa-onnx==2.0.1`。将 `model.int8.onnx`、`tokens.txt` 和 `silero_vad.onnx` 保存在 `.runtime/course-method-sensevoice/model/`。转写与候选扫描会校验模型文件。旧 DOC 处理另需在 `.runtime/course-method-doc` 安装 `word-extractor@1.0.4`。 [SenseVoice 模型与词表](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tree/2365baeacb507f821a0c8120fcee3d484dba7a07) · [Silero VAD 模型](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx)
+
+## 2. 课程包与所有权
+
+~~~text
+<课程包>/
+  原始资料/                    原始文件快照，保留相对路径
+  课件/
+    00 开始学习.md              验收后的唯一教材
+    原图/                      供教材使用的原片截图或附件图
+  .course/
+    project.json                输入身份
+    work/
+      讲次顺序.json              讲号的阅读顺序
+      <讲号> 转写.md              页内快速定位用
+      资料/                      按来源提取的原文、结构、图片及缺口
+      媒体补查/                  每集画音候选和联系表
+      源片段复核/                按原时间轴取的小窗，用于辨认短动作
+      选用素材/                  已登记的工作原图
+      教材.md                    编辑者的单篇稿
+      阅读预览/                  当前带图阅读稿和版面回执
+      验收填写模板.json          由当前预览生成，供人填写
+      验收记录.json              编辑者核对原件和只读走查后的记录
+    ledger/
+      intake.json               原件清单、尺寸及 SHA-256
+      inventory.json            本课程的讲号与附件身份
+      media-summary.json        视频时间轴索引
+      documents-summary.json    附件编号及提取状态
+      figures.json              每张图的原件、时间或页码、画幅和裁剪
+      publications/<SHA>.json   按发布正文指纹存放的版本回执
+~~~
+
+课程包用自己的输入清单和状态定位每个阶段。教材内图片和来源链接相对 `课件` 解析，搬动整个包仍然可以检查。`.course` 放编辑缓存和验收证据，读者从教材文件进入。正式发布前会保留旧教材可用，验证完选用图片和当前预览后，以替换教材正文作为提交点。
+
+## 3. 证据准备与模型路线
+
+### 原字幕、转写和语音候选
+
+1. `prepare` 依据稳定的文件路径和哈希建立原视频讲号。顺序缺省按相对路径自然排序。通过目录、原课开头和内容衔接确认真实教学顺序。需要改顺序时编辑 `讲次顺序.json` 的讲号数组，每个视频出现一次。讲号与原片身份保持绑定。
+2. 可用的原字幕优先。脚本尝试匹配同目录同名的 SRT/VTT 和常见语言后缀；有唯一内嵌文字字幕时提取。时间轴必须落在原片范围。字幕歧义或解析缺口会记录，之后可核对原音并选定。没有合格字幕但有音轨时以本地 ASR 生成候选文本。用 FFmpeg 解码 16 kHz 单声道 PCM，标准 CPU 版在停顿附近分段，记录视频与选用音轨的起点偏移。
+3. 用 Silero VAD 找字幕遗漏的人声窗口。已有时间码、声音和画面一起看。第二模型输出用于补查，教材里的术语、数值和动作由原片及附件确认。静音区间照样查看画面。
+4. 音轨缺失时，先找包内同版有声视频。使用 `voiced_reference` 时脚本比较两版时长、13 个沿时间轴分布的原画及时间戳，只在画面和时间轴符合时采用有声件并保留两份身份。原视频有可用音轨时沿用原音轨。
+
+需要控制字幕或音轨时，可在 `.course/work/媒体设置.json` 写讲号键。`audio_track` 是从零开始的音轨序号，`subtitle` 是课内原件相对路径，显式 `null` 让该讲走音轨。`language` 可选 `auto`、`zh`、`en`、`ja`、`ko`、`yue`。改完运行 `prepare`。
+
+~~~json
+{
+  "1": {
+    "language": "zh",
+    "audio_track": 0,
+    "subtitle": "第一讲.zh-Hans.srt"
+  }
+}
+~~~
+
+GPU 批量初稿用 `prepare` 或 `start` 的 `--gpu-exe` 与 `--model`。SenseVoiceSmall GGUF 使用 Vulkan、30 秒分段、额外重叠为零。成功后该课程包记住选用的本地运行配置，显式 `prepare --cpu` 可切回 CPU。独立复识用 `refine` 和 Whisper large-v3-turbo GGML 权重，围绕疑似漏词的小窗输出。脚本保留每讲的候选和独立识别，实际采用的词句仍回原音。环境变量也可配置 `WORLDANALYSIS_COURSE_ASR_EXE`、`WORLDANALYSIS_COURSE_SENSEVOICE_MODEL`、`WORLDANALYSIS_COURSE_WHISPER_MODEL`。GPU 工作文件临时保存在 Worldanalysis 的 `.runtime/tmp`。
+
+~~~powershell
+& $courseTool prepare $course --gpu-exe 'G:\本地运行包\crispasr.exe' --model 'G:\本地模型\sensevoice-small-q8_0.gguf'
+& $courseTool refine $course --gpu-exe 'G:\本地运行包\crispasr.exe' --model 'G:\本地模型\ggml-large-v3-turbo-q5_0.bin'
+~~~
+
+### 画面与关键帧
+
+媒体扫描按原片呈现时间逐帧解码。常规横屏有字幕每秒约 4 次低清比较，竖屏或无可用字幕每秒约 6 次。全局变化用于定位换页和成品确认，10×8 区域变化和红色标记用于定位小控件、圈点、进度及菜单。停留画面有周期候选，语音中的动作词用于补定位。近黑画面只作为进一步核实的线索。
+
+依原时间轴查看候选和原片。对短菜单、同屏圈点、滑动和纯画面操作，重点看动作前、动作发生时、动作后的结果。用 `window` 在候选前后连续解码，适应短时状态、小范围裁切及非编码关键帧。用 `keep` 登记要插入正文的原始像素。上一步的结果图与下一步使用时的输入状态尽量连贯。只有字幕或画面无法说明步骤时，按原话和原附件取证。
+
+~~~powershell
+& $courseTool window $course 1 12.4 15.2 --label '展开菜单' --step 0.1
+& $courseTool window $course 1 12.4 15.2 --label '检查局部' --crop 100 150 960 740
+& $courseTool keep $course 'G:\课程工作\取图清单.json'
+~~~
+
+`keep` 的 JSON 清单每项有图名和一个来源。视频用稳定讲号及原片秒数。文档用编号和从 1 开始的页码，PDF 可选 `scale`。`crop` 可用于两者，坐标是图像左、上、右、下。选择图片文件名称时省去 `.png`。同名已选图保持同一原件与像素；替换时用新名称。
+
+~~~json
+[
+  {"name": "展开比例菜单", "lesson": 1, "time": 13.25, "crop": [100, 150, 960, 740]},
+  {"name": "核对说明页", "document": "D001", "page": 1, "scale": 1.5}
+]
+~~~
+
+### 附件
+
+PDF 先读原文字和图片位置，遇到扫描或难提取页面再渲染、识别并查看原页。原表格保留工作表、单元格、原公式和单位，数值案例对照实际行。PPTX 读页面正文和原生资源，取内嵌图时脚本检查该页与原图的绑定。Word 和 XMind 按原节点或章节保留定位。原样片、压缩包及提取能力以外的文件也进入清点，按实际使用或缺口登记。所需原件在包内拆到页、图、表格和案例，正文当页写清具体内容。
+
+## 4. 编写、预览和验收
+
+### 编写约定
+
+在 `.course/work/教材.md` 写一个一级标题。有视频时每集一个对应的二级标题，按 `讲次顺序.json` 排列。长视频用三级标题划分动作组。纯文档项目用二级标题组织原件里的任务。可以在同一篇补文档任务章节。
+
+每节保留可复制的设置和输入。带读用「我准备」「我打开」「我填写」「我确认」推进，把原例、可见结果和遇到故障时怎么修写在实际发生位置。各图紧跟动作段落，图后接后续动作。使用同一素材重新举例时注明为练习。
+
+- 原视频出处 `{{01|00:12.4–00:15.2}}`。使用支撑正文的起止时间。
+- 附件出处 `{{D001|第 1 页，尺寸设置}}` 或 `{{D002|Sheet1 C4:O6}}`。
+- 在动作段落之后独立一段用 `{{img:展开比例菜单|550}}` 插入已登记的原图。需要多张时连续插入。描述图里要看的对象。
+- 发布器将出处转换为隐藏注释和文末折叠资料。过程记录留在工作区。用原资料编号、时间码和实际章节验收正文。
+
+### 审核记录与提交
+
+~~~powershell
+& $courseTool preview $course
+# 读预览，逐集对照原片，核查附件；按模板填写 .course/work/验收记录.json
+& $courseTool accept $course
+& $courseTool verify $course
+~~~
+
+`preview` 编译图文稿并生成对应的 `验收填写模板.json`。将它另存为 `验收记录.json` 后填入实查结果。脚本预填的来源、哈希、时间轴和语音候选只帮助定位。编辑者填实际看到、听到和跟做到的内容。
+
+| 记录 | 要填写的内容 |
+| --- | --- |
+| `snapshot` | 复制本次模板的正文、原图和证据指纹。换稿后使用新模板，对变更部分重新复核。 |
+| `episodes` | 每个视频保留原件身份、讲号和对应二级标题。`watched` 按顺序列原片的真实时间范围、类别（教学、原例、说明、过场）和观察。看片记录覆盖全片首尾，包括静音、停留画面等。纯文档项目留空。 |
+| `key_steps` | 每个关键步骤填 `range_s`（原视频起止秒数）、`anchor`（预览里能找到的可见动作短句）、`figures`（紧贴该动作的 PNG 名）。有画面的原图时间须在步骤区间内。纯口述步骤可用 `visual_note` 交代依据。 |
+| `visual_basis` | 从「原片」「附件原图」「无可教学画面」选择实际依据，在 `visual_note` 说明可辨内容。适用时正文要有本集原帧或相应附件原图。 |
+| `audio_checks` | 每个候选回听后记录「已补正文」「正文已涵盖」「非教学声音」「听辨缺口」之一及理由。遇到参数等关键缺口时写清可核实的值和适用条件。 |
+| `documents` | 每件附件有用途和实际核对说明。可用「引用」「用作转写」「参考」「重复」「原样存档」「提取缺口」。引用的附件回到相应页、表或章节。 |
+| `follow_along` | 只读预览完成关键任务。每条填所在二级标题、准备/入口/设置/结果/纠错五项可见文字的定位、同章节隐藏出处、实际看到的 PNG 文件名。可用 `visual_note` 说明纯文字依据。 |
+
+单个讲次的记录可以按下面的结构扩展。`watched` 的 `note` 写原片的实际观察。`anchor` 用预览中与配图紧邻、能唯一定位到这一步的原样短句。有多个片段时，为整集的各段补上对应观察。
+
+~~~json
+{
+  "watched": [
+    {"range_s": [0, 11.8], "kind": "说明", "note": "讲师打开画板并说明要检查输出规格"},
+    {"range_s": [11.8, 24.6], "kind": "教学", "note": "展开比例菜单，选中设置并打开预览"}
+  ],
+  "key_steps": [
+    {"range_s": [12.4, 15.2], "anchor": "我展开比例菜单", "figures": ["展开比例菜单.png"]}
+  ],
+  "visual_basis": "原片",
+  "visual_note": "比例菜单中的选择项和应用后的界面可见"
+}
+~~~
+
+`accept` 用同一版预览比对逐集时间、关键步骤邻图、附件去向和跟做证据，再在隔离的 Obsidian 阅读视图从开头滚到底，检查图像加载、跳转、横向溢出、折叠资料和引文隐藏。阅读通过后发布。`verify` 检验已发布正文、对应图片和原件与发布记录是否一致。源码定位与结构检查由脚本完成。是否忠实于原课、学员能否按内容做出产物，由逐集核对和读者走查负责。能做实际软件验证时，把真实运行结论写在对应记录。
+
+## 5. 开发入口与维护
+
+| 代码 | 责任 |
+| --- | --- |
+| [course.ps1](../_tools/course_production/course.ps1) 和 [course.py](../_tools/course_production/course.py) | 对外单课程命令。传入原件目录后组织准备、预览、审核和验收。 |
+| [project.py](../_tools/course_production/project.py) | 课程包位置、快照、哈希、原子写入和单课程锁。 |
+| [prepare.py](../_tools/course_production/prepare.py)、[prepare_documents.py](../_tools/course_production/prepare_documents.py) | 讲号、字幕及底稿路由。复用原生文档读取、PDF 渲染和 OCR。 |
+| [speech.py](../_tools/course_no_subtitles/speech.py)、[gpu_asr.py](../_tools/course_production/gpu_asr.py) | CPU 转写、可选的 SenseVoice Vulkan 转写和 Whisper 候选复识。 |
+| [review_media.py](../_tools/course_production/review_media.py)、[frames.py](../_tools/course_production/frames.py) | 全片画音扫描、同版有声对照、小窗和真帧取图。 |
+| [publish.py](../_tools/course_production/publish.py)、[reader_review.py](../_tools/course_production/reader_review.py)、[acceptance.py](../_tools/course_production/acceptance.py) | 同篇编译、隐藏出处、跟做校验、逐集门槛、发布与回读。 |
+| [verify_obsidian.cjs](../_tools/course_production/verify_obsidian.cjs) | 将本课引用的原件和图片带到隔离小库，检查实际阅读视图。 |
+| [test_course_production.py](../tests/test_course_production.py) | 用独立生成的源材料覆盖纯文档、视频加附件、字幕优先、静默片段、非编码关键帧、过期验收和续作。 |
+
+- **输入恢复**。入库中断可以用同一 `start` 续作。原件文件完整确认后才生成正式快照记录。课程包的录屏、字幕和附件一致时重跑 `prepare` 复用底稿。不同参数或权重生成新的索引。
+- **证据更新**。先更新原始媒体设置或取图记录，再预览；按新预览复核相关讲次。旧回执以正文、图片和提取证据的指纹识别。说过的参数、画面出现的动作和最终结果缺任一项时，回到对应原片、表格或讲义补齐。
+- **发布恢复**。先校验同名图，复制新图并保存当前版本回执，再切换正文。新图使用新名，已发布正文版本保存在各自回执的 `body` 中，配图保留。手工改过的正式正文没有匹配回执时保留现场，把需要的编辑合入工作稿后再交验。
+- **回归检查**。改原件、缓存、章节、来源或发布逻辑时，跑独立课程测试。要同时真测桌面阅读，设置 `WORLDANALYSIS_TEST_OBSIDIAN` 指向安装的 Obsidian；留空时测试覆盖准备、预览和应拒绝的情况。
+
+~~~powershell
+$env:WORLDANALYSIS_PYTHON = '<项目 Python 3.12 的完整路径>'
+$env:WORLDANALYSIS_TEST_OBSIDIAN = 'D:\Software\Obsidian\Obsidian.exe'
+& $env:WORLDANALYSIS_PYTHON -X utf8 -B -m unittest discover -s tests -p 'test_course_production.py' -v
+~~~
+
+## 6. 引用的项目
+
+### 生产依赖与研究资料
+
+- **音频转写与复核**采用 SenseVoiceSmall、sherpa-onnx、Silero VAD。可选 CrispASR Vulkan 和 Whisper Turbo，Qwen3-ASR 用于对照其他中文复识路线。参见 [SenseVoice](https://github.com/QwenAudio/SenseVoice)、[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)、[Silero VAD](https://github.com/snakers4/silero-vad)、[CrispASR](https://github.com/CrispStrobe/CrispASR)、[Whisper large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo)、[Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR)。
+- **解码和原图**使用 FFmpeg、PyAV、OpenCV。参考 Screex 的屏幕状态思路和 Waken 的控件定位方法。参见 [FFmpeg](https://ffmpeg.org/)、[PyAV](https://pyav.org/)、[OpenCV](https://github.com/opencv/opencv)、[Screex](https://github.com/blueprintparadise/Screex)、[Waken](https://www.research.autodesk.com/app/uploads/2023/03/waken-reverse-engineering-usage.pdf_rec2V6wlIVQVxnwlr.pdf)。
+- **附件与阅读**使用原生文件提取、PDFium 和 RapidOCR，采用 Obsidian 的内嵌图片和折叠块。参见 [pypdf](https://github.com/py-pdf/pypdf)、[pypdfium2](https://github.com/pypdfium2-team/pypdfium2)、[RapidOCR](https://github.com/RapidAI/RapidOCR)、[Obsidian 折叠块](https://help.obsidian.md/callouts)、[Google 长文组织](https://developers.google.com/tech-writing/two/large-docs)、[Clarity 编辑规则](https://github.com/addyosmani/clarity/blob/main/references/edit.md)、[文档协作与读者测试](https://github.com/anthropics/skills/blob/main/skills/doc-coauthoring/SKILL.md)。
+- **后续可比较的方法**包括从稳定帧识别幻灯片、按任务找界面区域、检测漏转、处理复杂文档版式和扫描小字。参见 [slide-detect](https://github.com/mizorewww/slide-detect)、[VG-GUI-TASKER](https://github.com/VG-GUI-TASKER/VG-GUI-TASKER)、[whisper-audit](https://github.com/xr843/whisper-audit)、[Docling](https://docling-project.github.io/docling/usage/advanced_options/)、[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)。
+
+### 参考过的课程整理项目
+
+- 视频、字幕与 PDF 进入同一教材，以及真实取图和链接校验。 [vid2courseware](https://github.com/Aster925/vid2courseware) · [video-to-chapter-book](https://github.com/flyfei-cmd/video-to-chapter-book)
+- 主题、来源、章节的稳定关联，以及多份原料的归并。 [study-notebook](https://github.com/LucyGuo0422/study-notebook) · [note-organizer](https://github.com/Renakoni/note-organizer)
+- 媒体探查、Markdown 出品、字幕优先与分讲检查。 [DeepTutor](https://github.com/HKUDS/DeepTutor) · [video2book](https://github.com/LINJIANG12/video2book)

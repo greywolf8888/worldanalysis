@@ -230,6 +230,7 @@ worldanalysis/
 | :--- | :--- |
 | [English documentation](<README.en.md>) | 与本页对应的英文介绍和使用说明。 |
 | [本地执行说明](<WORLDANALYSIS.md>) | 原环境入口、历史实测与未完成范围；部分材料路径仅本机存在。 |
+| [本地课程教材开发文档](<docs/课程资料整理与 Obsidian 教材制作手册.md>) | 从课程文件夹入库到逐集复核、配图和 Obsidian 发布。 |
 | [开发包总览](<worldanalysis_agent_devpack_20261110/README.md>) | 项目意图、模块划分与设计文档索引；规划不等于全部已实现。 |
 | [架构与数据契约](<worldanalysis_agent_devpack_20261110/02_ARCHITECTURE_AND_CONTRACTS.md>) | 采集、分析、台账与证据的接口边界。 |
 | [分析 Agent 规范](<worldanalysis_agent_devpack_20261110/04_ANALYSIS_AGENT.md>) | 阅读、引用、核验、补采及增量更新要求。 |
