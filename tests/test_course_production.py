@@ -78,6 +78,9 @@ class CourseProductionTest(unittest.TestCase):
             self.command("accept", self.package, "--obsidian-exe", OBSIDIAN)
             verified = self.command("verify", self.package)
             self.assertIn(f'"videos": {expected_videos}', verified)
+            self.assertTrue(json.loads(verified)["package_verified"])
+            self.assertFalse(json.loads(verified)["verified"])
+            self.assertIn("尚未交付到日常", self.command("verify", self.package, "--require-vault", okay=False))
             self.assertEqual(list((self.package / "课件").rglob("*.md")), [self.package / ENTRY])
             self.assertIn("<!-- 段落出处", (self.package / ENTRY).read_text(encoding="utf-8"))
         else:
@@ -114,6 +117,65 @@ class CourseProductionTest(unittest.TestCase):
             with archived.open("ab") as stream:
                 stream.write(b"\n")
             self.assertIn("原件有增删或变更", self.command("verify", self.package, okay=False))
+
+    def test_vault_delivery_preserves_the_existing_entry_and_requires_reopen(self):
+        sys.path.insert(0, str(CLI.parent))
+        from project import CourseProject, sha, write
+        from vault_delivery import confirm, delivery_status, install
+
+        write(self.source / "说明.txt", "原内容")
+        project = CourseProject.initialize(self.source, self.package)
+        vault = self.root / "用户日常库"
+        (vault / ".obsidian").mkdir(parents=True)
+        course_name = "已有学习入口"
+        target = vault / course_name / ENTRY
+        write(target, "# 保存的旧稿\n")
+        previous = sha(target)
+
+        picture = Path("课件/原图/指示图.png")
+        file = self.package / picture
+        file.parent.mkdir(parents=True)
+        file.write_bytes(b"publication fixture")
+        body = (
+            "# 新版\n\n## 导出预览\n\n![指示图](原图/指示图.png)\n\n"
+            "> [!info]- 原课与配套资料\n> [说明](../原始资料/说明.txt)\n"
+        )
+        write(project.entry, body)
+        published = {"body": body, "outputs": {ENTRY.as_posix(): sha(project.entry), picture.as_posix(): sha(file)}}
+        with self.assertRaisesRegex(ValueError, "已有不同的教材"):
+            install(project, published, vault, course_name)
+        self.assertEqual(sha(target), previous)
+
+        state = install(project, published, vault, course_name, previous)
+        self.assertEqual(sha(target), sha(project.entry))
+        self.assertEqual(sha(project.ledger / "obsidian-previous" / previous / ENTRY.name), previous)
+        self.assertTrue((vault / course_name / picture).is_file())
+        self.assertTrue((vault / course_name / "原始资料/说明.txt").is_file())
+        with self.assertRaisesRegex(ValueError, "尚待真实窗口重开"):
+            delivery_status(project, published, required=True)
+        observed = {
+            **{key: state[key] for key in ("entry", "sha256", "installed_at")},
+            "mode": "preview", "reopened": True, "reached_bottom": True, "references_collapsed": True,
+            "visible_citations": False, "section_seen": "导出预览", "image_seen": picture.as_posix(),
+            "note": "只用于验证记录格式的测试样例",
+        }
+        with self.assertRaisesRegex(ValueError, "日常 Obsidian 库重开"):
+            confirm(project, published, {**observed, "entry": str(project.entry)})
+        confirm(project, published, observed)
+        self.assertEqual(delivery_status(project, published, required=True)["status"], "已记录日常库重开")
+        self.assertEqual(install(project, published)["observation"], observed)
+
+        write(project.entry, body.replace("# 新版", "# 再版"))
+        revised = {"body": project.entry.read_text("utf8"),
+                   "outputs": {**published["outputs"], ENTRY.as_posix(): sha(project.entry)}}
+        self.assertEqual(delivery_status(project, revised)["status"], "阅读库待更新")
+        install(project, revised)
+        with self.assertRaisesRegex(ValueError, "尚待真实窗口重开"):
+            delivery_status(project, revised, required=True)
+        write(target, "# 读者的现场编辑\n")
+        self.assertEqual(delivery_status(project, revised)["status"], "阅读库文件待核对")
+        with self.assertRaisesRegex(ValueError, "已有不同的教材"):
+            install(project, revised)
 
     def make_clips(self):
         from PIL import Image, ImageDraw

@@ -159,13 +159,23 @@ def main(argv=None):
     for name, help_text in (
         ("status", "查看课程包内的当前产物"),
         ("preview", "编译一篇阅读稿和逐集验收填写模板"),
-        ("accept", "绑定原片复核和真实阅读检查后发布"),
-        ("verify", "复验已发布正文、配图、原件及回执"),
+        ("accept", "核验课程包预览并更新已绑定的日常阅读库"),
+        ("verify", "复验课程包文件与交付状态"),
+        ("deliver", "在日常 Obsidian 阅读库更新课程入口"),
+        ("confirm-vault", "登记日常 Obsidian 库重开后的实际阅读结果"),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("project", type=Path)
         if name == "accept":
             command.add_argument("--obsidian-exe", type=Path)
+        if name == "verify":
+            command.add_argument("--require-vault", action="store_true", help="要求日常阅读入口及同版重开核验")
+        if name == "deliver":
+            command.add_argument("--vault", type=Path, help="已在 Obsidian 使用的本地库路径")
+            command.add_argument("--course-folder", help="本课在该库中的一级文件夹名")
+            command.add_argument("--reviewed-previous", help="已核实身份、可替换的旧教材 SHA-256")
+        if name == "confirm-vault":
+            command.add_argument("observation", type=Path, help="日常阅读库的实际窗口核验记录")
     window = commands.add_parser("window", help="连续解码原片小窗以核对菜单和同屏变化")
     window.add_argument("project", type=Path)
     window.add_argument("lesson", type=int)
@@ -252,12 +262,25 @@ def main(argv=None):
                 print(project.work / "验收填写模板.json")
             else:
                 from acceptance import verify_publication
+                from vault_delivery import confirm, delivery, delivery_status, install
 
                 record = accept(project, args.obsidian_exe) if args.action == "accept" else verify_publication(project)
-                print(json.dumps({"verified": True, "entry": str(project.entry),
+                if args.action == "deliver":
+                    print(json.dumps(install(project, record, args.vault, args.course_folder, args.reviewed_previous),
+                                     ensure_ascii=False, indent=2))
+                    return 0
+                if args.action == "confirm-vault":
+                    print(json.dumps(confirm(project, record, read(args.observation)), ensure_ascii=False, indent=2))
+                    return 0
+                if args.action == "accept" and delivery(project):
+                    install(project, record)
+                live = delivery_status(project, record, required=getattr(args, "require_vault", False))
+                print(json.dumps({"verified": live["status"] == "已记录日常库重开",
+                                  "package_verified": True, "entry": str(project.entry),
                                   "videos": len(record["review"]["episodes"]),
                                   "attachments": len(record["review"]["documents"]),
-                                  "images": len(record["outputs"]) - 1}, ensure_ascii=False, indent=2))
+                                  "images": len(record["outputs"]) - 1,
+                                  "vault_delivery": live}, ensure_ascii=False, indent=2))
         return 0
     except subprocess.CalledProcessError as error:
         detail = error.stderr.decode("utf-8", "replace")[-1500:] if isinstance(error.stderr, bytes) else ""
