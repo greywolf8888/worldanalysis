@@ -34,17 +34,17 @@ def timecode(value):
     return result
 
 
-def figure_location(info):
+def figure_location(info, display_numbers):
     if "diagram" in info:
         spec = info["diagram"]
         start, end = spec["range_s"]
-        return f"第 {spec['lesson']} 讲 {stamp(start)}–{stamp(end)} · {spec['basis']}"
+        return f"第 {display_numbers[spec['lesson']]} 讲 {stamp(start)}–{stamp(end)} · {spec['basis']}"
     if "document" in info:
         return f"《{Path(info['source']).name}》第 {info['page']} 页"
     hours, remainder = divmod(round(info["pts"] * 100), 360000)
     minutes, centiseconds = divmod(remainder, 6000)
     prefix = f"{hours:02}:" if hours else ""
-    return f"原课第 {info['lesson']} 讲 {prefix}{minutes:02}:{centiseconds / 100:05.2f}"
+    return f"原课第 {display_numbers[info['lesson']]} 讲 {prefix}{minutes:02}:{centiseconds / 100:05.2f}"
 
 
 def hidden_source(kind, detail):
@@ -118,6 +118,7 @@ def compile_textbook(course, work, ledger, *, art_root, order):
             len(order) != len(movies) or set(order) != set(movies)):
         raise ValueError("讲次顺序须恰好包含全部视频讲号，各一次")
     movies = {number: movies[number] for number in order}
+    display_numbers = {number: position for position, number in enumerate(order, 1)}
     docs = {row["id"]: row for row in read(ledger / "documents-summary.json")["records"]}
     figure_path = ledger / "figures.json"
     manifest = read(figure_path) if figure_path.is_file() else []
@@ -152,7 +153,7 @@ def compile_textbook(course, work, ledger, *, art_root, order):
                         0 <= t <= movies[number]["duration_s"] + .01 for t in marks):
                     raise ValueError(f"第 {number} 讲时间定位无效 {label}")
                 cited_lessons.add(number)
-                return f"第 {number} 讲 {label}"
+                return f"第 {display_numbers[number]} 讲 {label}"
 
         def illustration(match):
             stem, width = match.groups()
@@ -170,7 +171,7 @@ def compile_textbook(course, work, ledger, *, art_root, order):
             title = stem.removeprefix("总教材-").removeprefix("补图-")
             prefix = match.string[match.string.rfind("\n", 0, match.start())+1:match.start()]
             indent = prefix if prefix.isspace() else ""
-            provenance = hidden_source("配图出处", f"{figure_location(info)} · {title}")
+            provenance = hidden_source("配图出处", f"{figure_location(info, display_numbers)} · {title}")
             caption = f"\n\n{indent}*根据原课整理 · {info['diagram']['caption']}*" if "diagram" in info else ""
             return f"![{title}|{display_width}]({quote(image_path, safe='/+')}){caption}\n\n{indent}{provenance}"
 
@@ -195,11 +196,11 @@ def compile_textbook(course, work, ledger, *, art_root, order):
         return text.replace("[", r"\[").replace("]", r"\]")
 
     index = ["> [!info]- 原课与配套资料", ">"]
-    for position, info in enumerate(movies.values(), 1):
+    for number, info in movies.items():
         raw = info["source"]
         title = Path(raw).name
         url = "../" + quote("原始资料/" + raw, safe="/+")
-        index.append(f"> - 第 {position} 讲 · [{link_title(title)}]({url}) · {clock(info['duration_s'])}")
+        index.append(f"> - 第 {display_numbers[number]} 讲 · [{link_title(title)}]({url}) · {clock(info['duration_s'])}")
     if cited_docs:
         index.extend([">", "> **配套资料**", ">"])
         for doc in sorted(cited_docs):

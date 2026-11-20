@@ -289,6 +289,41 @@ class CourseProductionTest(unittest.TestCase):
         self.save(decision_path, {**self.data(decision_path), "windows": []})
         self.command("adopt", self.package, 1, decision_path)
         self.publish(expected_videos=2)
+
+        introduction, first, second = body.split("\n## ")
+        reordered = (introduction + "\n## 第 1 讲 " + second
+                     + "\n## 第 2 讲 " + first)
+        note.write_text(reordered, encoding="utf-8")
+        order = self.work / "讲次顺序.json"
+        self.save(order, [2, 1])
+        self.command("preview", self.package)
+        reordered_note = (self.work / "阅读预览" / ENTRY).read_text(encoding="utf-8")
+        first_chapter = reordered_note.split("## 第 2 讲", 1)[0]
+        self.assertIn("<!-- 段落出处 第 1 讲 00:00–00:03 -->", first_chapter)
+        self.assertIn("<!-- 配图出处 原课第 1 讲 ", first_chapter)
+        self.assertIn("> - 第 1 讲 · [10 录屏二.mp4]", reordered_note)
+        self.assertIn("> - 第 2 讲 · [02 录屏 \\[一\\].mp4]", reordered_note)
+        reordered_template = self.data(self.work / "验收填写模板.json")
+        episodes = reordered_template["episodes"]
+        self.assertEqual([(row["lesson"], row["display_number"], row["chapter"]) for row in episodes],
+                         [(2, 1, "第 1 讲 检查静默录屏设置"), (1, 2, "第 2 讲 设好画板比例")])
+        previous_review = self.data(review_path)
+        by_source = {row["lesson"]: row for row in previous_review["episodes"]}
+        reordered_review = {
+            **previous_review,
+            "snapshot": reordered_template["snapshot"],
+            "episodes": [
+                {**by_source[row["lesson"]], "chapter": row["chapter"], "display_number": row["lesson"]}
+                for row in episodes
+            ],
+        }
+        self.save(review_path, reordered_review)
+        self.assertIn("第 1 讲的原件身份或时长不一致",
+                      self.command("accept", self.package, okay=False))
+        self.save(review_path, previous_review)
+        self.save(order, [1, 2])
+        note.write_text(body, encoding="utf-8")
+
         raw_mtime = (self.package / "原始资料" / "02 录屏 [一].mp4").stat().st_mtime_ns
         evidence_mtime = (self.work / "媒体补查/L01.json").stat().st_mtime_ns
         self.start_course()

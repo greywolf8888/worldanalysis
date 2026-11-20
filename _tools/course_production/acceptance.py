@@ -29,10 +29,10 @@ def figure_names(text):
     return {Path(unquote(link)).name for link in IMAGE.findall(text)}
 
 
-def source_ranges(section, lesson):
+def source_ranges(section, display_number):
     return [[timecode(left), timecode(right)] for comment in PARAGRAPH_SOURCE.findall(section)
             for number, left, right in VIDEO_RANGE.findall(comment)
-            if int(number) == lesson and right and timecode(left) < timecode(right)]
+            if int(number) == display_number and right and timecode(left) < timecode(right)]
 
 
 def prepare_review(project, body, ordered, receipt):
@@ -49,8 +49,9 @@ def prepare_review(project, body, ordered, receipt):
 
     for name in ("intake.json", "inventory.json", "documents-summary.json", "media-summary.json"):
         evidence_from(project.ledger / name)
+    evidence_from(project.work / "讲次顺序.json")
     episodes = []
-    for lesson in ordered:
+    for display_number, lesson in enumerate(ordered, 1):
         video = media[lesson]
         meta = evidence_from(project.ledger / f"{lesson:02}.json")
         adopted = update_timeline(project, lesson)
@@ -65,7 +66,7 @@ def prepare_review(project, body, ordered, receipt):
         if not (video["sha256"] == meta["sha256"] == signature["raw_sha256"] and
                 video["source"] == meta["source"] == scan["source"] and
                 signature["cues_sha256"] == cue_sha and signature["prepare"] == meta["prepare_signature"]):
-            raise ValueError(f"第 {lesson} 讲的画面或语音扫描过期，请再运行 prepare")
+            raise ValueError(f"第 {display_number} 讲的画面或语音扫描过期，请再运行 prepare")
         extra = project.work / "媒体补查" / f"L{lesson:02}-复识.json"
         if extra.is_file() and read(extra)["signature"]["scan_sha256"] == sha(
             project.work / "媒体补查" / f"L{lesson:02}.json"
@@ -73,9 +74,12 @@ def prepare_review(project, body, ordered, receipt):
             evidence_from(extra)
         points_path = project.work / "逐段要点" / f"{lesson:02}.json"
         source_points = evidence_from(points_path) if points_path.is_file() else []
-        candidates = [title for title, text in sections.items() if source_ranges(text, lesson)]
-        episodes.append({"lesson": lesson, "source": video["source"], "source_sha256": video["sha256"],
-                         "duration_s": video["duration_s"], "chapter": candidates[0] if len(candidates) == 1 else "",
+        candidates = [title for title, text in sections.items() if source_ranges(text, display_number)]
+        named = [title for title in candidates if re.match(rf"^第\s*{display_number}\s*讲", title)]
+        chapter = named[0] if len(named) == 1 else candidates[0] if len(candidates) == 1 else ""
+        episodes.append({"lesson": lesson, "display_number": display_number,
+                         "source": video["source"], "source_sha256": video["sha256"],
+                         "duration_s": video["duration_s"], "chapter": chapter,
                          "watched": [], "key_steps": [], "visual_basis": "", "visual_note": "",
                          "source_points": [dict(row, anchor="", source_limit="") for row in source_points],
                          "audio_checks": [{"start": row["start"], "end": row["end"], "outcome": "", "note": ""}
@@ -115,97 +119,101 @@ def nearby_figures(text, anchor):
 
 
 def validate_points(actual, expected, text):
-    lesson = expected["lesson"]
+    display_number = expected["display_number"]
     points = actual.get("source_points", [])
     expected_points = expected["source_points"]
     if len(points) != len(expected_points):
-        raise ValueError(f"第 {lesson} 讲需从原课逐段登记要点后逐项对应正文")
+        raise ValueError(f"第 {display_number} 讲需从原课逐段登记要点后逐项对应正文")
     spans = []
     for point, source in zip(points, expected_points):
         start, end = clip_range(point.get("range_s"), expected["duration_s"])
         if any(point.get(k) != source.get(k) for k in ("range_s", "kind", "source_note")) or (
             point.get("kind") not in POINTS or not point.get("source_note", "").strip()
         ):
-            raise ValueError(f"第 {lesson} 讲要点与原课清单不符 {start:g}–{end:g}")
+            raise ValueError(f"第 {display_number} 讲要点与原课清单不符 {start:g}–{end:g}")
         anchor = point.get("anchor", "").strip()
         limit = point.get("source_limit", "").strip()
         if bool(anchor) == bool(limit):
-            raise ValueError(f"第 {lesson} 讲要点需对应正文或具体原件缺口 {start:g}–{end:g}")
+            raise ValueError(f"第 {display_number} 讲要点需对应正文或具体原件缺口 {start:g}–{end:g}")
         if anchor and not any(anchor in COMMENT.sub("", block) and any(
-            left <= start + .05 and end <= right + .05 for left, right in source_ranges(block, lesson)
+            left <= start + .05 and end <= right + .05 for left, right in source_ranges(block, display_number)
         ) for block in re.split(r"\n[ \t]*\n", text)):
-            raise ValueError(f"第 {lesson} 讲要点未在对应正文块找到隐蔽原片出处 {anchor}")
+            raise ValueError(f"第 {display_number} 讲要点未在对应正文块找到隐蔽原片出处 {anchor}")
         spans.append((start, end))
     for part in actual["watched"]:
         left, right = part["range_s"]
         if part["kind"] != "过场" and not any(start < right and end > left for start, end in spans):
-            raise ValueError(f"第 {lesson} 讲在 {left:g}–{right:g} 秒缺来源要点")
+            raise ValueError(f"第 {display_number} 讲在 {left:g}–{right:g} 秒缺来源要点")
 
 
 def validate_episode(actual, expected, text, figures):
-    lesson = expected["lesson"]
+    source_lesson = expected["lesson"]
+    display_number = expected["display_number"]
     duration = expected["duration_s"]
-    for key in ("lesson", "source", "source_sha256", "duration_s"):
+    for key in ("lesson", "display_number", "source", "source_sha256", "duration_s"):
         if actual.get(key) != expected[key]:
-            raise ValueError(f"第 {lesson} 讲的原件身份或时长不一致")
-    citations = source_ranges(text, lesson)
+            raise ValueError(f"第 {display_number} 讲的原件身份或时长不一致")
+    heading = re.match(r"^第\s*(\d+)\s*讲", actual["chapter"])
+    if heading and int(heading[1]) != display_number:
+        raise ValueError(f"第 {display_number} 讲的标题讲次与阅读顺序不一致")
+    citations = source_ranges(text, display_number)
     if not citations:
-        raise ValueError(f"第 {lesson} 讲的对应章节缺少本集原片时间段")
+        raise ValueError(f"第 {display_number} 讲的对应章节缺少本集原片时间段")
 
     cursor = 0.0
     previous_start = 0.0
     for part in actual.get("watched", []):
         start, end = clip_range(part.get("range_s"), duration)
         if start < previous_start or start > cursor + .05 or part.get("kind") not in SPANS or not part.get("note", "").strip():
-            raise ValueError(f"第 {lesson} 讲在 {cursor:g} 秒后缺少连续看片记录或本段观察")
+            raise ValueError(f"第 {display_number} 讲在 {cursor:g} 秒后缺少连续看片记录或本段观察")
         previous_start = start
         cursor = max(cursor, end)
     if cursor < duration - .05 or not actual.get("watched"):
-        raise ValueError(f"第 {lesson} 讲的看片记录需覆盖首尾")
+        raise ValueError(f"第 {display_number} 讲的看片记录需覆盖首尾")
     if any(row["kind"] == "教学" for row in actual["watched"]) and not actual.get("key_steps"):
-        raise ValueError(f"第 {lesson} 讲需要记录教学动作、对应文字和配图选择")
+        raise ValueError(f"第 {display_number} 讲需要记录教学动作、对应文字和配图选择")
     validate_points(actual, expected, text)
 
     present = figure_names(text)
     basis = actual.get("visual_basis")
     if basis not in VISUAL_BASES or not actual.get("visual_note", "").strip():
-        raise ValueError(f"第 {lesson} 讲需要确认原片画面、附件原图或无可教学画面的依据")
-    if basis == "原片" and not any(figures[name].get("lesson") == lesson for name in present):
-        raise ValueError(f"第 {lesson} 讲的正文缺本集原片配图")
+        raise ValueError(f"第 {display_number} 讲需要确认原片画面、附件原图或无可教学画面的依据")
+    if basis == "原片" and not any(figures[name].get("lesson") == source_lesson for name in present):
+        raise ValueError(f"第 {display_number} 讲的正文缺本集原片配图")
     if basis == "附件原图" and not any("document" in figures[name] for name in present):
-        raise ValueError(f"第 {lesson} 讲的正文缺声明的附件配图")
+        raise ValueError(f"第 {display_number} 讲的正文缺声明的附件配图")
 
     native_steps = False
     for step in actual.get("key_steps", []):
         start, end = clip_range(step.get("range_s"), duration)
         if not any(left <= start + .05 and right + .05 >= end for left, right in citations):
-            raise ValueError(f"第 {lesson} 讲在 {start:g}–{end:g} 秒的关键步骤需要对应正文出处")
+            raise ValueError(f"第 {display_number} 讲在 {start:g}–{end:g} 秒的关键步骤需要对应正文出处")
         anchor = step.get("anchor", "").strip()
         if not anchor:
-            raise ValueError(f"第 {lesson} 讲缺关键步骤正文定位")
+            raise ValueError(f"第 {display_number} 讲缺关键步骤正文定位")
         chosen = step.get("figures", [])
         nearby = nearby_figures(text, anchor)
         if any(name not in nearby for name in chosen) or (not chosen and not step.get("visual_note", "").strip()):
-            raise ValueError(f"第 {lesson} 讲的关键图要紧接对应步骤；无图时记录依据 {anchor}")
+            raise ValueError(f"第 {display_number} 讲的关键图要紧接对应步骤；无图时记录依据 {anchor}")
         for name in chosen:
             asset = figures[name]
             diagram = asset.get("diagram")
             if diagram:
                 left, right = diagram["range_s"]
-                if diagram["lesson"] != lesson or left >= end or right <= start:
-                    raise ValueError(f"第 {lesson} 讲整理示意图与该步骤的原课时间不重合 {name}")
+                if diagram["lesson"] != source_lesson or left >= end or right <= start:
+                    raise ValueError(f"第 {display_number} 讲整理示意图与该步骤的原课时间不重合 {name}")
             if "lesson" in asset:
-                if asset["lesson"] != lesson or not start - .05 <= asset["pts"] <= end + .05:
-                    raise ValueError(f"第 {lesson} 讲的步骤图片时间与原片区间不一致 {name}")
+                if asset["lesson"] != source_lesson or not start - .05 <= asset["pts"] <= end + .05:
+                    raise ValueError(f"第 {display_number} 讲的步骤图片时间与原片区间不一致 {name}")
                 native_steps = True
     if basis == "原片" and actual.get("key_steps") and not native_steps:
-        raise ValueError(f"第 {lesson} 讲的原片图应放在对应的教学步骤旁")
+        raise ValueError(f"第 {display_number} 讲的原片图应放在对应的教学步骤旁")
 
     checks = actual.get("audio_checks", [])
     if [(row.get("start"), row.get("end")) for row in checks] != [
         (row["start"], row["end"]) for row in expected["audio_checks"]
     ] or any(row.get("outcome") not in AUDIO_OUTCOMES or not row.get("note", "").strip() for row in checks):
-        raise ValueError(f"第 {lesson} 讲的语音候选需要逐项核实并记录处理")
+        raise ValueError(f"第 {display_number} 讲的语音候选需要逐项核实并记录处理")
 
 
 def validate_review_proofs(project, review):
