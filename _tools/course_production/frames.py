@@ -3,6 +3,9 @@ from io import BytesIO
 import math
 import posixpath
 import re
+import shutil
+import subprocess
+import tempfile
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 from pathlib import Path, PurePosixPath
@@ -66,7 +69,26 @@ def slide_picture(filename,page):
             return image.copy()
 
 
-def document_image(path, doc_id, page, scale, *, ledger):
+def rendered_slide(filename, page):
+    powershell = shutil.which("powershell.exe")
+    if not powershell:
+        raise ValueError("完整 PPTX 页需要 Windows PowerPoint；仍可选取已核实的内嵌原图")
+    runner = Path(__file__).with_name("render_slide.ps1")
+    with tempfile.TemporaryDirectory(prefix="course-slide-") as temporary:
+        output = Path(temporary) / "slide.png"
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-NonInteractive", "-File", str(runner),
+             "-Source", str(filename), "-Page", str(page), "-Output", str(output)],
+            capture_output=True, timeout=90,
+        )
+        if result.returncode or not output.is_file():
+            detail = result.stderr.decode("utf-8", "replace").strip()[-380:]
+            raise ValueError(f"无法渲染完整幻灯片 {filename.name} 第 {page} 页。{detail}")
+        with Image.open(output) as image:
+            return image.copy()
+
+
+def document_image(path, doc_id, page, scale, *, ledger, full_slide=False):
     import pypdfium2 as pdfium
     if not isinstance(page, int) or isinstance(page, bool) or page < 1 or not math.isfinite(scale) or not 0 < scale <= 4:
         raise ValueError("使用正整数页码，PDF 取图倍率须大于 0 且不超过 4")
@@ -74,6 +96,10 @@ def document_image(path, doc_id, page, scale, *, ledger):
     source=next(v["file"] for v in inventory if v["id"]==doc_id)
     raw=(path/"原始资料").resolve()
     filename=local_child(raw, source)
+    if full_slide:
+        if filename.suffix.lower() != ".pptx":
+            raise ValueError("完整幻灯片渲染只用于 PPTX")
+        return source, rendered_slide(filename, page)
     if filename.suffix.lower()==".pdf":
         with pdfium.PdfDocument(filename) as pdf:
             if page > len(pdf):
@@ -187,8 +213,11 @@ def keep(path, entries, append=False, *, ledger, output_root):
             locator = {"diagram": spec, "diagram_sha256": digest}
         elif "document" in entry:
             doc=entry["document"];page=entry["page"];scale=entry.get("scale",1)
-            src,img=document_image(path,doc,page,scale,ledger=ledger)
+            full_slide = entry.get("full_slide", False)
+            src,img=document_image(path,doc,page,scale,ledger=ledger,full_slide=full_slide)
             locator={"document":doc,"page":page,"scale":scale}
+            if full_slide:
+                locator["full_slide"] = True
         else:
             lesson=entry["lesson"]
             src,img,pts=orig(path,lesson,entry["time"],ledger=ledger)

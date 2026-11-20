@@ -57,7 +57,10 @@ def check_figure(course, info, *, ledger, art_root):
         if digest != info["diagram_sha256"]:
             raise ValueError(f"整理示意图已变动 {info['name']}")
     elif "document" in info:
-        original, frame = document_image(course, info["document"], info["page"], info["scale"], ledger=ledger)
+        original, frame = document_image(
+            course, info["document"], info["page"], info["scale"], ledger=ledger,
+            full_slide=info.get("full_slide", False),
+        )
     else:
         original, frame, pts = orig(course, info["lesson"], info["pts"], ledger=ledger)
         if abs(info["pts"] - pts) >= .00001:
@@ -192,11 +195,11 @@ def compile_textbook(course, work, ledger, *, art_root, order):
         return text.replace("[", r"\[").replace("]", r"\]")
 
     index = ["> [!info]- 原课与配套资料", ">"]
-    for number, info in movies.items():
+    for position, info in enumerate(movies.values(), 1):
         raw = info["source"]
         title = Path(raw).name
         url = "../" + quote("原始资料/" + raw, safe="/+")
-        index.append(f"> - 第 {number} 讲 · [{link_title(title)}]({url}) · {clock(info['duration_s'])}")
+        index.append(f"> - 第 {position} 讲 · [{link_title(title)}]({url}) · {clock(info['duration_s'])}")
     if cited_docs:
         index.extend([">", "> **配套资料**", ">"])
         for doc in sorted(cited_docs):
