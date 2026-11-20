@@ -1,20 +1,19 @@
 # Worldanalysis 课程教材生产开发文档
 
-给定一个已经下载的课程文件夹，Worldanalysis 对原件做独立入库，准备转写、附件和观察画面，由整理者逐集对照原视频、撰写教材、走查实际步骤，再由脚本验收和发布。每个课程包有且只有一篇可交付教材 `课件/00 开始学习.md`。项目入口和交付边界见[项目规则](../AGENTS.md)。
+给定一个已经下载的课程文件夹，Worldanalysis 对原件做独立入库，准备转写、附件和观察画面，由整理者逐集对照原视频、撰写教材、走查实际步骤，再由脚本验收和发布。每个项目在日常 Obsidian 库沿用原项目目录，只有一篇以项目名命名的教材 `课件/<项目名>.md`。项目入口和交付边界见[项目规则](../AGENTS.md)。
 
 教材保留原课讲次，讲内按学习问题组织。直接说明方法和适用条件，自然引导学习者操作，给讲师亲历或课堂主张明确归属，整理者新增的演算注明示例。图片紧跟它能解释的动作或关系。段落与原图的出处保存在 Markdown 注释里，原片和附件入口放在文末默认折叠的「原课与配套资料」。本地入口由现有的[课程整理 Skill](../.agents/skills/course-material-archive/SKILL.md) 接续，编辑判定见[写作流程](../.agents/skills/course-material-archive/workflow.md#本地教材工作流)和[验收说明](../.agents/skills/course-material-archive/acceptance.md#本地教材验收)。
 
 ~~~mermaid
 flowchart TD
     A["课程原件文件夹"] --> B["start · 入库与画音、附件准备"]
-    B --> H["read · 对照音画 · 记录逐段要点"]
-    H --> C["编写教材与取原图"]
+    B --> I["read · 对照音画 · 记录逐段要点"]
+    I --> C["编写教材与取原图"]
     C --> D["preview · 编译带图预览"]
     D --> E["只读跟做并填写验收记录"]
     E --> F["accept · 核验同版证据和隔离阅读"]
-    F --> G["deliver · 更新日常 Obsidian 库的原入口"]
-    G --> H["重开教材 · confirm-vault · verify --require-vault"]
-    F --> G["00 开始学习.md · verify 复验"]
+    F --> G["deliver · 在原项目目录更新项目名.md"]
+    G --> H["verify-reader · 重开同版 · verify --require-vault"]
     E -->|发现缺项| C
 ~~~
 
@@ -43,7 +42,7 @@ $course = 'G:\Worldanalysis\整理结果\课程教材\一门课'
 - **Python 3.12**。Windows 包装脚本优先使用 `WORLDANALYSIS_PYTHON`，再尝试仓库内的 `.venv` 或 `py -3.12`。也可直接用兼容解释器执行 `_tools/course_production/course.py`。项目本地模块和模型从 `.runtime` 读入。安装或更新第三方依赖时用项目锁定版本。 [依赖清单](../requirements-lock.txt)
 - **视频**。需要 PATH 中的 `ffmpeg`、`ffprobe`，以及 PyAV、OpenCV、Pillow、NumPy。CPU 音频转写和人声检测使用 `.runtime/course-method-sensevoice/model` 的已校验 SenseVoiceSmall、词表和 Silero VAD。
 - **附件**。PDF 用 pypdf 和 pypdfium2，扫描页和常规图片由 RapidOCR 辅助。旧 DOC 需要 Node.js 和现有的本地 `word-extractor`。提取状态和缺口保存在文档记录。图片识别的数值与小字回原图核对。
-- **阅读验收**。需要支持 WebSocket 的 Node.js 和桌面 Obsidian。可用 `accept --obsidian-exe <路径>` 或 `OBSIDIAN_EXE` 指定安装位置。Windows 也会检查本机常见安装目录。课程包自动测试在隔离库完成，日常库交付另需在用户的实际窗口重开核对。
+- **阅读验收**。需要支持 WebSocket 的 Node.js 和桌面 Obsidian。用 `accept --obsidian-exe <路径>`、`verify-reader --obsidian-exe <路径>` 或 `OBSIDIAN_EXE` 指定安装位置。Windows 也会检查本机常见安装目录。两项阅读核验均在独立的 Obsidian 环境完成，先核课程包，再核日常库实际交付的同版文件。
 - **可选 GPU**。用已安装的 CrispASR Vulkan 和本地权重。缺省 CPU 路径可以继续完成。传入 GPU 路径时同时给出对应权重。现有依赖和模型可通过 `WORLDANALYSIS_COURSE_RUNTIME` 指向已准备的本地运行目录。无音轨、无同版补录的项目可以独立运行视觉路径。
 
 新检出仓库时，在兼容的 Python 3.12 环境安装项目锁定依赖与 `sherpa-onnx==2.0.1`。将 `model.int8.onnx`、`tokens.txt` 和 `silero_vad.onnx` 保存在 `.runtime/course-method-sensevoice/model/`。转写与候选扫描会校验模型文件。旧 DOC 处理另需在 `.runtime/course-method-doc` 安装 `word-extractor@1.0.4`。 [SenseVoice 模型与词表](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tree/2365baeacb507f821a0c8120fcee3d484dba7a07) · [Silero VAD 模型](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx)
@@ -54,7 +53,7 @@ $course = 'G:\Worldanalysis\整理结果\课程教材\一门课'
 <课程包>/
   原始资料/                    原始文件快照，保留相对路径
   课件/
-    00 开始学习.md              验收后的唯一教材
+    00 开始学习.md              课程包内部的验收文件，发布时映射为项目名
     原图/                      供教材使用的原片截图或附件图
   .course/
     project.json                输入身份
@@ -72,8 +71,10 @@ $course = 'G:\Worldanalysis\整理结果\课程教材\一门课'
       选用素材/                  已登记的工作原图
       教材.md                    编辑者的单篇稿
       阅读预览/                  当前带图阅读稿和版面回执
+      日常库接口验收/             日常入口同路径、同版重开的回执
       验收填写模板.json          由当前预览生成，供人填写
       验收记录.json              编辑者核对原件和只读走查后的记录
+      补充内容复核.json          有独立配套条目时登记正文短句与同段原件位置
     ledger/
       intake.json               原件清单、尺寸及 SHA-256
       inventory.json            本课程的讲号与附件身份
@@ -122,7 +123,7 @@ GPU 初稿用 `prepare` 或 `start` 的 `--gpu-exe` 与 `--model`。先用 Crisp
 
 ### 画面与关键帧
 
-媒体扫描按原片呈现时间解码。常规横屏已有转写每秒约 4 次低清比较，竖屏或无转写每秒约 6 次。全局变化用于定位换页和成品确认。10×8 区域变化和红色标记用于定位小控件、圈点、进度及菜单，也覆盖近黑画面的局部变化。停留画面有周期候选，语音中的动作词用于补定位。
+媒体扫描按原片呈现时间解码。常规横屏已有转写每秒约 4 次低清比较，竖屏或无转写每秒约 6 次。全局变化用于定位换页和成品确认。10×8 区域变化和红色标记用于定位小控件、圈点、进度及菜单，也覆盖近黑画面的局部变化。停留画面有周期候选，语音中的动作词用于补定位。转写条目常包含口播和停顿，媒体回执用实际人声活动另标出 `outside_speech` 候选。结合原片判断这些画面有无独立的操作、演示或结果。
 
 依原时间轴查看候选和原片。对短菜单、同屏圈点、滑动和纯画面操作，重点看动作前、动作发生时、动作后的结果。用 `window` 在候选前后连续解码，适应短时状态、小范围裁切及非编码关键帧。用 `keep` 登记要插入正文的原始像素。上一步的结果图与下一步使用时的输入状态尽量连贯。只有字幕或画面无法说明步骤时，按原话和原附件取证。
 
@@ -218,17 +219,33 @@ PDF 先读原文字和图片位置，遇到扫描或难提取页面再渲染、�
 
 ### 交付到用户日常 Obsidian 库
 
-确认用户在用的库及本课既有入口。更新旧课沿用库内同一课程文件夹和 `课件/00 开始学习.md`。课程包独立保存原件和生产证据，日常库保留可直接阅读的教材、配图和链接用到的原件。首次绑定用 `deliver`。遇到旧入口正文不一致，先确认同课、保存用户修改，再按提示提供经核对的旧正文 SHA-256 给 `--reviewed-previous`。脚本在课程包内保存旧正文，校验已有配图及原件后先补齐缺件，最后替换教材。用户要求仅本地时，先确认目标库没有将本课同步到远端。
+确认用户在用的库及本课既有目录。更新旧课沿用库内同一项目目录，并将唯一的教材放在 `课件/<项目名>.md`。课程包独立保存原件和生产证据，日常库保留教材、配图和折叠区用到的原件。首次绑定用 `deliver`。遇到旧入口正文不一致，先确认同课、保存用户修改，再按提示提供经核对的旧正文 SHA-256 给 `--reviewed-previous`。脚本先核对是否有指向旧笔记的链接，归档旧正文，校验已有配图及原件，补齐缺件后再更新教材。用户要求仅本地时，核实目标库的同步情况。
 
 ~~~powershell
 & $courseTool deliver $course --vault 'G:\我的日常阅读库' --course-folder '一门课'
-& $courseTool confirm-vault $course 'G:\本次工作的实际窗口观察.json'
+& $courseTool verify-reader $course
 & $courseTool verify $course --require-vault
 ~~~
 
-执行 `confirm-vault` 前，实际关闭并从课件入口重开同一篇。检查能看到新版章节和相邻配图、阅读模式能到页尾、附录默认折叠、出处隐藏。观察 JSON 从 `deliver` 的输出取 `entry`、`sha256` 和 `installed_at`；实际观察填 `mode: "preview"`、`reopened: true`、`reached_bottom: true`、`references_collapsed: true`、`visible_citations: false`，以及一个确实读到的完整二级标题 `section_seen`、一个实际看到的配图路径 `image_seen`（如 `课件/原图/示例.png`）和说明 `note`。纯文档无图时省略 `image_seen`。记录存入本课程的 `.course/ledger/obsidian-delivery.json`。
+`deliver` 返回日常库实际路径 `entry`、Obsidian 直达链接 `uri`、正文指纹 `sha256` 和落库时间 `installed_at`。链接使用 Obsidian 支持的 `obsidian://open?path=...`，可直接从课单或验收记录打开。 [Obsidian 直达链接](https://obsidian.md/help/Extending%2BObsidian%2BURI)
 
-已绑定的课程后续用 `accept` 时会更新日常库，正文版本变化后重新重开核验。输出中的 `package_verified` 表示课程包通过，`verified` 表示本版还有日常库的核验结果。`verify --require-vault` 会拦下仍缺日常库、旧版、缺图、链接原件不同或尚未真实重开的情况。最终交付链接使用日常库实际入口。纯画面、暗色、有声和混合样本按各自的实际复核范围报告。
+`verify-reader` 从日常库中读取已交付的正文和链接文件，在独立 Obsidian 环境按该项目路径打开、关闭后重开，读到所有章节和文末，确认全部图片已加载、出处默认折叠以及页面无横向溢出。回执保存于 `.course/work/日常库接口验收/`，其版本摘要记录于 `.course/ledger/obsidian-delivery.json`。有额外实际窗口观察时可运行 `confirm-vault <课程包> <观察记录.json>`。手填记录须有同一版的 `entry`、`sha256`、`installed_at`，以及阅读模式、重开、页尾、折叠、引文、已看到的章节和图片，字段详见命令校验。
+
+已绑定的课程后续用 `accept` 时会更新日常库。正文版本变化后重新执行 `verify-reader` 和 `verify --require-vault`。输出中的 `package_verified` 表示独立课程包通过，`verified` 表示日常库也有本版核验结果。`verify --require-vault` 检查现存正文、图片和所链接原件，同时要求该版本的重开记录。最终交付链接必须指到日常库项目名教材。报告有声、部分无口播、全程纯画面等类型的实际复核范围，保留真实听辨和原件缺口。
+
+### 复核随课材料与作者支持
+
+以入库清单为起点，逐件阅读旧稿标为「参考」「原样存档」「部分提取」的材料，也检查讲师口播未提及的附件。表格核工作表、字段、公式和规则，文档核内嵌图与超链接，压缩包核成员和各自用途。网址快捷方式从本地读取原 URL 字段，其归属和使用条件继续对照来源。把能独立用于学习的规则、练习、案例或可编辑原件写进当前教材。补充内容可以放在相关讲或文末的配套资料节，仍使用原有文档和视频标记保留同段出处。
+
+对作者信息回到原始署名、名片、视频片头片尾和讲师主动介绍。跨课程相同的分发页和水印用于判断归属。作者频道、资料领取入口、只适用于一张参考图的署名及转载联系方式分别记录来源和用途。出现在课件上的历史规则、链接和账户说明按原始语境保存。识别不全、归属未证或原件仅有网址时，记录具体范围。
+
+将逐项确认要发布的内容登记到 `.course/work/补充内容复核.json`。`anchor` 用正文中读到的短句，`sources` 用同一段隐藏出处中完整的原件名与定位，例如 `实操练习.pdf · 第 3 页，输入单与交付检查`。同一条也可以引用 `第 2 讲 01:10–01:35` 等原片区间。预览时该文件纳入版本指纹，生成的 `supplements` 条目需随同版验收记录提交。`accept` 会校验短句和完整出处是否出现在同一可读正文段。写在代码块、折叠块或注释里的短句不能作为正文依据。
+
+新验收记录的 `documents[].inspected_at` 填实际检查的页、工作表、压缩包成员或原件部位。其 `note` 填教学用途、与其他材料的关系或缺口。每个视频的 `episodes[].channel_review` 使用 `opening`、`closing` 和 `screen` 记录片头、片尾和实际画面位置，用 `finding` 登记据此确认的作用或未确认的地方。即使各处均未显示作者渠道，也按实际查看的时码、画面和观察结果填好。脚本核对记录完整性，编辑者据原件判断归属与读者价值。已经完成的发布件可照常复验，重做时使用新预览生成的模板。
+
+### 同一批课程的续作顺序
+
+先按用户指定顺序盘点完整的原件文件夹。未指定时按文件夹名自然升序，记录实际源路径和目标项目名。早期完成项目通过完整原件指纹与有效交付回执识别。可疑同名或转存版本先核新附件和原片差异。每完成一个项目，将已验收入口、正文版本和原件缺口保存到本地记录，再处理下一项。中断时从最近的原件、准备、预览或交付回执接续。具体原件缺失时记录所需文件及影响，按原顺序继续其余可做项目。
 
 ## 5. 开发入口与维护
 
@@ -241,9 +258,9 @@ PDF 先读原文字和图片位置，遇到扫描或难提取页面再渲染、�
 | [transcript.py](../_tools/course_production/transcript.py)、[visual.py](../_tools/course_production/visual.py) | 原字幕差异、采用稿和分窗读取、按呈现时间留下原帧及 OCR 轨。 |
 | [review_media.py](../_tools/course_production/review_media.py)、[frames.py](../_tools/course_production/frames.py) | 全片画音扫描、同版有声对照、小窗和真帧取图。 |
 | [publish.py](../_tools/course_production/publish.py)、[reader_review.py](../_tools/course_production/reader_review.py)、[acceptance.py](../_tools/course_production/acceptance.py) | 同篇编译、隐藏出处、跟做校验、逐集门槛、发布与回读。 |
-| [verify_obsidian.cjs](../_tools/course_production/verify_obsidian.cjs) | 将本课引用的原件和图片带到隔离小库，检查实际阅读视图。 |
-| [vault_delivery.py](../_tools/course_production/vault_delivery.py) | 更新日常库固定入口，保留旧版正文，绑定重开观察并检验版本、图片和来源链接。 |
-| [test_course_production.py](../tests/test_course_production.py) | 用独立生成的原料验证纯文档、字幕以外的全音轨、短缺口、暗色和硬字幕、采用稿更新、过期验收与续作。 |
+| [verify_obsidian.cjs](../_tools/course_production/verify_obsidian.cjs) | 在独立 Obsidian 环境验证课程包和日常入口的同版文件，检查末讲、页尾、全部图片与折叠。 |
+| [vault_delivery.py](../_tools/course_production/vault_delivery.py) | 更新日常库的项目名入口，保留旧版正文，生成直达链接，核对重开回执及现存文件。 |
+| [test_course_production.py](../tests/test_course_production.py) | 用独立生成的原料验证纯文档、全音轨、短缺口、暗色、硬字幕、采用稿更新、配套正文与出处、附件部位及作者核查、过期验收和续作。 |
 
 - **输入恢复**。入库中断可以用同一 `start` 续作。原件文件完整确认后才生成正式快照记录。课程包的录屏、字幕和附件一致时重跑 `prepare` 复用底稿。不同参数或权重生成新的索引。
 - **证据更新**。先更新原始媒体设置或取图记录，再预览；按新预览复核相关讲次。旧回执以正文、图片和提取证据的指纹识别。说过的参数、画面出现的动作和最终结果缺任一项时，回到对应原片、表格或讲义补齐。
