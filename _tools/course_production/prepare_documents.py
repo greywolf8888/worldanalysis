@@ -5,7 +5,8 @@ from pathlib import Path
 import json
 import subprocess
 import tempfile
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
+from prepare_archive import ARCHIVE_SIGNATURES, read_archive
 from project import put, read, sha, write
 from worldanalysis.documents import extract
 
@@ -66,6 +67,18 @@ def internet_shortcut(file):
             "gaps": []}
 
 
+def inspect_document(source, out, options):
+    ext = source.suffix.lower()
+    if ext == ".doc":
+        return legacy_doc(source)
+    if ext == ".xmind":
+        return mindmap(source)
+    if ext == ".url":
+        return internet_shortcut(source)
+    out.mkdir(parents=True, exist_ok=True)
+    return extract(source, out, options=options)
+
+
 def prepare_documents(raw, records, meta, work):
     docs=work/"资料"
     docs.mkdir(parents=True,exist_ok=True)
@@ -81,28 +94,31 @@ def prepare_documents(raw, records, meta, work):
         cache_name = f"{key}-{ext.removeprefix('.') or 'file'}"
         if ext == ".url":
             cache_name += "-shortcut"
+        if ext in ARCHIVE_SIGNATURES:
+            cache_name += "-members"
         cache=docs/(cache_name+".json")
         if cache.is_file():
             result=read(cache)
         else:
             try:
-                if ext==".doc":
-                    result=legacy_doc(source)
-                elif ext==".xmind":
-                    result=mindmap(source)
-                elif ext == ".url":
-                    result = internet_shortcut(source)
+                if ext in {".doc", ".xmind", ".url"}:
+                    result = inspect_document(source, None, options)
                 else:
-                    out=Path(tempfile.mkdtemp(prefix=key[:10]+"-",dir=docs))
-                    result=extract(source,out,options=options)
-                    result["asset_root"]=out.relative_to(work).as_posix()
-            except (OSError,ValueError,subprocess.TimeoutExpired) as error:
+                    out = Path(tempfile.mkdtemp(prefix=key[:10]+"-", dir=docs))
+                    if ext in ARCHIVE_SIGNATURES:
+                        result = read_archive(source, out, lambda member, target: inspect_document(member, target, options))
+                    else:
+                        result = inspect_document(source, out, options)
+                    result["asset_root"] = out.relative_to(work).as_posix()
+            except (OSError, ValueError, BadZipFile, subprocess.TimeoutExpired) as error:
                 result={"processing_status":"failed","blocks":[],"gaps":[{"reason":str(error)}]}
             if result["processing_status"]!="failed":put(cache,result)
         texts=[b for b in result["blocks"] if b.get("text")]
         item={"id":f"D{i:03}","file":row["file"],"sha256":key,"status":result["processing_status"],
               "text_blocks":len(texts),"text_chars":sum(len(b["text"]) for b in texts),
               "gaps":len(result["gaps"]),"result":cache.relative_to(work).as_posix() if cache.is_file() else None}
+        if result["processing_status"] == "failed":
+            item["gaps_detail"] = result["gaps"]
         evidence.append(item)
         # Save a readable locator-first view of each distinct document for the editorial pass.
         digest_text=docs/(cache_name+".md")

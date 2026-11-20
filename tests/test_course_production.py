@@ -72,6 +72,40 @@ class CourseProductionTest(unittest.TestCase):
             "sources": sources, "figures": figures,
         }
 
+    def test_archive_member_retains_unicode_path_and_content(self):
+        tool = shutil.which("bsdtar") or shutil.which("tar")
+        if not tool or b"bsdtar" not in subprocess.check_output([tool, "--version"], timeout=10):
+            self.skipTest("libarchive tar is needed to build a 7z fixture offline")
+        inputs = self.root / "附件样例"
+        text = "从正面拍一张，再从侧面拍一张。"
+        member = Path("练习/镜头规则.txt")
+        (inputs / member.parent).mkdir(parents=True)
+        (inputs / member).write_text(text, encoding="utf-8")
+        source = self.source / "随课练习.7z"
+        subprocess.run([tool, "-cf", str(source), "--format", "7zip", "-C", str(inputs),
+                        member.as_posix()], check=True, timeout=10)
+        old_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        (self.source / "零字节.rar").write_bytes(b"")
+        self.start_course()
+        docs = self.data(self.ledger / "documents-summary.json")["records"]
+        doc = next(record for record in docs if record["file"] == source.name)
+        failed = next(record for record in docs if record["file"] == "零字节.rar")
+        self.assertEqual(failed["status"], "failed")
+        self.assertIn("文件头与扩展名不一致", failed["gaps_detail"][0]["reason"])
+        self.assertIsNone(failed["result"])
+        result = self.data(self.work / doc["result"])
+        self.assertEqual(doc["sha256"], old_digest)
+        self.assertEqual(doc["status"], "extracted")
+        self.assertEqual((self.package / "原始资料" / source.name).read_bytes(), source.read_bytes())
+        self.assertEqual(result["blocks"][0]["locator"]["member_path"], member.as_posix())
+        self.assertEqual(result["blocks"][0]["text"], text)
+        record = result["archive_members"][0]
+        retained = self.work / result["asset_root"] / record["file"]
+        self.assertEqual(retained.read_text(encoding="utf-8"), text)
+        self.assertEqual(hashlib.sha256(retained.read_bytes()).hexdigest(), record["sha256"])
+        self.command("prepare", self.package)
+        self.assertEqual(self.data(self.ledger / "documents-summary.json")["records"], docs)
+
     def publish(self, expected_videos):
         self.assertFalse((self.package / ENTRY).exists())
         if OBSIDIAN:
