@@ -7,8 +7,12 @@ import subprocess
 import tempfile
 from zipfile import BadZipFile, ZipFile
 from prepare_archive import ARCHIVE_SIGNATURES, read_archive
+from prepare_html import HTML_SUFFIXES, local_html
 from project import put, read, sha, write
 from worldanalysis.documents import extract
+
+
+INLINE_SUFFIXES = {".doc", ".xmind", ".url"} | HTML_SUFFIXES
 
 
 def mindmap(file):
@@ -75,6 +79,8 @@ def inspect_document(source, out, options):
         return mindmap(source)
     if ext == ".url":
         return internet_shortcut(source)
+    if ext in HTML_SUFFIXES:
+        return local_html(source)
     out.mkdir(parents=True, exist_ok=True)
     return extract(source, out, options=options)
 
@@ -94,6 +100,8 @@ def prepare_documents(raw, records, meta, work):
         cache_name = f"{key}-{ext.removeprefix('.') or 'file'}"
         if ext == ".url":
             cache_name += "-shortcut"
+        if ext in HTML_SUFFIXES:
+            cache_name += "-static"
         if ext in ARCHIVE_SIGNATURES:
             cache_name += "-members"
         cache=docs/(cache_name+".json")
@@ -101,7 +109,7 @@ def prepare_documents(raw, records, meta, work):
             result=read(cache)
         else:
             try:
-                if ext in {".doc", ".xmind", ".url"}:
+                if ext in INLINE_SUFFIXES:
                     result = inspect_document(source, None, options)
                 else:
                     out = Path(tempfile.mkdtemp(prefix=key[:10]+"-", dir=docs))

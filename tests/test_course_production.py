@@ -106,6 +106,36 @@ class CourseProductionTest(unittest.TestCase):
         self.command("prepare", self.package)
         self.assertEqual(self.data(self.ledger / "documents-summary.json")["records"], docs)
 
+    def test_html_handout_preserves_sections_links_and_unread_visuals(self):
+        source = self.source / "随课操作指南.htm"
+        html = (
+            '<title>随课指南</title><section id="practice"><h2>课堂练习</h2>'
+            '<p>先打开 <strong>原件</strong>，再 <a href="例题.pdf?part=1&amp;page=3">看练习</a>。</p>'
+            '<table><tr><th>字段</th><th>限制</th></tr><tr><td>比例</td><td>3:4</td></tr></table>'
+            '<img src="步骤.png" alt="导出按钮">'
+            '<template><template>内部占位</template><p>未使用的模板</p></template>'
+            '<script>document.write("脚本模拟正文");</script><p>先核导出结果。</p></section>'
+        )
+        source.write_text(html, encoding="utf-8")
+        self.start_course()
+        self.assertEqual(source.read_bytes(), (self.package / "原始资料" / source.name).read_bytes())
+        doc, = self.data(self.ledger / "documents-summary.json")["records"]
+        self.assertTrue(doc["result"].endswith("-htm-static.json"))
+        self.assertEqual(doc["status"], "partial")
+        result = self.data(self.work / doc["result"])
+        texts = [row["text"] for row in result["blocks"]]
+        self.assertIn("比例 | 3:4", texts)
+        self.assertIn("先打开 原件，再 看练习。", texts)
+        self.assertIn("先核导出结果。", texts)
+        self.assertIn("导出按钮 · 步骤.png", texts)
+        self.assertFalse(any("占位" in line or "模拟正文" in line or "未使用的模板" in line for line in texts))
+        link, = [row for row in result["blocks"] if row["locator"].get("field") == "href"]
+        self.assertEqual(link["text"], "例题.pdf?part=1&page=3")
+        self.assertEqual(link["locator"]["sections"], ["practice"])
+        self.assertEqual({g["locator"]["element"] for g in result["gaps"]}, {"img", "template"})
+        self.command("prepare", self.package)
+        self.assertEqual(self.data(self.ledger / "documents-summary.json")["records"], [doc])
+
     def publish(self, expected_videos):
         self.assertFalse((self.package / ENTRY).exists())
         if OBSIDIAN:
