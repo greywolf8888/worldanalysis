@@ -2,7 +2,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const root = path.resolve(__dirname, "../..");
-const WordExtractor = require(path.join(root, ".runtime/course-method-doc/node_modules/word-extractor"));
+const runtime = process.env.WORLDANALYSIS_COURSE_RUNTIME || path.join(root, ".runtime");
+const WordExtractor = require(path.join(path.resolve(runtime), "course-method-doc/node_modules/word-extractor"));
 async function main() {
   const parser = new WordExtractor();
   const doc = await parser.extract(fs.readFileSync(process.argv[2]));

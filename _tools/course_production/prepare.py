@@ -1,4 +1,6 @@
 """Extract a course's audio once into short timestamped cues. Preserve the raw package."""
+import hashlib
+import json
 import math
 from pathlib import Path
 import re
@@ -102,7 +104,7 @@ def prepare_project_media(project, videos, documents, gpu=None):
         if language not in {"auto", "zh", "en", "ja", "ko", "yue"}:
             raise ValueError(f"第 {number} 讲语言应为 auto、zh、en、ja、ko 或 yue")
         subtitle, candidates = subtitle_choice(item, prefs, documents)
-        signature = {"version": 1, "raw_sha256": item["sha256"], "file": item["file"],
+        signature = {"version": 2, "raw_sha256": item["sha256"], "file": item["file"],
                      "settings": prefs, "subtitle_sha256": subtitle["sha256"] if subtitle else None,
                      "asr": gpu.identity if gpu else MODEL_SHA}
         old = read(destination) if destination.is_file() else {}
@@ -145,6 +147,7 @@ def prepare_project_media(project, videos, documents, gpu=None):
         offset = max(source_time(audio[track].get("start_time"), audio_origin) - audio_origin, 0) if audio else 0.0
         rows = []
         cues = []
+        subtitle_kind = None
         notes = []
         method = "no_audio"
         if len(candidates) > 1 and not subtitle:
@@ -154,21 +157,26 @@ def prepare_project_media(project, videos, documents, gpu=None):
                 if not subtitle["result"]:
                     raise ValueError("配套字幕无法提取")
                 cues = document_cues(read(project.work / subtitle["result"]), duration)
-                method = "original_subtitle"
+                subtitle_kind = "original_subtitle"
             elif "subtitle" not in prefs and sum(s["codec_type"] == "subtitle" for s in meta["streams"]) == 1:
                 cues = embedded_cues(source, project.work / "内嵌字幕" / f"{number:02}.srt", duration)
-                method = "embedded_subtitle"
+                subtitle_kind = "embedded_subtitle"
         except ValueError as error:
             if "subtitle" in prefs:
                 raise ValueError(f"第 {number} 讲指定字幕不可用 {error}") from error
             notes.append(str(error))
 
-        if not cues and audio:
+        original_cues = cues
+        audio_scope = []
+        if audio:
             if gpu:
-                rows = gpu.transcribe(sound, duration, track, language, offset)
+                identity = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
+                cache = project.work / "音轨取材" / f"{number:02}" / identity
+                rows = gpu.transcribe(sound, duration, track, language, offset, cache=cache)
+                audio_scope = gpu.decoded_windows
                 cues = [{"start": row["start"], "end": row["end"], "text": row["text"]}
                         for row in rows if row["text"]]
-                method = "sensevoice_vulkan"
+                method = gpu.backend + "_vulkan"
             else:
                 if not verified_cpu:
                     if sha(MODEL / "model.int8.onnx") != MODEL_SHA:
@@ -181,16 +189,22 @@ def prepare_project_media(project, videos, documents, gpu=None):
                     row["end"] += offset
                     row["times"] = [t + offset for t in row["times"]]
                 cues = captions(rows)
+                audio_scope = [{"timeline_start": row["start"], "samples": round((row["end"] - row["start"]) * 16000),
+                                "sample_rate": 16000} for row in rows]
                 method = "sensevoice_cpu"
+        asr_cues = cues if audio else []
+        if original_cues and not asr_cues:
+            cues, method = original_cues, subtitle_kind
         record = {"lesson": number, "source": item["file"], "sha256": item["sha256"],
-                  "model_sha256": gpu.identity["model_sha256"] if method == "sensevoice_vulkan" else
-                  MODEL_SHA if method == "sensevoice_cpu" else None,
+                  "model_sha256": (gpu.identity["model_sha256"] if gpu else MODEL_SHA) if audio else None,
                   "duration_s": duration, "media": meta, "timeline_origin_s": origin, "audio_track": track,
                   "audio_offset_s": offset, "language": language, "extraction": method,
                   "audio_count": len(audio), "audio_source": reference or item["file"],
                   "audio_source_sha256": sources[reference]["sha256"] if reference else None,
                   "audio_alignment": alignment,
-                  "subtitle": subtitle["file"] if method == "original_subtitle" else None,
+                  "subtitle": subtitle["file"] if subtitle and subtitle_kind == "original_subtitle" else None,
+                  "subtitle_kind": subtitle_kind, "original_cues": original_cues, "asr_cues": asr_cues,
+                  "audio_processed": bool(audio), "audio_scope": audio_scope,
                   "subtitle_candidates": candidates, "notes": notes, "prepare_signature": signature,
                   "cues": cues, "speech_windows": rows}
         text = [f"# {number:02} {source.stem}"]

@@ -1,17 +1,18 @@
 """Timestamped local Chinese ASR. Keep all PCM, split near pauses and emit short reviewable cues."""
 from collections import deque
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 
 ROOT=Path(__file__).resolve().parents[2]
-sys.path.insert(0,str(ROOT/".runtime/site-packages"))
-sys.path.insert(0,str(ROOT/".runtime/course-method-sensevoice/lib"))
+RUNTIME=Path(os.environ.get("WORLDANALYSIS_COURSE_RUNTIME",ROOT/".runtime")).resolve()
+sys.path.insert(0,str(RUNTIME/"site-packages"))
+sys.path.insert(0,str(RUNTIME/"course-method-sensevoice/lib"))
 import numpy as np
-import sherpa_onnx
 
-MODEL=ROOT/".runtime/course-method-sensevoice/model"
+MODEL=RUNTIME/"course-method-sensevoice/model"
 RATE=16000
 MODEL_SHA="c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51"
 ENGINE=None
@@ -28,6 +29,8 @@ def load_model(language="zh"):
     global ENGINE, ENGINE_LANGUAGE
     if ENGINE is not None and ENGINE_LANGUAGE == language:
         return
+    import sherpa_onnx
+
     ENGINE=sherpa_onnx.OfflineRecognizer.from_sense_voice(model=str(MODEL/"model.int8.onnx"),tokens=str(MODEL/"tokens.txt"),
             language=language,use_itn=True,num_threads=3,provider="cpu")
     ENGINE_LANGUAGE=language

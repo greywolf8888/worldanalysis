@@ -33,7 +33,10 @@ def gpu_from_args(args, backend, configured=None):
         raise ValueError("GPU 转写需要同时指定本地 CrispASR 可执行文件和相应权重")
     from gpu_asr import VulkanASR
 
-    return VulkanASR(exe, model, backend)
+    device = getattr(args, "device", None)
+    if device is None and configured:
+        device = configured.get("device")
+    return VulkanASR(exe, model, backend, device)
 
 
 def prepare(project, args):
@@ -49,15 +52,26 @@ def prepare(project, args):
     runtime = project.ledger / "asr-settings.json"
     preferred = read(runtime) if runtime.is_file() else None
     gpu = gpu_from_args(args, "sensevoice", preferred) if videos else None
-    media = prepare_project_media(project, videos, documents["records"], gpu)
-    scan_project(project, media["videos"], args.workers)
     if gpu:
-        put(runtime, {"backend": "sensevoice", "exe": str(gpu.executable), "model": str(gpu.model)})
+        put(runtime, {"backend": "sensevoice", "exe": str(gpu.executable), "model": str(gpu.model),
+                      "device": gpu.device["index"]})
     elif videos and args.cpu:
         put(runtime, {"backend": "cpu"})
+    media = prepare_project_media(project, videos, documents["records"], gpu)
+    scan_project(project, media["videos"], args.workers)
+    from transcript import update_timeline
+
+    stale = []
+    for row in media["videos"]:
+        try:
+            update_timeline(project, row["lesson"])
+        except (ValueError, OSError) as error:
+            stale.append(str(error))
     order = project.work / ORDER
     if not order.exists():
         put(order, [row["lesson"] for row in videos])
+    if stale:
+        raise ValueError("；".join(stale))
     print(f"已准备 {len(videos)} 个原视频和 {documents['total']} 件附件")
     print(f"原件 {project.raw}")
     print(f"编辑与取证 {project.work}")
@@ -80,7 +94,7 @@ def preview(project):
 
 
 def accept(project, obsidian_exe):
-    from acceptance import REVIEW, commit, validate_review, verify_publication
+    from acceptance import REVIEW, commit, validate_review, validate_review_proofs, verify_publication
     from reader_review import snapshot
 
     body, figures, template = preview(project)
@@ -89,6 +103,7 @@ def accept(project, obsidian_exe):
         raise ValueError(f"请先逐集对照原片并只读走查，填写 {review_path}")
     review = read(review_path)
     validate_review(body, figures, review, template)
+    validate_review_proofs(project, review)
     env = dict(os.environ)
     if obsidian_exe:
         env["OBSIDIAN_EXE"] = str(obsidian_exe.resolve(strict=True))
@@ -101,8 +116,10 @@ def accept(project, obsidian_exe):
     current = (project.preview / ENTRY).read_text(encoding="utf-8")
     if current != body or snapshot(project.preview, current) != {
         key: template["snapshot"][key] for key in ("text_sha256", "images")
-    }:
+    } or any(sha(local_child(project.state, name)) != digest
+             for name, digest in template["snapshot"]["evidence"].items()):
         raise ValueError("阅读检查期间预览或配图已修改，请重新验收")
+    validate_review_proofs(project, review)
     project.validate_raw()
     commit(project, body, figures, review, render)
     return verify_publication(project, raw_verified=True)
@@ -125,6 +142,7 @@ def preparation_options(parser):
     parser.add_argument("--workers", type=int, choices=range(1, 9), default=3, metavar="1–8")
     parser.add_argument("--gpu-exe", type=Path, help="可选本地 CrispASR Vulkan 可执行文件")
     parser.add_argument("--model", type=Path, help="可选 SenseVoiceSmall GGUF 权重")
+    parser.add_argument("--device", type=int, help="CrispASR 诊断显示的 Vulkan 序号")
     parser.add_argument("--cpu", action="store_true", help="切换到本地 CPU 转写")
 
 
@@ -159,10 +177,34 @@ def main(argv=None):
     keep = commands.add_parser("keep", help="从原视频或附件登记真实 PNG")
     keep.add_argument("project", type=Path)
     keep.add_argument("picks", type=Path, help="JSON 取图清单")
-    refine = commands.add_parser("refine", help="用本地 Whisper Turbo 独立复识候选")
+    refine = commands.add_parser("refine", help="用本地 Whisper Turbo 或 Qwen3-ASR 独立复识候选")
     refine.add_argument("project", type=Path)
     refine.add_argument("--gpu-exe", type=Path)
     refine.add_argument("--model", type=Path)
+    refine.add_argument("--device", type=int)
+    refine.add_argument("--backend", choices=("whisper", "qwen3"), default="whisper")
+    refine.add_argument("--lesson", type=int)
+    refine.add_argument("--range", nargs=2, action="append", type=float, metavar=("START", "END"),
+                        help="回查字幕区间内的争议，可多次提供，单位秒")
+    reading = commands.add_parser("read", help="按时间顺序输出当前采用稿与画面候选")
+    reading.add_argument("project", type=Path)
+    reading.add_argument("lesson", type=int)
+    reading.add_argument("--start", type=float, default=0)
+    reading.add_argument("--end", type=float)
+    reading.add_argument("--observations", action="append", default=[],
+                         help="可多次引用观察 JSON，使用相对于 .course/work 的路径")
+    adopt = commands.add_parser("adopt", help="把经原课和复识对照确认的补识纳入采用稿")
+    adopt.add_argument("project", type=Path)
+    adopt.add_argument("lesson", type=int)
+    adopt.add_argument("decisions", type=Path)
+    visual = commands.add_parser("observe", help="按呈现时间打开原片帧，可对局部做时序 OCR")
+    visual.add_argument("project", type=Path)
+    visual.add_argument("lesson", type=int)
+    visual.add_argument("start", type=float)
+    visual.add_argument("end", type=float)
+    visual.add_argument("--step", type=float, default=.5)
+    visual.add_argument("--crop", nargs=4, type=int)
+    visual.add_argument("--ocr", action="store_true")
     args = parser.parse_args(argv)
 
     try:
@@ -188,8 +230,22 @@ def main(argv=None):
                 from gpu_asr import refine_candidates
 
                 project.validate_raw()
-                refine_candidates(project, gpu_from_args(args, "whisper"))
+                refine_candidates(project, gpu_from_args(args, args.backend), args.lesson, args.range)
                 print(project.work / "媒体补查/语音复识.json")
+            elif args.action == "adopt":
+                from transcript import timeline_paths, update_timeline
+
+                update_timeline(project, args.lesson, read(args.decisions))
+                print(timeline_paths(project, args.lesson)[0])
+            elif args.action == "read":
+                from transcript import reading_packet
+
+                print(json.dumps(reading_packet(project, args.lesson, args.start, args.end, args.observations),
+                                 ensure_ascii=False, indent=2))
+            elif args.action == "observe":
+                from visual import observe
+
+                print(observe(project, args.lesson, args.start, args.end, args.step, args.crop, args.ocr))
             elif args.action == "preview":
                 preview(project)
                 print(project.preview / ENTRY)

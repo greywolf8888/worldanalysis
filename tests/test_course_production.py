@@ -1,4 +1,5 @@
 """Integration coverage for fresh course folders, independent of the archived batch."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -137,6 +138,8 @@ class CourseProductionTest(unittest.TestCase):
                             "-t", "3", str(self.source / chapter)], check=True, timeout=30)
         subtitle = self.source / "02 录屏 [一].zh-Hans.srt"
         subtitle.write_text("1\n00:00:00,500 --> 00:00:01,500\n我打开比例菜单，选三比四。\n", encoding="utf-8")
+        summary = self.source / "10 录屏二.srt"
+        summary.write_text("1\n00:00:00,000 --> 00:00:03,000\n设置比例。\n", encoding="utf-8")
 
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "需要本地 FFmpeg")
     def test_mixed_course_checks_every_video_and_rejects_stale_review(self):
@@ -144,7 +147,11 @@ class CourseProductionTest(unittest.TestCase):
         self.make_clips()
         self.start_course()
         self.assertEqual(self.data(self.ledger / "01.json")["extraction"], "original_subtitle")
-        self.assertEqual(self.data(self.ledger / "02.json")["extraction"], "sensevoice_cpu")
+        silent_sound = self.data(self.ledger / "02.json")
+        self.assertTrue(silent_sound["audio_processed"])
+        self.assertGreater(silent_sound["audio_scope"][0]["samples"], 47000)
+        self.assertEqual(silent_sound["original_cues"], silent_sound["cues"])
+        self.assertEqual(silent_sound["asr_cues"], [])
         self.command("window", self.package, 2, .9, 1.65, "--label", "短比例菜单", "--step", .1,
                      "--crop", 400, 70, 550, 155)
         window = self.data(self.work / "源片段复核/短比例菜单/片段.json")
@@ -153,11 +160,16 @@ class CourseProductionTest(unittest.TestCase):
                    {"name": "静默片段里的菜单", "lesson": 2, "time": 1.2}])
         note = self.work / "教材.md"
         body = ("# 画板操作\n\n## 设好画板比例\n\n"
-                "我先准备空白画板，打开比例菜单，选 3:4。{{01|00:00–00:03}} {{D002|第 1 页}}\n\n"
+                "我先准备空白画板，打开比例菜单，选 3:4。{{01|00:00–00:03}} {{D003|第 1 页}}\n\n"
                 "{{img:菜单初选|450}}\n\n我保存预览。如果设置错了，我重新选择比例。\n\n"
                 "## 检查静默录屏设置\n\n我在无口播的界面展开比例列表。{{02|00:00–00:03}}\n\n"
                 "{{img:静默片段里的菜单|450}}\n\n我等面板收起，再检查 3:4 已应用。\n")
         note.write_text(body, encoding="utf-8")
+        point_dir = self.work / "逐段要点"
+        point_dir.mkdir()
+        for lesson in (1, 2):
+            self.save(point_dir / f"{lesson:02}.json", [
+                {"range_s": [1, 1.6], "kind": "画面", "source_note": "原片中显示短暂的 3:4 比例菜单"}])
         self.command("preview", self.package)
         review = self.data(self.work / "验收填写模板.json")
         review_path = self.work / "验收记录.json"
@@ -168,6 +180,7 @@ class CourseProductionTest(unittest.TestCase):
                        visual_basis="原片", visual_note="原片比例菜单可见",
                        key_steps=[{"range_s": [1, 1.6], "anchor": anchor,
                                    "figures": [image + ".png"]}])
+            row["source_points"][0]["anchor"] = anchor
         for doc in review["documents"]:
             if doc["source"].endswith(".srt"):
                 doc.update(use="用作转写", note="对照第一讲的课程原字幕")
@@ -194,17 +207,85 @@ class CourseProductionTest(unittest.TestCase):
         note.write_text(body + "\n我最后核对预览。\n", encoding="utf-8")
         self.assertIn("验收记录与当前预览", self.command("accept", self.package, okay=False))
         note.write_text(body, encoding="utf-8")
+        proof_path = self.work / "确认回看.txt"
+        proof_path.write_text("原片菜单 3:4 出现", encoding="utf-8")
+        decision_path = self.work / "补识决定.json"
+        self.save(decision_path, {
+            "metadata_sha256": hashlib.sha256((self.ledger / "01.json").read_bytes()).hexdigest(),
+            "windows": [{"range_s": [.5, 1.5], "reason": "对照录屏原菜单",
+                         "proofs": [{"path": proof_path.name, "sha256": hashlib.sha256(proof_path.read_bytes()).hexdigest()}],
+                         "cues": [{"start": .5, "end": 1.5, "text": "打开比例菜单，选 3:4。"}]}],
+        })
+        self.command("adopt", self.package, 1, decision_path)
+        adopted = self.data(self.work / "采用转写/01.json")
+        self.assertEqual(adopted["confirmed_windows"], [[.5, 1.5]])
+        self.assertIn("选 3:4", adopted["cues"][0]["text"])
+        self.assertIn("验收记录与当前预览", self.command("accept", self.package, okay=False))
+        proof_path.write_text("证据已变", encoding="utf-8")
+        self.assertIn("采用依据字节已变动", self.command("read", self.package, 1, okay=False))
+        confirmed_spec = self.data(decision_path)
+        self.save(decision_path, {**self.data(decision_path), "windows": []})
+        self.command("adopt", self.package, 1, decision_path)
         self.publish(expected_videos=2)
         raw_mtime = (self.package / "原始资料" / "02 录屏 [一].mp4").stat().st_mtime_ns
         evidence_mtime = (self.work / "媒体补查/L01.json").stat().st_mtime_ns
         self.start_course()
         self.assertEqual(raw_mtime, (self.package / "原始资料" / "02 录屏 [一].mp4").stat().st_mtime_ns)
         self.assertEqual(evidence_mtime, (self.work / "媒体补查/L01.json").stat().st_mtime_ns)
+        proof_path.write_text("原片菜单 3:4 出现", encoding="utf-8")
+        self.save(decision_path, confirmed_spec)
+        self.command("adopt", self.package, 1, decision_path)
         self.save(self.work / "媒体设置.json", {"1": {"voiced_reference": "10 录屏二.mp4"}})
-        self.command("prepare", self.package)
+        self.assertIn("采用决定已过期", self.command("prepare", self.package, okay=False))
         aligned = self.data(self.ledger / "01.json")
         self.assertEqual(aligned["audio_source"], "10 录屏二.mp4")
         self.assertEqual(len(aligned["audio_alignment"]), 13)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "需要本地 FFmpeg")
+    def test_hard_captions_and_dark_silent_operation(self):
+        from PIL import Image, ImageDraw
+
+        for index, label in enumerate(("Ready", "ROI 2.3", "ROI 23", "Saved")):
+            frame = Image.new("RGB", (640, 360), "#0c0c0c")
+            draw = ImageDraw.Draw(frame)
+            draw.text((230, 300), label, fill="white", font_size=30)
+            if index == 1:
+                draw.rectangle((250, 100, 365, 160), outline="red", width=4)
+            frame.save(self.root / f"input-{index}.png")
+        video = self.source / "暗色界面.mp4"
+        subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-framerate", "2", "-i",
+                        str(self.root / "input-%d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video)],
+                       check=True, timeout=30)
+        deps = Path(self.env.get("WORLDANALYSIS_COURSE_RUNTIME", str(ROOT / ".runtime"))) / "site-packages"
+        paths = [str(deps), self.env.get("PYTHONPATH", "")]
+        self.env["PYTHONPATH"] = os.pathsep.join(filter(None, paths))
+        self.env["WORLDANALYSIS_COURSE_RUNTIME"] = str(self.root / "空运行目录")
+        self.start_course()
+        self.assertFalse(self.data(self.ledger / "01.json")["audio_processed"])
+        scan = self.data(self.work / "媒体补查/L01.json")
+        self.assertTrue(any(event.get("dark_background") for event in scan["picture"]["scene_probes"]))
+        path = Path(self.command("observe", self.package, 1, 0, 2, "--step", .25,
+                                 "--crop", 160, 270, 460, 352, "--ocr").splitlines()[-1])
+        seen = self.data(path)
+        self.assertEqual(seen["ocr_unreadable_frames"], [])
+        self.assertTrue(any(cue["start"] == .5 and "2.3" in cue["text"] for cue in seen["text_cues"]))
+        self.assertTrue(any(cue["start"] == 1 and "23" in cue["text"] for cue in seen["text_cues"]))
+
+    def test_short_uncovered_speech_and_differences_inside_a_cue(self):
+        sys.path.insert(0, str(CLI.parent))
+        try:
+            from review_media import missing_ranges
+            from transcript import compare_cues
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(missing_ranges(10.0, 10.8, [], []), [(10.0, 10.8)])
+        self.assertEqual(missing_ranges(10.0, 10.2, [], []), [])
+        self.assertEqual(missing_ranges(10.0, 10.2, [], [], minimum=0), [(10.0, 10.2)])
+        captions = [{"start": 0, "end": 12, "text": "开启快投，目标 ROI 23。"}]
+        audio = [{"start": 0, "end": 12, "text": "不要开启快投，目标 ROI 2.3。"}]
+        differences, = compare_cues(captions, audio, 12)
+        self.assertEqual(differences["kind"], "both")
+        self.assertTrue(differences["critical_words_differ"])
 
 
 if __name__ == "__main__":

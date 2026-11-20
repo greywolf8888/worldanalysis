@@ -17,16 +17,15 @@ from _tools.course_no_subtitles.speech import load_model
 import av
 import cv2
 import numpy as np
-import sherpa_onnx
 
 
 RATE = 16000
 VAD_FILE = MODEL / "silero_vad.onnx"
 VAD_SHA = "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
-REVIEW_REV = 3
-VISUAL_METHOD = "source PTS sampling, local change, annotation, near-black overlay suppression"
+REVIEW_REV = 4
+VISUAL_METHOD = "source PTS sampling, local change, annotations including dark backgrounds"
 ACTION_WORDS = re.compile(r"右键|点击|点开|按住|长按|打开|选中|切换|拖动|弹出|放大|缩小|按钮|菜单|勾选|圈出|画框|保存")
-GAP_S = .85
+GAP_S = .45
 PAD_S = .2
 
 
@@ -55,22 +54,24 @@ def merged_ranges(items, padding=0):
     return result
 
 
-def missing_ranges(left, right, covered, ends):
+def missing_ranges(left, right, covered, ends, minimum=GAP_S):
     gaps = []
     for l, r in covered[bisect_right(ends, left):]:
         if l >= right:
             break
-        if l - left >= GAP_S:
+        if l - left >= minimum and l > left:
             gaps.append((left, l))
         left = max(left,r)
         if left >= right:
             break
-    if right-left >= GAP_S:
+    if right - left >= minimum and right > left:
         gaps.append((left, right))
     return gaps
 
 
 def speech_detector():
+    import sherpa_onnx
+
     cfg=sherpa_onnx.VadModelConfig()
     cfg.sample_rate=RATE
     cfg.num_threads=1
@@ -93,6 +94,7 @@ def speech_scan(source, metadata, offset, gain_db=0):
     gain=10**(gain_db/20)
     activity=[]
     candidates=[]
+    below_threshold=[]
     decoded_end=0.0
     tail=np.empty(0,dtype=np.float32)
 
@@ -107,7 +109,10 @@ def speech_scan(source, metadata, offset, gain_db=0):
             if end <= start:
                 continue
             activity.append((start,end))
-            for left,right in missing_ranges(start,end,cue_ranges,ends):
+            for left,right in missing_ranges(start,end,cue_ranges,ends,minimum=0):
+                if right - left < GAP_S:
+                    below_threshold.append({"start": round(left, 3), "end": round(right, 3)})
+                    continue
                 # Decode only the uncaptioned portion of a speech candidate, with a
                 # short context margin for word boundaries. Existing cues stay intact.
                 a=max(0,round((left-start-.15)*RATE))
@@ -144,6 +149,7 @@ def speech_scan(source, metadata, offset, gain_db=0):
             "original_cues":len(metadata["cues"]),
             "speech_ranges":len(activity),
             "speech_s":round(sum(b-a for a,b in merged_ranges(activity)),2),
+            "candidate_min_s":GAP_S,"cue_padding_s":PAD_S,"below_threshold":below_threshold,
             "uncovered_candidates":candidates}
 
 
@@ -189,10 +195,8 @@ def frame_scan(source, duration, cues, origin=0):
             gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
             inner = gray[height//10:height*8//10, width//10:width*9//10]
             dark = cv2.countNonZero(cv2.inRange(inner, 0, 12)) >= inner.size * .87
-            marks = None
-            if not dark:
-                red = rgb[:, :, 0]
-                marks = (red >= 130) & (cv2.subtract(red, cv2.max(rgb[:, :, 1], rgb[:, :, 2])) > 48)
+            red = rgb[:, :, 0]
+            marks = (red >= 130) & (cv2.subtract(red, cv2.max(rgb[:, :, 1], rgb[:, :, 2])) > 48)
             dark_count += dark
             cue = bisect_left(cue_ends, t-.35)
             quiet = cue >= len(cue_starts) or cue_starts[cue] > t+.35
@@ -203,16 +207,14 @@ def frame_scan(source, duration, cues, origin=0):
                 first = t
             else:
                 largest_gap = max(largest_gap, t - previous_t)
-                if not (dark and previous_dark):
-                    delta = cv2.absdiff(gray, previous)
-                    cell_shape = (rows, height//rows, columns, width//columns)
-                    cells = delta.reshape(cell_shape).mean(axis=(1, 3))
-                    iy, ix = np.unravel_index(cells.argmax(), cells.shape)
-                    tile = [int(ix), int(iy)]
-                    local = float(cells[iy, ix])
-                    overall = float(cv2.mean(delta)[0])
-                    if marks is not None and previous_marks is not None:
-                        ink = float(np.logical_xor(marks, previous_marks).reshape(cell_shape).mean(axis=(1, 3)).max())
+                delta = cv2.absdiff(gray, previous)
+                cell_shape = (rows, height//rows, columns, width//columns)
+                cells = delta.reshape(cell_shape).mean(axis=(1, 3))
+                iy, ix = np.unravel_index(cells.argmax(), cells.shape)
+                tile = [int(ix), int(iy)]
+                local = float(cells[iy, ix])
+                overall = float(cv2.mean(delta)[0])
+                ink = float(np.logical_xor(marks, previous_marks).reshape(cell_shape).mean(axis=(1, 3)).max())
 
             if pending is not None:
                 pending["after_pts"] = t
@@ -221,7 +223,8 @@ def frame_scan(source, duration, cues, origin=0):
             if change and t - last_change >= .58:
                 pending = {"kind":"change", "before_pts":previous_t, "pts":t, "after_pts":t,
                            "change":round(local,3), "whole":round(overall,3), "ink":round(ink,4),
-                           "tile":tile, "outside_cues":quiet, "near_spoken_action":action}
+                           "tile":tile, "outside_cues":quiet, "near_spoken_action":action,
+                           "dark_background":dark and previous_dark}
                 events.append(pending)
                 last_change = t
             if t >= next_anchor:
@@ -293,10 +296,11 @@ def scan_video(course, ledger, work, lesson):
         "cues_sha256":hashlib.sha256(json.dumps(metadata["cues"],ensure_ascii=False).encode("utf-8")).hexdigest(),
     }
     signature["prepare"] = metadata["prepare_signature"]
+    signature["audio_method"] = {"revision": 2, "min_s": GAP_S, "cue_padding_s": PAD_S} if audio_count else None
     previous = read(output) if output.is_file() else None
-    if previous and (storage/f"L{lesson:02}.jpg").is_file():
-        if previous["signature"]==signature:
-            return previous
+    sheet = storage/f"L{lesson:02}.jpg"
+    if previous and sheet.is_file() and previous["signature"] == signature:
+        return previous
     started=time.perf_counter()
     same_audio = previous and all(previous["signature"].get(key)==value for key,value in signature.items()
                                   if key != "revision")
@@ -304,8 +308,12 @@ def scan_video(course, ledger, work, lesson):
         sound_info = previous["audio"]
     else:
         sound_info=speech_scan(sound,metadata,offset) if audio_count else {"no_audio":True,"uncovered_candidates":[]}
-    display,pictures=frame_scan(source,metadata["duration_s"],metadata["cues"],metadata.get("timeline_origin_s", 0))
-    write_strip(storage,lesson,pictures)
+    if previous and sheet.is_file() and all(previous["signature"].get(key) == signature[key]
+            for key in ("revision", "raw_sha256", "raw_mtime_ns", "cues_sha256", "prepare")):
+        display = previous["picture"]
+    else:
+        display,pictures=frame_scan(source,metadata["duration_s"],metadata["cues"],metadata.get("timeline_origin_s", 0))
+        write_strip(storage,lesson,pictures)
     receipt={"course":name,"lesson":lesson,"source":metadata["source"],
              "duration":metadata["duration_s"],"signature":signature,
              "audio":sound_info,"picture":display,"elapsed_s":round(time.perf_counter()-started,2)}
@@ -316,7 +324,8 @@ def scan_video(course, ledger, work, lesson):
 def scan_project(project, videos, workers):
     if not videos:
         return []
-    if sha(VAD_FILE) != VAD_SHA or sha(MODEL / "model.int8.onnx") != MODEL_SHA:
+    has_audio = any(read(project.ledger / f"{row['lesson']:02}.json")["audio_count"] for row in videos)
+    if has_audio and (sha(VAD_FILE) != VAD_SHA or sha(MODEL / "model.int8.onnx") != MODEL_SHA):
         raise ValueError("补查使用的本地模型哈希不符")
     with ProcessPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(scan_video, project.folder, project.ledger, project.work, row["lesson"])

@@ -8,7 +8,7 @@ from zipfile import ZipFile
 from pathlib import Path, PurePosixPath
 
 from prepare import stamp
-from project import local_child, put, read
+from project import local_child, put, read, sha
 import av
 from PIL import Image, ImageChops, ImageDraw
 
@@ -153,6 +153,23 @@ def review_window(path, lesson, start, stop, step, label, crop=None, *, ledger, 
     print(f"{path.name} 第 {lesson} 讲 · {len(frames)} 张候选画面 · {folder}")
 
 
+def diagram_source(path, ledger, work, spec):
+    from transcript import valid_span
+
+    file = local_child(work, spec["file"])
+    with Image.open(file) as image:
+        if image.format != "PNG":
+            raise ValueError("整理示意图须是已完成的 PNG")
+        image = image.copy()
+    meta = read(ledger / f"{spec['lesson']:02}.json")
+    valid_span(spec["range_s"], meta["duration_s"])
+    if not spec["basis"].strip() or not spec["caption"].strip():
+        raise ValueError("整理示意图需要标明该处原课依据和图注")
+    if sha(local_child(path / "原始资料", meta["source"])) != meta["sha256"]:
+        raise ValueError("整理示意图对应的课程原件已变")
+    return meta["source"], image, sha(file)
+
+
 def keep(path, entries, append=False, *, ledger, output_root):
     output=local_child(output_root, "课件/原图")
     output.mkdir(exist_ok=True,parents=True)
@@ -164,7 +181,11 @@ def keep(path, entries, append=False, *, ledger, output_root):
         stem=entry["name"]
         if Path(stem).name!=stem or not stem.strip() or stem in (".", "..") or re.search(r'[\\/:*?"<>|\[\]{}]', stem):
             raise ValueError("图片名需要是普通文件名，且能作为 Markdown 图片标题")
-        if "document" in entry:
+        if "diagram" in entry:
+            spec = entry["diagram"]
+            src, img, digest = diagram_source(path, ledger, output_root.parent, spec)
+            locator = {"diagram": spec, "diagram_sha256": digest}
+        elif "document" in entry:
             doc=entry["document"];page=entry["page"];scale=entry.get("scale",1)
             src,img=document_image(path,doc,page,scale,ledger=ledger)
             locator={"document":doc,"page":page,"scale":scale}

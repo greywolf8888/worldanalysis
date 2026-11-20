@@ -4,9 +4,10 @@ from pathlib import Path
 import re
 from urllib.parse import quote, unquote
 
-from frames import document_image, orig
+from frames import diagram_source, document_image, orig
 from project import ENTRY, copy_file, local_child, read, sha, write
 from reader_review import markdown_segments
+from transcript import stamp
 from PIL import Image, ImageChops
 
 
@@ -34,6 +35,10 @@ def timecode(value):
 
 
 def figure_location(info):
+    if "diagram" in info:
+        spec = info["diagram"]
+        start, end = spec["range_s"]
+        return f"第 {spec['lesson']} 讲 {stamp(start)}–{stamp(end)} · {spec['basis']}"
     if "document" in info:
         return f"《{Path(info['source']).name}》第 {info['page']} 页"
     hours, remainder = divmod(round(info["pts"] * 100), 360000)
@@ -47,7 +52,11 @@ def hidden_source(kind, detail):
 
 
 def check_figure(course, info, *, ledger, art_root):
-    if "document" in info:
+    if "diagram" in info:
+        original, frame, digest = diagram_source(course, ledger, art_root.parent, info["diagram"])
+        if digest != info["diagram_sha256"]:
+            raise ValueError(f"整理示意图已变动 {info['name']}")
+    elif "document" in info:
         original, frame = document_image(course, info["document"], info["page"], info["scale"], ledger=ledger)
     else:
         original, frame, pts = orig(course, info["lesson"], info["pts"], ledger=ledger)
@@ -159,7 +168,8 @@ def compile_textbook(course, work, ledger, *, art_root, order):
             prefix = match.string[match.string.rfind("\n", 0, match.start())+1:match.start()]
             indent = prefix if prefix.isspace() else ""
             provenance = hidden_source("配图出处", f"{figure_location(info)} · {title}")
-            return f"![{title}|{display_width}]({quote(image_path, safe='/+')})\n\n{indent}{provenance}"
+            caption = f"\n\n{indent}*根据原课整理 · {info['diagram']['caption']}*" if "diagram" in info else ""
+            return f"![{title}|{display_width}]({quote(image_path, safe='/+')}){caption}\n\n{indent}{provenance}"
 
         def references(match):
             expanded = (reference(ref) for ref in REF.finditer(match[0]))
