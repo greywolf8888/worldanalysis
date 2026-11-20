@@ -90,6 +90,9 @@ class CourseProductionTest(unittest.TestCase):
 
     def test_document_only_intake_preview_and_publication(self):
         guide = self.make_guide()
+        resource = self.source / "B 课堂练习.url"
+        url = "https://course.example.invalid/practice?q=%E7%BB%83"
+        resource.write_text(f"[InternetShortcut]\nURL={url}\n", encoding="utf-16")
         self.start_course()
         self.assertEqual(guide.read_bytes(), (self.package / "原始资料" / guide.name).read_bytes())
         self.pick([{"name": "比例图", "document": "D001", "page": 1, "scale": 1.2}])
@@ -98,29 +101,87 @@ class CourseProductionTest(unittest.TestCase):
             "# 画板导出\n\n## 设好画板比例\n\n"
             "我先准备空白画板，打开比例菜单，选 3:4。{{D001|第 1 页，比例和预览设置}}\n\n"
             "{{img:比例图|450}}\n\n我保存预览。如果比例显示错误，我重新选择比例。\n\n"
-            "~~~text\nratio={{current_ratio}}\n~~~\n",
+            "~~~text\nratio={{current_ratio}}\n~~~\n\n"
+            "## 随课参考\n\n讲义首页用于复习画板尺寸。{{D001|第 1 页，比例和预览设置}}\n\n"
+            "课堂练习可用随课的原始入口。{{D002|InternetShortcut 中的 URL}}\n",
             encoding="utf-8",
         )
+        supplemental = {"anchor": "讲义首页用于复习画板尺寸",
+                        "sources": [f"{guide.name} · 第 1 页，比例和预览设置"]}
+        supplement_file = self.work / "补充内容复核.json"
+        self.save(supplement_file, [{**supplemental, "sources": [f"{guide.name} · 第 2 页"]}])
         self.command("preview", self.package)
         self.assertIn("{{current_ratio}}", (self.work / "阅读预览" / ENTRY).read_text(encoding="utf-8"))
         docs = self.data(self.ledger / "documents-summary.json")["records"]
         self.assertGreater(docs[0]["text_blocks"], 0)
+        self.assertEqual(docs[1]["status"], "extracted")
+        self.assertEqual(self.data(self.work / docs[1]["result"])["blocks"][0]["text"], url)
         review = self.data(self.work / "验收填写模板.json")
         self.assertEqual(review["episodes"], [])
         review["documents"][0]["note"] = "已查看第 1 页的尺寸标签和预览示意"
+        review["documents"][1].update(inspected_at="InternetShortcut 节和 URL 条目", note="随课练习入口")
         review["follow_along"] = [self.follow_along(
             "设好画板比例", ["第 1 页，比例和预览设置"], ["比例图.png"])]
-        self.save(self.work / "验收记录.json", review)
+        review_path = self.work / "验收记录.json"
+        self.save(review_path, review)
+        self.assertIn("附件须登记实际检查的页", self.command("accept", self.package, okay=False))
+        review["documents"][0]["inspected_at"] = "第 1 页的文字和图形布局"
+        review.pop("supplements")
+        self.save(review_path, review)
+        self.assertIn("补充内容验收需与当前登记一致", self.command("accept", self.package, okay=False))
+        review["supplements"] = self.data(supplement_file)
+        self.save(review_path, review)
+        self.assertIn("补充内容缺可见正文或相邻隐藏出处", self.command("accept", self.package, okay=False))
+        self.save(supplement_file, [supplemental])
+        self.command("preview", self.package)
+        review["snapshot"] = self.data(self.work / "验收填写模板.json")["snapshot"]
+        review["supplements"] = [supplemental]
+        self.save(review_path, review)
         self.publish(expected_videos=0)
         if OBSIDIAN:
+            (self.root / ".obsidian").mkdir()
+            target = self.package / ENTRY.parent / f"{self.package.name}.md"
+            installed = json.loads(self.command(
+                "deliver", self.package, "--vault", self.root, "--course-folder", self.package.name))
+            self.assertEqual(Path(installed["entry"]), target)
+            self.assertFalse((self.package / ENTRY).exists())
+            self.command("verify-reader", self.package, "--obsidian-exe", OBSIDIAN)
+            result = json.loads(self.command("verify", self.package, "--require-vault"))
+            self.assertTrue(result["verified"])
+            render = self.work / "日常库接口验收" / f"{installed['sha256']}.json"
+            self.assertTrue(self.data(render)["checks"][0]["reopened"])
+            render.write_text("{}", encoding="utf-8")
+            self.assertIn("尚待 Obsidian 重开", self.command("verify", self.package, "--require-vault", okay=False))
             archived = self.package / "原始资料" / guide.name
             with archived.open("ab") as stream:
                 stream.write(b"\n")
             self.assertIn("原件有增删或变更", self.command("verify", self.package, okay=False))
 
+    def test_supplements_require_visible_text_and_exact_nearby_sources(self):
+        sys.path.insert(0, str(CLI.parent))
+        from acceptance import validate_supplements
+
+        guide = "作者资料.pdf · 第 3 页"
+        film = "第 1 讲 00:00–00:12"
+        item = [{"anchor": "在作者页领取练习", "sources": [guide, film]}]
+        hidden = f"<!-- 段落出处 {guide} · {film} -->"
+        text = f"在作者页领取练习。{hidden}"
+        validate_supplements(text, item, item)
+        for misplaced in (
+            f"> [!info]- 资料\n> {text}\n",
+            f"<details>\n{text}\n</details>",
+            f"~~~text\n{text}\n~~~",
+            f"<!-- 在作者页领取练习。 -->{hidden}",
+            f"在作者页领取练习。\n\n{hidden}",
+            text.replace("第 3 页", "第 3 页附注"),
+        ):
+            with self.subTest(body=misplaced), self.assertRaisesRegex(ValueError, "缺可见正文或相邻隐藏出处"):
+                validate_supplements(misplaced, item, item)
+
     def test_vault_delivery_preserves_the_existing_entry_and_requires_reopen(self):
         sys.path.insert(0, str(CLI.parent))
         from project import CourseProject, sha, write
+        from urllib.parse import unquote
         from vault_delivery import confirm, delivery_status, install
 
         write(self.source / "说明.txt", "原内容")
@@ -128,9 +189,10 @@ class CourseProductionTest(unittest.TestCase):
         vault = self.root / "用户日常库"
         (vault / ".obsidian").mkdir(parents=True)
         course_name = "已有学习入口"
-        target = vault / course_name / ENTRY
-        write(target, "# 保存的旧稿\n")
-        previous = sha(target)
+        old_target = vault / course_name / ENTRY
+        target = old_target.with_name(f"{course_name}.md")
+        write(old_target, "# 保存的旧稿\n")
+        previous = sha(old_target)
 
         picture = Path("课件/原图/指示图.png")
         file = self.package / picture
@@ -144,14 +206,22 @@ class CourseProductionTest(unittest.TestCase):
         published = {"body": body, "outputs": {ENTRY.as_posix(): sha(project.entry), picture.as_posix(): sha(file)}}
         with self.assertRaisesRegex(ValueError, "已有不同的教材"):
             install(project, published, vault, course_name)
-        self.assertEqual(sha(target), previous)
+        self.assertEqual(sha(old_target), previous)
 
+        shortcut = vault / "旧入口索引.md"
+        write(shortcut, f"[[{course_name}/{ENTRY.with_suffix('').as_posix()}]]")
+        with self.assertRaisesRegex(ValueError, "旧笔记有入链"):
+            install(project, published, vault, course_name, previous)
+        self.assertTrue(old_target.is_file())
+        shortcut.unlink()
         state = install(project, published, vault, course_name, previous)
+        self.assertFalse(old_target.exists())
         self.assertEqual(sha(target), sha(project.entry))
+        self.assertEqual(unquote(state["uri"]), f"obsidian://open?path={target.as_posix()}")
         self.assertEqual(sha(project.ledger / "obsidian-previous" / previous / ENTRY.name), previous)
         self.assertTrue((vault / course_name / picture).is_file())
         self.assertTrue((vault / course_name / "原始资料/说明.txt").is_file())
-        with self.assertRaisesRegex(ValueError, "尚待真实窗口重开"):
+        with self.assertRaisesRegex(ValueError, "尚待 Obsidian 重开"):
             delivery_status(project, published, required=True)
         observed = {
             **{key: state[key] for key in ("entry", "sha256", "installed_at")},
@@ -170,7 +240,7 @@ class CourseProductionTest(unittest.TestCase):
                    "outputs": {**published["outputs"], ENTRY.as_posix(): sha(project.entry)}}
         self.assertEqual(delivery_status(project, revised)["status"], "阅读库待更新")
         install(project, revised)
-        with self.assertRaisesRegex(ValueError, "尚待真实窗口重开"):
+        with self.assertRaisesRegex(ValueError, "尚待 Obsidian 重开"):
             delivery_status(project, revised, required=True)
         write(target, "# 读者的现场编辑\n")
         self.assertEqual(delivery_status(project, revised)["status"], "阅读库文件待核对")
@@ -214,6 +284,10 @@ class CourseProductionTest(unittest.TestCase):
         self.assertGreater(silent_sound["audio_scope"][0]["samples"], 47000)
         self.assertEqual(silent_sound["original_cues"], silent_sound["cues"])
         self.assertEqual(silent_sound["asr_cues"], [])
+        scan = self.data(self.work / "媒体补查/L02.json")
+        self.assertEqual(scan["audio"]["speech_windows"], [])
+        self.assertTrue(any(event["kind"] == "change" and event["outside_speech"] and not event["outside_cues"]
+                            for event in scan["picture"]["scene_probes"]))
         self.command("window", self.package, 2, .9, 1.65, "--label", "短比例菜单", "--step", .1,
                      "--crop", 400, 70, 550, 155)
         window = self.data(self.work / "源片段复核/短比例菜单/片段.json")
@@ -242,12 +316,16 @@ class CourseProductionTest(unittest.TestCase):
                        visual_basis="原片", visual_note="原片比例菜单可见",
                        key_steps=[{"range_s": [1, 1.6], "anchor": anchor,
                                    "figures": [image + ".png"]}])
+            row["channel_review"] = {"opening": "0 秒从画板开场", "closing": "末段菜单收起",
+                                     "screen": "界面四边仅有画板和菜单",
+                                     "finding": "原片没有作者公开渠道"}
             row["source_points"][0]["anchor"] = anchor
         for doc in review["documents"]:
             if doc["source"].endswith(".srt"):
-                doc.update(use="用作转写", note="对照第一讲的课程原字幕")
+                doc.update(use="用作转写", inspected_at="字幕时间轴与首尾字幕", note="对照第一讲的课程原字幕")
             else:
-                doc["note"] = "说明页展示导出前的比例确认"
+                doc.update(inspected_at="PDF 第 1 页文字、比例示意和页边",
+                           note="说明页展示导出前的比例确认")
         review["follow_along"] = [self.follow_along(
             "设好画板比例", ["第 1 讲 00:00–00:03"], ["菜单初选.png"])]
         complete = review["episodes"]
@@ -255,6 +333,10 @@ class CourseProductionTest(unittest.TestCase):
         self.save(review_path, review)
         self.assertIn("每个原视频", self.command("accept", self.package, okay=False))
         review["episodes"] = complete
+        close = complete[0]["channel_review"].pop("closing")
+        self.save(review_path, review)
+        self.assertIn("片头、片尾、画面署名及作者渠道", self.command("accept", self.package, okay=False))
+        complete[0]["channel_review"]["closing"] = close
         self.save(review_path, review)
         displaced = body.replace("{{img:菜单初选|450}}\n\n我保存预览。如果设置错了，我重新选择比例。",
                                  "我保存预览。如果设置错了，我重新选择比例。\n\n{{img:菜单初选|450}}")

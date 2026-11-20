@@ -6,7 +6,7 @@ import re
 from urllib.parse import unquote
 
 from project import ENTRY, copy_file, local_child, put, read, sha, write
-from reader_review import IMAGE, ITEMS, chapters, snapshot, validate_cases
+from reader_review import IMAGE, ITEMS, chapters, markdown_segments, snapshot, validate_cases
 from publish import timecode
 from transcript import timeline_paths, update_timeline, validate_proof
 
@@ -17,12 +17,18 @@ VIDEO_RANGE = re.compile(r"第 (\d+) 讲 ([\d:.]+)(?:–([\d:.]+))?")
 
 REVIEW = "验收记录.json"
 TEMPLATE = "验收填写模板.json"
+SUPPLEMENTS = "补充内容复核.json"
 COMMENT = re.compile(r"<!--[\s\S]*?-->")
+COLLAPSED = re.compile(
+    r"^ {0,3}>[ \t]*\[![^\]\n]+\]-[^\n]*(?:\n[ \t]*>[^\n]*)*"
+    r"|<details\b[^>]*>[\s\S]*?</details\s*>", re.MULTILINE | re.IGNORECASE
+)
 SPANS = {"教学", "原例", "说明", "过场"}
 POINTS = {"概念", "输入", "操作", "参数", "条件", "原例", "纠错", "结果", "画面", "说明"}
 AUDIO_OUTCOMES = {"已补正文", "正文已涵盖", "非教学声音", "听辨缺口"}
 DOCUMENT_USES = {"引用", "用作转写", "参考", "重复", "原样存档", "提取缺口"}
 VISUAL_BASES = {"原片", "附件原图", "无可教学画面"}
+CHANNEL_CHECKS = ("opening", "closing", "screen", "finding")
 
 
 def figure_names(text):
@@ -81,15 +87,20 @@ def prepare_review(project, body, ordered, receipt):
                          "source": video["source"], "source_sha256": video["sha256"],
                          "duration_s": video["duration_s"], "chapter": chapter,
                          "watched": [], "key_steps": [], "visual_basis": "", "visual_note": "",
+                         "channel_review": dict.fromkeys(CHANNEL_CHECKS, ""),
                          "source_points": [dict(row, anchor="", source_limit="") for row in source_points],
                          "audio_checks": [{"start": row["start"], "end": row["end"], "outcome": "", "note": ""}
                                           for row in scan["audio"]["uncovered_candidates"]]})
+    supplement_path = project.work / SUPPLEMENTS
+    supplements = evidence_from(supplement_path) if supplement_path.is_file() else []
     return {
         "schema": 1, "snapshot": {**snapshot(project.preview, body), "evidence": evidence},
         "episodes": episodes,
         "documents": [{"id": row["id"], "source": row["file"], "sha256": row["sha256"],
-                       "use": "引用" if row["id"] in receipt["document_refs"] else "", "note": ""}
+                       "use": "引用" if row["id"] in receipt["document_refs"] else "",
+                       "inspected_at": "", "note": ""}
                       for row in manifest],
+        "supplements": supplements,
         "follow_along": [{"goal": "", "chapter": "", "checks": dict.fromkeys(ITEMS, ""),
                           "sources": [], "figures": [], "visual_note": ""}],
     }
@@ -170,6 +181,12 @@ def validate_episode(actual, expected, text, figures):
         cursor = max(cursor, end)
     if cursor < duration - .05 or not actual.get("watched"):
         raise ValueError(f"第 {display_number} 讲的看片记录需覆盖首尾")
+    if "channel_review" in expected:
+        audit = actual.get("channel_review", {})
+        if not isinstance(audit, dict) or not all(
+            isinstance(audit.get(key), str) and audit[key].strip() for key in CHANNEL_CHECKS
+        ):
+            raise ValueError(f"第 {display_number} 讲需要记录片头、片尾、画面署名及作者渠道核查")
     if any(row["kind"] == "教学" for row in actual["watched"]) and not actual.get("key_steps"):
         raise ValueError(f"第 {display_number} 讲需要记录教学动作、对应文字和配图选择")
     validate_points(actual, expected, text)
@@ -222,6 +239,29 @@ def validate_review_proofs(project, review):
             validate_proof(project.work, proof)
 
 
+def validate_supplements(body, registered, reviewed):
+    """A supplemental item must be readable in the same block as its hidden evidence."""
+    if not isinstance(registered, list) or reviewed != registered:
+        raise ValueError("补充内容验收需与当前登记一致")
+    if not registered:
+        return
+    blocks = [
+        (COMMENT.sub("", block), [f" · {note} · " for note in PARAGRAPH_SOURCE.findall(block)])
+        for is_code, part in markdown_segments(body) if not is_code
+        for block in re.split(r"\n[ \t]*\n", COLLAPSED.sub("", part))
+    ]
+    for item in registered:
+        if not isinstance(item, dict):
+            raise ValueError("补充内容需登记可见短句及原件位置")
+        anchor, sources = item.get("anchor"), item.get("sources")
+        if (not isinstance(anchor, str) or not anchor.strip() or not isinstance(sources, list)
+                or not sources or any(not isinstance(s, str) or not s.strip() for s in sources)):
+            raise ValueError("补充内容需登记可见短句及原件位置")
+        if not any(anchor in visible and all(any(f" · {source} · " in note for note in notes) for source in sources)
+                   for visible, notes in blocks):
+            raise ValueError(f"补充内容缺可见正文或相邻隐藏出处 {anchor}")
+
+
 def validate_review(body, figures, review, template):
     if review.get("schema") != 1 or review.get("snapshot") != template["snapshot"]:
         raise ValueError("验收记录与当前预览、配图或证据版本不一致")
@@ -241,11 +281,17 @@ def validate_review(body, figures, review, template):
         raise ValueError("附件须逐件登记核对结果和用途")
     for row in documents:
         expected = expected_docs[row["id"]]
+        if "inspected_at" in expected and not (
+            isinstance(row.get("inspected_at"), str) and row["inspected_at"].strip()
+        ):
+            raise ValueError(f"附件须登记实际检查的页、表、档内成员或原件部位 {expected['source']}")
         if any(row.get(key) != expected[key] for key in ("source", "sha256")) or (
             row.get("use") not in DOCUMENT_USES or not row.get("note", "").strip()
             or (row["use"] == "引用") != (expected["use"] == "引用")
         ):
             raise ValueError(f"附件出处、用途或核对说明不符 {expected['source']}")
+
+    validate_supplements(body, template.get("supplements", []), review.get("supplements", []))
 
     cases = review.get("follow_along")
     validate_cases(body, cases)
@@ -285,16 +331,18 @@ def verify_publication(project, *, raw_verified=False):
     if not raw_verified:
         project.validate_raw()
     record = publication_receipt(project)
+    entry = project.entry
     for name, digest in record["outputs"].items():
-        if sha(local_child(project.folder, name)) != digest:
+        file = entry if name == ENTRY.as_posix() else local_child(project.folder, name)
+        if sha(file) != digest:
             raise ValueError(f"发布件和验收回执不一致 {name}")
-    if set(project.entry.parent.rglob("*.md")) != {project.entry}:
+    if set(entry.parent.rglob("*.md")) != {entry}:
         raise ValueError("课件目录需要且仅保留一篇 Markdown")
     digest = record["outputs"][ENTRY.as_posix()]
     inputs = record["review"]["snapshot"]
     if (inputs["text_sha256"] != digest or hashlib.sha256(record["body"].encode("utf-8")).hexdigest() != digest
             or inputs["evidence"]["ledger/intake.json"] != sha(project.intake)
-            or snapshot(project.folder, project.entry.read_text(encoding="utf-8"))["images"] != inputs["images"]):
+            or snapshot(project.folder, entry.read_text(encoding="utf-8"))["images"] != inputs["images"]):
         raise ValueError("原件、配图或正文和已审核版本不一致")
     check_render(record["obsidian"], digest)
     return record

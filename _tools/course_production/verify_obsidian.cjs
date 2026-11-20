@@ -95,16 +95,21 @@ async function evaluate(client, expression, timeout) {
   return ret.result.value;
 }
 async function main(){
-  if (process.argv[2] !== "--project" || process.argv.length !== 5) {
-    throw Error("用法 --project 课程包 阅读预览目录");
+  const installed = process.argv[2] === "--installed";
+  if (installed ? process.argv.length !== 6 : process.argv[2] !== "--project" || process.argv.length !== 5) {
+    throw Error("用法 --project 课程包 阅读预览目录；或 --installed 日常库课目录 笔记相对路径 回执文件");
   }
-  const preview=path.resolve(process.argv[4]);
-  const working=path.dirname(preview);
+  const folder=path.resolve(process.argv[3]);
+  const preview=installed ? folder : path.resolve(process.argv[4]);
+  const output=installed ? path.resolve(process.argv[5]) : path.join(preview,"obsidian-render.json");
+  const working=installed ? path.dirname(output) : path.dirname(preview);
+  const entry=installed ? process.argv[4].split(path.sep).join("/") : "课件/00 开始学习.md";
+  if (path.posix.dirname(entry)!=="课件" || !entry.endsWith(".md")) throw Error("无效的课件路径");
   const qa=await fs.mkdtemp(path.join(working,"obsidian-render-"));
   const vault=path.join(qa,"搬移后的学习库"),roam=path.join(qa,"roaming"),local=path.join(qa,"local");
   const profile=path.join(roam,"obsidian");
   const cases=new Map();
-  await prepareNote(vault, cases, path.resolve(process.argv[3]), preview, "课件/00 开始学习.md");
+  await prepareNote(vault, cases, folder, preview, entry);
   await configureVault(vault);
   for(const d of [profile,local]) await fs.mkdir(d,{recursive:true});
   await fs.writeFile(path.join(profile,"obsidian.json"),JSON.stringify({vaults:{a73c12e5f03b94d6:{path:vault,ts:Date.now(),open:true}},updateDisabled:true}));
@@ -121,6 +126,7 @@ async function main(){
   if (!exe) throw Error("找不到 Obsidian，请用 --obsidian-exe 或 OBSIDIAN_EXE 指定位置");
   const app=spawn(exe,["--user-data-dir="+profile,"--remote-debugging-port=0","--remote-debugging-address=127.0.0.1",
     "--disable-background-networking","--disable-component-update","--no-first-run","--disable-gpu",
+    "--disable-background-timer-throttling","--disable-renderer-backgrounding","--disable-backgrounding-occluded-windows",
     "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost"],{cwd:qa,windowsHide:true,
     env:{...process.env,APPDATA:roam,LOCALAPPDATA:local,TEMP:qa,TMP:qa},stdio:"ignore"});
   let browser, client, passed=false;
@@ -150,8 +156,15 @@ async function main(){
     for(const file of files){
       const info=await evaluate(client,`(async()=>{
         const target=app.vault.getAbstractFileByPath(${JSON.stringify(file)});
-        const leaf=app.workspace.activeLeaf || app.workspace.getMostRecentLeaf() || app.workspace.getLeaf(false);
+        let leaf=app.workspace.activeLeaf || app.workspace.getMostRecentLeaf() || app.workspace.getLeaf(false);
         await leaf.openFile(target,{state:{mode:"preview"}});
+        if (${installed}) {
+          if (leaf.view.file?.path!==target.path) throw Error("初次打开时未定位到日常库的同名教材");
+          const reopened=app.workspace.getLeaf("tab");
+          leaf.detach();
+          leaf=reopened;
+          await leaf.openFile(target,{state:{mode:"preview"}});
+        }
         const state=leaf.getViewState(); state.state.mode="preview"; await leaf.setViewState(state);
         const wait=(n)=>new Promise(r=>setTimeout(r,n));
         const rendered=()=>leaf.view.containerEl.querySelector(".markdown-reading-view .markdown-preview-view");
@@ -163,9 +176,12 @@ async function main(){
           await wait(100);
         }
         if(!view?.querySelector("h1"))throw Error("reading view did not render: "+target.path);
-        const seen=new Map(), urls=new Set(), closedAppendices=new Set(), visibleCitations=new Set();
+        const seen=new Map(), sections=new Set(), urls=new Set(), closedAppendices=new Set(), visibleCitations=new Set();
         const appendices=${JSON.stringify(cases?.get(file).appendices || [])};
         const provenance=${JSON.stringify(cases?.get(file).provenance || [])};
+        const expectedImages=${JSON.stringify(cases.get(file).images)};
+        const metadata=app.metadataCache.getFileCache(target);
+        const lastChapter=metadata?.headings?.filter(heading=>heading.level===2).at(-1)?.heading?.trim();
         const collectLinks=()=>{
           for(const a of view.querySelectorAll("a[href]")){
             const href=a.getAttribute("href");
@@ -173,7 +189,9 @@ async function main(){
           }
         };
         let expanded=0, title="", formula=false, code=false, table=false, reachedBottom=false, horizontalOverflow=false;
-        for(let pos=0,step=0;step<700;step++){
+        let bottomRepeats=0;
+        const walkStarted=performance.now();
+        for(let pos=0,step=0;step<700 && performance.now()-walkStarted<90000;step++){
           view.scrollTop=pos; await wait(85);
           for(const node of view.querySelectorAll(".callout.is-collapsed .callout-title")){
             const text=node.querySelector(".callout-title-inner")?.textContent.trim();
@@ -183,7 +201,14 @@ async function main(){
           await wait(65);
           for(const i of view.querySelectorAll("img")){
             const src=i.getAttribute("src")||"";
-            if(i.complete && i.naturalWidth>0)seen.set(src,{width:i.naturalWidth,height:i.naturalHeight,fit:i.getBoundingClientRect().width<=view.clientWidth});
+            if(i.complete && i.naturalWidth>0){
+              const name=decodeURIComponent(src.split("?")[0].split("/").pop());
+              seen.set(name,{width:i.naturalWidth,height:i.naturalHeight,fit:i.getBoundingClientRect().width<=view.clientWidth});
+            }
+          }
+          for(const h of view.querySelectorAll("h2")){
+            sections.add(h.textContent.trim());
+            if(h.dataset.heading) sections.add(h.dataset.heading.trim());
           }
           title=title||view.querySelector("h1")?.textContent||"";
           horizontalOverflow=horizontalOverflow||view.scrollWidth>view.clientWidth+2;
@@ -203,7 +228,15 @@ async function main(){
               }
             }
           }
-          if(view.scrollTop+view.clientHeight>=view.scrollHeight-2){reachedBottom=true;break;}
+          const height=view.scrollHeight;
+          const atBottom=view.scrollTop+view.clientHeight>=height-3;
+          const sawEnding=(!lastChapter || sections.has(lastChapter)) &&
+            appendices.every(appendix=>closedAppendices.has(appendix)) &&
+            expectedImages.every(name=>seen.has(name));
+          // Obsidian can briefly report a smaller document before the next chunks are mounted.
+          bottomRepeats=atBottom ? bottomRepeats+1 : 0;
+          if(atBottom && sawEnding && bottomRepeats>=2){reachedBottom=true;break;}
+          if(bottomRepeats>=20)break;
           pos=view.scrollTop+Math.max(120,view.clientHeight*0.68);
         }
         await wait(175);
@@ -212,7 +245,7 @@ async function main(){
           const rect=el.getBoundingClientRect();
           return rect.width>0 && rect.right>box.right+2;
         }).slice(-8).map(el=>({tag:el.tagName,cls:el.className,width:Math.round(el.getBoundingClientRect().width)}));
-        const links=app.metadataCache.getFileCache(target)?.links||[];
+        const links=metadata?.links||[];
         const internal=links.map(l=>{
           const [file,mark]=l.link.split("#",2);
           const dest=file ? app.metadataCache.getFirstLinkpathDest(file,target.path) : target;
@@ -221,11 +254,13 @@ async function main(){
             !!cache?.headings?.some(h=>h.heading===mark)));
           return {link:l.link,found};
         });
-        return {file:target.path,mode:leaf.view.getMode(),title,expanded,reachedBottom,closedAppendices:[...closedAppendices],
-          images:[...seen].map(([s,v])=>({name:decodeURIComponent(s.split("?")[0].split("/").pop()),...v})),
+        return {file:target.path,mode:leaf.view.getMode(),title,expanded,reopened:${installed},reachedBottom,
+          sections:[...sections],closedAppendices:[...closedAppendices],
+          images:[...seen].map(([name,size])=>({name,...size})),
           internal, formula, code, table, rawLinks:urls.size,visibleCitations:[...visibleCitations],
           horizontalOverflow:horizontalOverflow||view.scrollWidth>view.clientWidth+2,
-          clientWidth:view.clientWidth, scrollWidth:view.scrollWidth,overflowElements};
+          clientWidth:view.clientWidth, scrollWidth:view.scrollWidth,
+          scrollTop:view.scrollTop,scrollHeight:view.scrollHeight,clientHeight:view.clientHeight,overflowElements};
       })()`,120000);
       info.document_sha256=cases.get(file).digest;
       checks.push(info);
@@ -242,11 +277,12 @@ async function main(){
     if(unreadable.length){
       await fs.writeFile(path.join(qa,"incomplete-render.json"),JSON.stringify(result,null,2));
       throw Error("Incomplete reading-view checks "+JSON.stringify(unreadable.map(v=>({
-        file:v.file,links:v.internal.filter(x=>!x.found),images:v.images.map(x=>[x.name,x.fit]),raw:v.rawLinks,
+        file:v.file,reachedBottom:v.reachedBottom,sections:v.sections,closedAppendices:v.closedAppendices,
+        links:v.internal.filter(x=>!x.found),images:v.images.map(x=>[x.name,x.fit]),raw:v.rawLinks,
         formula:v.formula,code:v.code,table:v.table,visibleCitations:v.visibleCitations,
         overflow:v.horizontalOverflow,extended:v.overflowElements})))+" "+qa);
     }
-    await fs.writeFile(path.join(preview, "obsidian-render.json"), JSON.stringify({version:ver.Browser,checks},null,2)+"\n");
+    await fs.writeFile(output, JSON.stringify({version:ver.Browser,checks},null,2)+"\n");
     passed=true;
     console.log("Rendered",checks.length,"notes and",checks.reduce((a,v)=>a+v.images.length,0),"images");
   }finally{

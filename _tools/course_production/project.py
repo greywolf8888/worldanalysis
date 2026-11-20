@@ -78,6 +78,10 @@ def local_child(root, name):
     return path
 
 
+def named_entry(folder):
+    return local_child(folder, ENTRY.parent / f"{folder.name}.md")
+
+
 def inventory_files(root):
     result = []
     if not root.is_dir():
@@ -156,7 +160,11 @@ class CourseProject:
 
     @property
     def entry(self):
-        return local_child(self.folder, ENTRY)
+        legacy = local_child(self.folder, ENTRY)
+        if legacy.is_file():
+            return legacy
+        named = named_entry(self.folder)
+        return named if named.is_file() else legacy
 
     @property
     def intake(self):

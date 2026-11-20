@@ -1,4 +1,6 @@
 """Use project-local format readers and stable source IDs to prepare the current course's documents."""
+from codecs import BOM_UTF16_BE, BOM_UTF16_LE
+from configparser import ConfigParser, Error as ConfigError
 from pathlib import Path
 import json
 import subprocess
@@ -38,6 +40,32 @@ def legacy_doc(file):
     return {"processing_status":"review_visual","blocks":[],"gaps":[{"reason":"正文为空，待检查嵌图或版式"}]}
 
 
+def internet_shortcut(file):
+    """Read the locally supplied URL as evidence without opening it."""
+    with file.open("rb") as stream:
+        data = stream.read(65537)
+    if len(data) > 65536:
+        raise ValueError("网址快捷方式超出可直接读取的大小")
+    if data.startswith((BOM_UTF16_BE, BOM_UTF16_LE)):
+        text = data.decode("utf-16")
+    else:
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = data.decode("gb18030")
+    shortcut = ConfigParser(interpolation=None)
+    try:
+        shortcut.read_string(text)
+        value = shortcut.get("InternetShortcut", "URL", fallback="").strip()
+    except ConfigError as error:
+        raise ValueError("无法读取网址快捷方式的原始字段") from error
+    if not value or any(ord(char) < 32 for char in value):
+        raise ValueError("网址快捷方式缺少可读的 URL 字段")
+    return {"processing_status": "extracted",
+            "blocks": [{"locator": {"part": "InternetShortcut", "field": "URL"}, "text": value}],
+            "gaps": []}
+
+
 def prepare_documents(raw, records, meta, work):
     docs=work/"资料"
     docs.mkdir(parents=True,exist_ok=True)
@@ -51,6 +79,8 @@ def prepare_documents(raw, records, meta, work):
         source=raw/row["file"]
         key=row.get("sha256") or sha(source); ext=source.suffix.lower()
         cache_name = f"{key}-{ext.removeprefix('.') or 'file'}"
+        if ext == ".url":
+            cache_name += "-shortcut"
         cache=docs/(cache_name+".json")
         if cache.is_file():
             result=read(cache)
@@ -60,6 +90,8 @@ def prepare_documents(raw, records, meta, work):
                     result=legacy_doc(source)
                 elif ext==".xmind":
                     result=mindmap(source)
+                elif ext == ".url":
+                    result = internet_shortcut(source)
                 else:
                     out=Path(tempfile.mkdtemp(prefix=key[:10]+"-",dir=docs))
                     result=extract(source,out,options=options)

@@ -22,7 +22,7 @@ import numpy as np
 RATE = 16000
 VAD_FILE = MODEL / "silero_vad.onnx"
 VAD_SHA = "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
-REVIEW_REV = 4
+REVIEW_REV = 5
 VISUAL_METHOD = "source PTS sampling, local change, annotations including dark backgrounds"
 ACTION_WORDS = re.compile(r"右键|点击|点开|按住|长按|打开|选中|切换|拖动|弹出|放大|缩小|按钮|菜单|勾选|圈出|画框|保存")
 GAP_S = .45
@@ -145,15 +145,17 @@ def speech_scan(source, metadata, offset, gain_db=0):
     release()
     if not decoded_end:
         raise ValueError(f"有声源解码未产生 PCM {source}")
+    speaking=merged_ranges(activity)
     return {"decoded_s":round(decoded_end,3),"offset_s":offset,"gain_db":gain_db,
             "original_cues":len(metadata["cues"]),
             "speech_ranges":len(activity),
-            "speech_s":round(sum(b-a for a,b in merged_ranges(activity)),2),
+            "speech_s":round(sum(b-a for a,b in speaking),2),
+            "speech_windows":[[round(a,3),round(b,3)] for a,b in speaking],
             "candidate_min_s":GAP_S,"cue_padding_s":PAD_S,"below_threshold":below_threshold,
             "uncovered_candidates":candidates}
 
 
-def frame_scan(source, duration, cues, origin=0):
+def frame_scan(source, duration, cues, origin=0, speech_windows=None):
     cv2.setNumThreads(1)
     targets = [duration*x for x in (.012,.18,.39,.6,.81,.973)]
     overview = []
@@ -170,6 +172,8 @@ def frame_scan(source, duration, cues, origin=0):
     cue_starts = [c["start"] for c in cues]
     cue_ends = list(accumulate((c["end"] for c in cues), max))
     action_cues = [bool(ACTION_WORDS.search(c["text"])) for c in cues]
+    voice_starts = [left for left, _ in speech_windows or []]
+    voice_ends = [right for _, right in speech_windows or []]
     with av.open(str(source), options={"protocol_whitelist": "file,pipe"}) as container:
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
@@ -199,8 +203,13 @@ def frame_scan(source, duration, cues, origin=0):
             marks = (red >= 130) & (cv2.subtract(red, cv2.max(rgb[:, :, 1], rgb[:, :, 2])) > 48)
             dark_count += dark
             cue = bisect_left(cue_ends, t-.35)
-            quiet = cue >= len(cue_starts) or cue_starts[cue] > t+.35
-            action = not quiet and action_cues[cue]
+            outside_cues = cue >= len(cue_starts) or cue_starts[cue] > t+.35
+            voice = bisect_left(voice_ends, t-.2)
+            quiet = outside_cues if speech_windows is None else (
+                voice >= len(voice_starts) or voice_starts[voice] > t+.2
+            )
+            action = not outside_cues and action_cues[cue]
+            voice_flags = {"outside_cues":outside_cues, "outside_speech":quiet}
             local = overall = ink = 0.0
             tile = None
             if previous_t is None:
@@ -223,7 +232,7 @@ def frame_scan(source, duration, cues, origin=0):
             if change and t - last_change >= .58:
                 pending = {"kind":"change", "before_pts":previous_t, "pts":t, "after_pts":t,
                            "change":round(local,3), "whole":round(overall,3), "ink":round(ink,4),
-                           "tile":tile, "outside_cues":quiet, "near_spoken_action":action,
+                           "tile":tile, **voice_flags, "near_spoken_action":action,
                            "dark_background":dark and previous_dark}
                 events.append(pending)
                 last_change = t
@@ -231,7 +240,7 @@ def frame_scan(source, duration, cues, origin=0):
                 next_anchor = (int(t / 18) + 1) * 18
                 if pending is None:
                     pending = {"kind":"interval", "before_pts":previous_t, "pts":t, "after_pts":t,
-                               "change":0.0, "outside_cues":quiet}
+                               "change":0.0, **voice_flags}
                     events.append(pending)
             need_overview = len(overview) < len(targets) and t >= targets[len(overview)]
             peak = change and (strongest is None or local > strongest[1])
@@ -296,7 +305,7 @@ def scan_video(course, ledger, work, lesson):
         "cues_sha256":hashlib.sha256(json.dumps(metadata["cues"],ensure_ascii=False).encode("utf-8")).hexdigest(),
     }
     signature["prepare"] = metadata["prepare_signature"]
-    signature["audio_method"] = {"revision": 2, "min_s": GAP_S, "cue_padding_s": PAD_S} if audio_count else None
+    signature["audio_method"] = {"revision": 3, "min_s": GAP_S, "cue_padding_s": PAD_S} if audio_count else None
     previous = read(output) if output.is_file() else None
     sheet = storage/f"L{lesson:02}.jpg"
     if previous and sheet.is_file() and previous["signature"] == signature:
@@ -307,13 +316,12 @@ def scan_video(course, ledger, work, lesson):
     if same_audio:
         sound_info = previous["audio"]
     else:
-        sound_info=speech_scan(sound,metadata,offset) if audio_count else {"no_audio":True,"uncovered_candidates":[]}
-    if previous and sheet.is_file() and all(previous["signature"].get(key) == signature[key]
-            for key in ("revision", "raw_sha256", "raw_mtime_ns", "cues_sha256", "prepare")):
-        display = previous["picture"]
-    else:
-        display,pictures=frame_scan(source,metadata["duration_s"],metadata["cues"],metadata.get("timeline_origin_s", 0))
-        write_strip(storage,lesson,pictures)
+        sound_info=speech_scan(sound,metadata,offset) if audio_count else {
+            "no_audio":True, "uncovered_candidates":[], "speech_windows":[],
+        }
+    display,pictures=frame_scan(source,metadata["duration_s"],metadata["cues"],
+                                metadata.get("timeline_origin_s", 0), sound_info.get("speech_windows", []))
+    write_strip(storage,lesson,pictures)
     receipt={"course":name,"lesson":lesson,"source":metadata["source"],
              "duration":metadata["duration_s"],"signature":signature,
              "audio":sound_info,"picture":display,"elapsed_s":round(time.perf_counter()-started,2)}

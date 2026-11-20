@@ -104,14 +104,7 @@ def accept(project, obsidian_exe):
     review = read(review_path)
     validate_review(body, figures, review, template)
     validate_review_proofs(project, review)
-    env = dict(os.environ)
-    if obsidian_exe:
-        env["OBSIDIAN_EXE"] = str(obsidian_exe.resolve(strict=True))
-    node = shutil.which("node")
-    if not node:
-        raise ValueError("Obsidian 阅读验收需要可调用的 Node.js")
-    subprocess.run([node, str(ROOT / "_tools/course_production/verify_obsidian.cjs"),
-                    "--project", str(project.folder), str(project.preview)], env=env, check=True)
+    run_obsidian(obsidian_exe, "--project", project.folder, project.preview)
     render = read(project.preview / "obsidian-render.json")
     current = (project.preview / ENTRY).read_text(encoding="utf-8")
     if current != body or snapshot(project.preview, current) != {
@@ -123,6 +116,36 @@ def accept(project, obsidian_exe):
     project.validate_raw()
     commit(project, body, figures, review, render)
     return verify_publication(project, raw_verified=True)
+
+
+def run_obsidian(executable, *arguments):
+    env = dict(os.environ)
+    if executable:
+        env["OBSIDIAN_EXE"] = str(executable.resolve(strict=True))
+    node = shutil.which("node")
+    if not node:
+        raise ValueError("Obsidian 阅读验收需要可调用的 Node.js")
+    subprocess.run([node, str(ROOT / "_tools/course_production/verify_obsidian.cjs"),
+                    *map(str, arguments)], env=env, check=True)
+
+
+def verify_reader(project, publication, executable):
+    from project import named_entry
+    from vault_delivery import RENDER_DIR, automated_observation, confirm, delivery, verify_installed
+
+    state = delivery(project)
+    if not state:
+        raise ValueError("请先交付到日常 Obsidian 阅读库")
+    entry = verify_installed(project, publication, state)
+    target = entry.parent.parent
+    if entry != named_entry(target):
+        raise ValueError("请先用 deliver 将日常笔记名迁移到项目名称")
+    render = project.work / RENDER_DIR / f"{state['sha256']}.json"
+    render.parent.mkdir(parents=True, exist_ok=True)
+    run_obsidian(executable, "--installed", target, entry.relative_to(target).as_posix(), render)
+    observation = automated_observation(project, publication, state, render)
+    put(render.parent / "当前回执.json", observation)
+    return confirm(project, publication, observation)
 
 
 def show_status(project):
@@ -163,10 +186,11 @@ def main(argv=None):
         ("verify", "复验课程包文件与交付状态"),
         ("deliver", "在日常 Obsidian 阅读库更新课程入口"),
         ("confirm-vault", "登记日常 Obsidian 库重开后的实际阅读结果"),
+        ("verify-reader", "通过 Obsidian 接口重开和核阅日常入口的同版副本"),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("project", type=Path)
-        if name == "accept":
+        if name in ("accept", "verify-reader"):
             command.add_argument("--obsidian-exe", type=Path)
         if name == "verify":
             command.add_argument("--require-vault", action="store_true", help="要求日常阅读入口及同版重开核验")
@@ -271,6 +295,9 @@ def main(argv=None):
                     return 0
                 if args.action == "confirm-vault":
                     print(json.dumps(confirm(project, record, read(args.observation)), ensure_ascii=False, indent=2))
+                    return 0
+                if args.action == "verify-reader":
+                    print(json.dumps(verify_reader(project, record, args.obsidian_exe), ensure_ascii=False, indent=2))
                     return 0
                 if args.action == "accept" and delivery(project):
                     install(project, record)

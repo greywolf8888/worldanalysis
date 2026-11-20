@@ -1,15 +1,22 @@
 """Install the reviewed edition at the reader's existing Obsidian entry."""
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import unquote
+import re
+from urllib.parse import quote, unquote
 
-from project import ENTRY, copy_file, local_child, put, read, sha
+from project import ENTRY, copy_file, local_child, named_entry, put, read, sha
 from publish import LOCAL_LINK, verify_links
 from reader_review import chapters
 
 
 DELIVERY = "obsidian-delivery.json"
 ENTRY_PATH = ENTRY.as_posix()
+RENDER_DIR = "日常库接口验收"
+RENDER_METHOD = "日常入口同版快照的 Obsidian 接口重开"
+
+
+def obsidian_uri(entry):
+    return "obsidian://open?path=" + quote(entry.as_posix(), safe="")
 
 
 def delivery(project):
@@ -42,7 +49,9 @@ def linked_originals(project, body):
 
 def verify_installed(project, publication, state):
     _, target = destination(state["vault"], state["folder"])
-    entry = local_child(target, ENTRY)
+    entry = Path(state["entry"])
+    if entry not in (named_entry(target), local_child(target, ENTRY)):
+        raise ValueError("阅读库教材路径不在已绑定的课程目录内")
     expected = publication["outputs"][ENTRY_PATH]
     if state["sha256"] != expected:
         raise ValueError("阅读库还未交付课程包中的这一版")
@@ -50,11 +59,22 @@ def verify_installed(project, publication, state):
         raise ValueError("阅读库本课需要保留唯一教材入口")
     files = {**publication["outputs"], **linked_originals(project, publication["body"])}
     for name, digest in files.items():
-        path = local_child(target, name)
+        path = entry if name == ENTRY_PATH else local_child(target, name)
         if not path.is_file() or sha(path) != digest:
             raise ValueError(f"阅读库的文件与验收版本不一致 {path}")
-    verify_links(target, {ENTRY_PATH: publication["body"]}, art_root=target)
+    verify_links(target, {entry.relative_to(target).as_posix(): publication["body"]}, art_root=target)
     return entry
+
+
+def check_legacy_links(vault, entry):
+    legacy = ENTRY.stem
+    for note in vault.rglob("*.md"):
+        if note == entry or note.is_symlink() or any(part.startswith(".") for part in note.relative_to(vault).parts):
+            continue
+        text = unquote(note.read_text(encoding="utf-8-sig", errors="replace"))
+        links = re.findall(r"\[\[([^\]]+)\]\]|\]\(([^)]+)\)", text)
+        if any(legacy in (wikilink or markdown) for wikilink, markdown in links):
+            raise ValueError(f"旧笔记有入链，请先在 Obsidian 内重命名以更新引用 {note}")
 
 
 def install(project, publication, vault=None, folder=None, reviewed_previous=None):
@@ -71,13 +91,19 @@ def install(project, publication, vault=None, folder=None, reviewed_previous=Non
                                      or project.folder.is_relative_to(vault)):
         raise ValueError("请选择独立阅读库或沿课程包在该库中的既有入口交付")
 
-    entry = local_child(target, ENTRY)
+    entry = named_entry(target)
+    legacy = local_child(target, ENTRY)
+    if legacy != entry and legacy.exists() and entry.exists():
+        raise ValueError("阅读库同时存在旧入口和同名教材，请先核对两篇内容")
+    current = legacy if legacy.is_file() else entry
     expected = publication["outputs"][ENTRY_PATH]
-    old_sha = sha(entry) if entry.is_file() else None
+    old_sha = sha(current) if current.is_file() else None
     if old_sha and old_sha not in {expected, reviewed_previous, previous["sha256"] if previous else None}:
-        raise ValueError(f"阅读库已有不同的教材，请核对并保留读者修改后再接管 {entry} ({old_sha})")
-    if set(entry.parent.rglob("*.md")) - {entry}:
+        raise ValueError(f"阅读库已有不同的教材，请核对并保留读者修改后再接管 {current} ({old_sha})")
+    if set(entry.parent.rglob("*.md")) - {current}:
         raise ValueError("阅读库本课有其他 Markdown，请先核对唯一教材入口")
+    if current != entry:
+        check_legacy_links(vault, current)
 
     assets = {**publication["outputs"], **linked_originals(project, publication["body"])}
     assets.pop(ENTRY_PATH)
@@ -89,23 +115,28 @@ def install(project, publication, vault=None, folder=None, reviewed_previous=Non
         elif not asset.is_file() or sha(asset) != digest:
             raise ValueError(f"阅读库已有同名但不同的文件，请先核对 {asset}")
 
-    if old_sha and old_sha != expected:
-        archive = local_child(project.ledger, f"obsidian-previous/{old_sha}/00 开始学习.md")
-        copy_file(entry, archive, old_sha)
+    if old_sha and (old_sha != expected or current != entry):
+        archive = local_child(project.ledger, f"obsidian-previous/{old_sha}/{current.name}")
+        copy_file(current, archive, old_sha)
     for name, digest in missing:
         asset = local_child(target, name)
         if asset.exists() and (not asset.is_file() or sha(asset) != digest):
             raise ValueError(f"交付期间出现不同的同名文件 {asset}")
         copy_file(local_child(project.folder, name), asset, digest)
-    current_sha = sha(entry) if entry.is_file() else None
+    current_sha = sha(current) if current.is_file() else None
     if current_sha != old_sha:
         raise ValueError("交付期间阅读库教材已变更，请保留并对照修改")
-    verify_links(target, {ENTRY_PATH: publication["body"]}, art_root=target)
+    verify_links(target, {entry.relative_to(target).as_posix(): publication["body"]}, art_root=target)
+    if current != entry:
+        if entry.exists():
+            raise ValueError(f"交付期间出现同名教材 {entry}")
+        current.rename(entry)
     copy_file(project.entry, entry, expected)
 
-    if previous and previous["sha256"] == expected and old_sha == expected and not missing:
+    if (previous and previous["entry"] == str(entry) and previous["sha256"] == expected
+            and old_sha == expected and not missing):
         return previous
-    state = {**binding, "entry": str(entry), "sha256": expected,
+    state = {**binding, "entry": str(entry), "uri": obsidian_uri(entry), "sha256": expected,
              "installed_at": datetime.now(timezone.utc).isoformat(), "observation": None}
     put(project.ledger / DELIVERY, state)
     return state
@@ -131,6 +162,31 @@ def confirm(project, publication, observed):
     return state
 
 
+def automated_observation(project, publication, state, render_file):
+    from acceptance import check_render
+
+    entry = verify_installed(project, publication, state)
+    render = read(render_file)
+    check_render(render, state["sha256"])
+    view = render["checks"][0]
+    relative = f"{state['folder']}/{entry.relative_to(entry.parent.parent).as_posix()}"
+    sections = tuple(chapters(publication["body"]))
+    files = set(publication["outputs"]) - {ENTRY_PATH}
+    rendered_images = {f"{ENTRY.parent.as_posix()}/原图/{item['name']}" for item in view["images"]}
+    if (view["file"] != relative or not view.get("reopened")
+            or not sections or any(section not in view["sections"] for section in sections)
+            or not files.issubset(rendered_images)):
+        raise ValueError("Obsidian 应重开日常交付同路径快照并读取所有章节与图片")
+    return {
+        **{key: state[key] for key in ("entry", "sha256", "installed_at")},
+        "method": RENDER_METHOD,
+        "render_sha256": sha(render_file),
+        "mode": "preview", "reopened": True, "reached_bottom": True, "references_collapsed": True,
+        "visible_citations": False, "section_seen": sections[-1], "image_seen": next(iter(sorted(files)), None),
+        "note": "直接读取日常库中的交付文件，在独立 Obsidian 环境用接口重开同路径副本，由章首核阅至折叠出处和页尾。",
+    }
+
+
 def delivery_status(project, publication, required=False):
     state = delivery(project)
     if state and state["sha256"] == publication["outputs"][ENTRY_PATH]:
@@ -140,10 +196,16 @@ def delivery_status(project, publication, required=False):
             if required:
                 raise
             return {"status": "阅读库文件待核对", "entry": state["entry"], "detail": str(error)}
-        result = {"status": "已记录日常库重开" if state["observation"] else "待在日常库重开",
-                  "entry": state["entry"], "sha256": state["sha256"]}
-        if required and not state["observation"]:
-            raise ValueError(f"已更新 {entry}，尚待真实窗口重开核验")
+        observation = state["observation"]
+        if observation and observation.get("method") == RENDER_METHOD:
+            render = local_child(project.work, f"{RENDER_DIR}/{state['sha256']}.json")
+            if not render.is_file() or sha(render) != observation.get("render_sha256"):
+                observation = None
+        result = {"status": "已记录日常库重开" if observation else "待在日常库重开",
+                  "entry": state["entry"], "uri": obsidian_uri(entry), "sha256": state["sha256"],
+                  "method": observation.get("method", "日常窗口观察") if observation else None}
+        if required and not observation:
+            raise ValueError(f"已更新 {entry}，尚待 Obsidian 重开核验")
         return result
     if required:
         raise ValueError("当前课程包版本尚未交付到日常 Obsidian 库")
