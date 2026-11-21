@@ -49,6 +49,7 @@ async function prepareNote(vault, cases, folder, preview, rel) {
   }
   cases.set(name + "/" + rel, {name, images:[...images], urls:urls.size,
     provenance:provenance.map(match => match[2].replace(/\s+/g, " ")),
+    bodyCharacters:body.length,
     digest:createHash("sha256").update(body).digest("hex"),
     appendices:[...body.matchAll(/^> \[!info\]- (原课与配套资料|有声原课与工具入口)$/gm)].map(match => match[1]),
     formula:/\$\$[\s\S]+?\$\$/.test(body),code:/^(?:\x60{3}|~{3})\w+/m.test(body),table:/^\|.*\|\s*$/m.test(body)});
@@ -154,6 +155,10 @@ async function main(){
     await until(()=>evaluate(client,JSON.stringify(files)+".every(p=>{const f=app.vault.getAbstractFileByPath(p);return f&&app.metadataCache.getFileCache(f)})"));
     const checks=[];
     for(const file of files){
+      const noteCase=cases.get(file);
+      // Portrait figures can take several scroll positions each. Scale the
+      // deadline while keeping the actual walk bounded and checking every item.
+      const walkBudget=Math.max(90000,30000+460*noteCase.images.length+Math.ceil(noteCase.bodyCharacters/12));
       const info=await evaluate(client,`(async()=>{
         const target=app.vault.getAbstractFileByPath(${JSON.stringify(file)});
         let leaf=app.workspace.activeLeaf || app.workspace.getMostRecentLeaf() || app.workspace.getLeaf(false);
@@ -181,7 +186,8 @@ async function main(){
         const provenance=${JSON.stringify(cases?.get(file).provenance || [])};
         const expectedImages=${JSON.stringify(cases.get(file).images)};
         const metadata=app.metadataCache.getFileCache(target);
-        const lastChapter=metadata?.headings?.filter(heading=>heading.level===2).at(-1)?.heading?.trim();
+        const expectedSections=(metadata?.headings||[]).filter(heading=>heading.level===2)
+          .map(heading=>heading.heading.trim());
         const collectLinks=()=>{
           for(const a of view.querySelectorAll("a[href]")){
             const href=a.getAttribute("href");
@@ -191,14 +197,15 @@ async function main(){
         let expanded=0, title="", formula=false, code=false, table=false, reachedBottom=false, horizontalOverflow=false;
         let bottomRepeats=0;
         const walkStarted=performance.now();
-        for(let pos=0,step=0;step<700 && performance.now()-walkStarted<90000;step++){
+        for(let pos=0;performance.now()-walkStarted<${walkBudget};){
           view.scrollTop=pos; await wait(85);
+          const expandedBefore=expanded;
           for(const node of view.querySelectorAll(".callout.is-collapsed .callout-title")){
             const text=node.querySelector(".callout-title-inner")?.textContent.trim();
             if(appendices.includes(text)) closedAppendices.add(text);
             else {node.click(); expanded++;}
           }
-          await wait(65);
+          if(expanded>expandedBefore)await wait(65);
           for(const i of view.querySelectorAll("img")){
             const src=i.getAttribute("src")||"";
             if(i.complete && i.naturalWidth>0){
@@ -230,7 +237,7 @@ async function main(){
           }
           const height=view.scrollHeight;
           const atBottom=view.scrollTop+view.clientHeight>=height-3;
-          const sawEnding=(!lastChapter || sections.has(lastChapter)) &&
+          const sawEnding=expectedSections.every(section=>sections.has(section)) &&
             appendices.every(appendix=>closedAppendices.has(appendix)) &&
             expectedImages.every(name=>seen.has(name));
           // Obsidian can briefly report a smaller document before the next chunks are mounted.
@@ -261,7 +268,7 @@ async function main(){
           horizontalOverflow:horizontalOverflow||view.scrollWidth>view.clientWidth+2,
           clientWidth:view.clientWidth, scrollWidth:view.scrollWidth,
           scrollTop:view.scrollTop,scrollHeight:view.scrollHeight,clientHeight:view.clientHeight,overflowElements};
-      })()`,120000);
+      })()`,walkBudget+30000);
       info.document_sha256=cases.get(file).digest;
       checks.push(info);
     }
