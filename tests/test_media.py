@@ -39,7 +39,7 @@ class FakeASR:
 
 class MediaTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="media-test-", dir=FIXTURES)
+        self.temp = tempfile.TemporaryDirectory(prefix="media-test-")
         self.root = Path(self.temp.name)
         self.source = self.root / "synthetic.wav"
         make_silence(self.source, 12)
