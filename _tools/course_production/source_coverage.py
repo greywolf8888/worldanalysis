@@ -413,8 +413,13 @@ def validate_finding(finding, location_matches, blocks, label, *, value=""):
         raise ValueError(f"作者渠道线索须说明真实归属和核对结果 {label}")
     if finding["kind"] == "作者渠道":
         anchor = finding.get("anchor")
+        recorded = finding.get("value", "")
+        if "value" in finding and not populated(recorded):
+            raise ValueError(f"作者渠道原件标识需要可读原文 {label}")
+        tokens = [re.compile(rf"(?<![a-z0-9_]){re.escape(item.strip())}(?![a-z0-9_])", re.IGNORECASE)
+                  for item in (value, recorded) if item]
         if not populated(anchor) or not any(
-            anchor in text and (not value or value.casefold() in text.casefold()) and location_matches(cites)
+            anchor in text and all(token.search(text) for token in tokens) and location_matches(cites)
             for text, cites in blocks
         ):
             raise ValueError(f"已确认的作者渠道缺同段可见正文及原件出处 {label}")

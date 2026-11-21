@@ -124,6 +124,22 @@ class SourceCoverageTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "作者候选"):
             validate_source_coverage(body, self.scope, self.review)
 
+    def test_manually_read_author_identifier_matches_the_same_source_block(self):
+        self.scope["videos"][0]["candidates"].clear()
+        video = self.review["source_coverage"]["videos"][0]
+        video["candidates"].clear()
+        screen = next(zone for zone in video["channels"] if zone["zone"] == "screen")
+        screen["findings"].append({"kind": "作者渠道", "range_s": [11, 14], "anchor": "原作者联系方式",
+                                   "value": "teacher_2026", "note": "连续原画都标记为课后答疑，已复读账号字样。"})
+        validate_source_coverage(self.body, self.scope, self.review)
+
+        for body in (self.body.replace("teacher_2026", "teacher_20260"),
+                     self.body.replace("00:10–00:15", "00:15–00:20")):
+            with self.subTest(body=body):
+                self.set_claims(body)
+                with self.assertRaisesRegex(ValueError, "已确认的作者渠道缺同段可见正文及原件出处"):
+                    validate_source_coverage(body, self.scope, self.review)
+
     def test_nonexistent_page_inside_claimed_range_is_rejected(self):
         body = self.body.replace("第 1 页 -->", "第 1–999 页 -->")
         self.set_claims(body)
