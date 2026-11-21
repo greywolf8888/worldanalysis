@@ -219,7 +219,7 @@ PDF 先读原文字和图片位置，遇到扫描或难提取页面再渲染、�
 }
 ~~~
 
-`accept` 用同一版预览比对逐集时间、关键步骤邻图、附件去向和跟做证据，再在隔离的 Obsidian 阅读视图从开头滚到底，检查图像加载、跳转、横向溢出、折叠资料和引文隐藏。通过后写入课程包。源码定位与结构检查由脚本完成，是否忠实于原课、学员能否按内容做出产物由逐集核对和读者走查负责。
+`accept` 用同一版预览比对逐集时间、关键步骤邻图、附件去向和跟做证据，再在隔离的 Obsidian 阅读视图从开头滚到底，检查每个二级标题、全部图像加载、跳转、横向溢出、折叠资料和引文隐藏。巡查时限按正文长度和图片数调整，读到页尾前继续记录尚未核阅的章节与图片。通过后写入课程包。源码定位与结构检查由脚本完成，是否忠实于原课、学员能否按内容做出产物由逐集核对和读者走查负责。
 
 ### 交付到用户日常 Obsidian 库
 
@@ -266,7 +266,7 @@ PDF 先读原文字和图片位置，遇到扫描或难提取页面再渲染、�
 | [transcript.py](../_tools/course_production/transcript.py)、[visual.py](../_tools/course_production/visual.py) | 原字幕差异、采用稿和分窗读取、按呈现时间留下原帧及 OCR 轨。 |
 | [review_media.py](../_tools/course_production/review_media.py)、[frames.py](../_tools/course_production/frames.py) | 全片画音扫描、同版有声对照、小窗和真帧取图。 |
 | [publish.py](../_tools/course_production/publish.py)、[reader_review.py](../_tools/course_production/reader_review.py)、[acceptance.py](../_tools/course_production/acceptance.py) | 同篇编译、隐藏出处、跟做校验、逐集门槛、发布与回读。 |
-| [verify_obsidian.cjs](../_tools/course_production/verify_obsidian.cjs) | 在独立 Obsidian 环境验证课程包和日常入口的同版文件，检查末讲、页尾、全部图片与折叠。 |
+| [verify_obsidian.cjs](../_tools/course_production/verify_obsidian.cjs) | 在独立 Obsidian 环境验证课程包和日常入口的同版文件，检查全部二级标题、页尾、图片与折叠。 |
 | [vault_delivery.py](../_tools/course_production/vault_delivery.py) | 更新日常库的项目名入口，保留旧版正文，生成直达链接，核对重开回执及现存文件。 |
 | [test_course_production.py](../tests/test_course_production.py) | 用独立生成的原料验证纯文档、全音轨、短缺口、暗色、硬字幕、采用稿更新、配套正文与出处、附件部位及作者核查、过期验收和续作。 |
 
