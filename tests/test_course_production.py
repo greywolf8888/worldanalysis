@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 import wave
+from zipfile import ZipFile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +61,64 @@ class CourseProductionTest(unittest.TestCase):
 
     def start_course(self):
         self.command("start", self.source, "--output", self.package, "--workers", 2)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "需要本地 FFmpeg")
+    def test_presentation_embedded_video_is_an_original_media_source(self):
+        standalone = self.source / "01 无声录屏.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=navy:s=96x96:d=1", "-an",
+                        "-c:v", "libx264", str(standalone)], check=True, timeout=20)
+        video = standalone.read_bytes()
+        deck = self.source / "演示讲义.pptx"
+        relationship = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+        xmlns = "http://schemas.openxmlformats.org/presentationml/2006/main"
+        with ZipFile(deck, "w") as book:
+            book.writestr("ppt/presentation.xml",
+                          f'<p:presentation xmlns:p="{xmlns}" xmlns:r="{relationship}">'
+                          '<p:sldIdLst><p:sldId r:id="rId1"/></p:sldIdLst></p:presentation>')
+            book.writestr("ppt/_rels/presentation.xml.rels",
+                          f'<Relationships><Relationship Id="rId1" Type="{relationship}/slide" '
+                          'Target="slides/slide3.xml"/></Relationships>')
+            book.writestr("ppt/slides/slide3.xml", "<slide><t>滤镜合成</t></slide>")
+            book.writestr("ppt/slides/_rels/slide3.xml.rels", "<Relationships>"
+                          f'<Relationship Id="rId1" Type="{relationship}/video" Target="../media/media1.mp4"/>'
+                          f'<Relationship Id="rId2" Type="{relationship}/media" Target="../media/media1.mp4"/>'
+                          "</Relationships>")
+            book.writestr("ppt/media/media1.mp4", video)
+
+        self.start_course()
+        media_file = self.ledger / "media-summary.json"
+        media = self.data(media_file)
+        first, second = media["videos"]
+        self.assertEqual(first["source"], standalone.name)
+        self.assertEqual(second["source"], "演示讲义.pptx!ppt/media/media1.mp4")
+        self.assertEqual(second["embedded"]["pages"], [1])
+        self.assertEqual(second["sha256"], hashlib.sha256(video).hexdigest())
+        clip = self.work / second["embedded"]["work_file"]
+        self.assertEqual(clip.read_bytes(), video)
+        self.assertEqual(self.data(self.ledger / "documents-summary.json")["total"], 1)
+        self.assertEqual(len(self.data(self.ledger / "intake.json")["sources"]), 2)
+        self.save(self.work / "讲次顺序.json", [1])
+        self.command("prepare", self.package)
+        self.assertEqual(self.data(self.work / "讲次顺序.json"), [1, 2])
+        self.pick([{"name": "内嵌动作", "lesson": 2, "time": .4}])
+        (self.work / "教材.md").write_text(
+            "# 滤镜合成\n\n## 第 1 讲 准备\n\n打开画板。{{01|00:00–00:01}}\n\n"
+            "## 第 2 讲 试看\n\n把滤镜配到画面。{{02|00:00–00:01}} {{D001|第 1 页}}\n\n"
+            "{{img:内嵌动作|450}}\n", encoding="utf-8")
+        self.command("preview", self.package)
+        preview = (self.work / "阅读预览" / ENTRY).read_text(encoding="utf-8")
+        self.assertIn("演示讲义.pptx · 第 1 页内嵌视频", preview)
+        episode = self.data(self.work / "验收填写模板.json")["episodes"][1]
+        self.assertEqual(episode["embedded"], second["embedded"])
+
+        self.save(media_file, {**media, "videos": [first]})
+        self.assertIn("原附件内嵌视频与课件采用范围不一致", self.command("preview", self.package, okay=False))
+        self.save(media_file, media)
+        clip.write_bytes(b"changed")
+        self.assertIn("原视频身份已变", self.command("preview", self.package, okay=False))
+        self.command("prepare", self.package)
+        self.assertEqual(clip.read_bytes(), video)
+        self.command("preview", self.package)
 
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "需要本地 FFmpeg")
     def test_unreadable_video_leaves_a_gap_and_still_prepares_later_sources(self):

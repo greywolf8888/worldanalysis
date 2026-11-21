@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 
-from project import ROOT, VIDEO_EXTENSIONS, local_child, put, read, recovery_files, sha, write
+from project import ROOT, VIDEO_EXTENSIONS, original_media_path, put, read, recovery_files, sha, write
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -22,9 +22,15 @@ def natural(name):
     return tuple((0,int(s)) if s.isdigit() else (1,s.lower()) for s in re.split(r"(\d+)",name.strip()))
 
 
-def classify(sources):
+def classify(sources, embedded=()):
     videos = sorted((row for row in sources if row["extension"] in VIDEO_EXTENSIONS),
                     key=lambda row: (natural(row["file"]), row["file"]))
+    videos.extend(sorted(embedded, key=lambda row: (
+        natural(row["embedded"]["document"]), not row["embedded"]["pages"],
+        row["embedded"]["pages"], row["embedded"]["member"],
+    )))
+    if len({row["file"] for row in videos}) != len(videos):
+        raise ValueError("原视频与附件内嵌视频的路径标识发生重复")
     for number, row in enumerate(videos, 1):
         row["lesson"] = number
     return videos
@@ -124,7 +130,7 @@ def prepare_project_media(project, videos, documents, gpu=None):
     sources = {row["file"]: row for row in videos}
     for item in videos:
         number = item["lesson"]
-        source = local_child(project.raw, item["file"])
+        source = original_media_path(project.raw, project.work, item["file"], item.get("embedded"))
         destination = project.ledger / f"{number:02}.json"
         prefs = settings.get(str(number), {})
         if not isinstance(prefs, dict) or set(prefs) - {"language", "audio_track", "subtitle", "voiced_reference", "recovery"}:
@@ -136,6 +142,8 @@ def prepare_project_media(project, videos, documents, gpu=None):
         signature = {"version": 2, "raw_sha256": item["sha256"], "file": item["file"],
                      "settings": prefs, "subtitle_sha256": subtitle["sha256"] if subtitle else None,
                      "asr": gpu.identity if gpu else MODEL_SHA}
+        if "embedded" in item:
+            signature["embedded"] = item["embedded"]
         recovery = recovered = None
         try:
             if prefs.get("recovery") is not None:
@@ -167,7 +175,7 @@ def prepare_project_media(project, videos, documents, gpu=None):
                 raise ValueError(f"第 {number} 讲的补录须指向包内另一原视频")
             if any(stream["codec_type"] == "audio" for stream in meta["streams"]):
                 raise ValueError(f"第 {number} 讲已有正式音轨，保留原声")
-            sound = local_child(project.raw, reference)
+            sound = original_media_path(project.raw, project.work, reference, sources[reference].get("embedded"))
             audio_meta = read_media(sound)
             audio_origin = source_time(audio_meta["format"].get("start_time"))
             if abs(source_time(audio_meta["format"].get("duration")) - duration) > .5 or not any(
@@ -244,6 +252,10 @@ def prepare_project_media(project, videos, documents, gpu=None):
                   "cues": cues, "speech_windows": rows}
         if recovery:
             record["recovery"] = recovery
+        if "embedded" in item:
+            record["embedded"] = item["embedded"]
+        if reference and "embedded" in sources[reference]:
+            record["audio_embedded"] = sources[reference]["embedded"]
         text = [f"# {number:02} {Path(item['file']).stem}"]
         if recovery:
             text.append(recovery["scope"])
@@ -253,7 +265,7 @@ def prepare_project_media(project, videos, documents, gpu=None):
         results.append(record)
         print(f"第 {number} 讲 · {method} · {len(cues)} 段", flush=True)
     summary = {
-        "videos": [{k: row[k] for k in ("lesson", "source", "duration_s", "sha256", "recovery") if k in row}
+        "videos": [{k: row[k] for k in ("lesson", "source", "duration_s", "sha256", "recovery", "embedded") if k in row}
                    for row in results],
         "duration_s": sum(row["duration_s"] for row in results),
         "cue_total": sum(len(row["cues"]) for row in results),

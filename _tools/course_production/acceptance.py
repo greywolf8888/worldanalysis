@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 from urllib.parse import unquote
 
+from embedded_media import DIRECTORY as EMBEDDED_MEDIA_DIR, verify_embedded_videos
 from project import ENTRY, RECOVERY_DIR, copy_file, local_child, put, read, recovery_files, sha, write
 from reader_review import IMAGE, ITEMS, chapters, markdown_segments, snapshot, validate_cases
 from publish import timecode
@@ -72,7 +73,7 @@ def prepare_review(project, body, ordered, receipt):
         if not (video["sha256"] == meta["sha256"] == signature["raw_sha256"] and
                 video["source"] == meta["source"] == scan["source"] and
                 signature["cues_sha256"] == cue_sha and signature["prepare"] == meta["prepare_signature"] and
-                video.get("recovery") == meta.get("recovery")):
+                video.get("recovery") == meta.get("recovery") and video.get("embedded") == meta.get("embedded")):
             raise ValueError(f"第 {display_number} 讲的画面或语音扫描过期，请再运行 prepare")
         extra = project.work / "媒体补查" / f"L{lesson:02}-复识.json"
         if extra.is_file() and read(extra)["signature"]["scan_sha256"] == sha(
@@ -92,6 +93,9 @@ def prepare_review(project, body, ordered, receipt):
                          "source_points": [dict(row, anchor="", source_limit="") for row in source_points],
                          "audio_checks": [{"start": row["start"], "end": row["end"], "outcome": "", "note": ""}
                                           for row in scan["audio"]["uncovered_candidates"]]})
+        if embedded := video.get("embedded"):
+            episodes[-1]["embedded"] = embedded
+            evidence[f"work/{embedded['work_file']}"] = video["sha256"]
         if recovery := video.get("recovery"):
             recovered, recovery_manifest, spec = recovery_files(
                 project.work, recovery["manifest"], video["sha256"], recovery["manifest_sha256"])
@@ -179,6 +183,8 @@ def validate_episode(actual, expected, text, figures):
     for key in ("lesson", "display_number", "source", "source_sha256", "duration_s"):
         if actual.get(key) != expected[key]:
             raise ValueError(f"第 {display_number} 讲的原件身份或时长不一致")
+    if actual.get("embedded") != expected.get("embedded"):
+        raise ValueError(f"第 {display_number} 讲的内嵌附件和页码不一致")
     if recovery := expected.get("recovery"):
         visible = COMMENT.sub("", COLLAPSED.sub("", text))
         if actual.get("recovery") != recovery or not any(
@@ -349,9 +355,9 @@ def publication_receipt(project):
 
 
 def verify_publication(project, *, raw_verified=False):
-    if not raw_verified:
-        project.validate_raw()
+    sources = read(project.intake)["sources"] if raw_verified else project.validate_raw()
     record = publication_receipt(project)
+    verify_embedded_videos(project, sources, record["review"]["episodes"])
     entry = project.entry
     for name, digest in record["outputs"].items():
         file = entry if name == ENTRY.as_posix() else local_child(project.folder, name)
@@ -366,8 +372,9 @@ def verify_publication(project, *, raw_verified=False):
             or snapshot(project.folder, entry.read_text(encoding="utf-8"))["images"] != inputs["images"]):
         raise ValueError("原件、配图或正文和已审核版本不一致")
     for relative, fingerprint in inputs["evidence"].items():
-        if relative.startswith(f"work/{RECOVERY_DIR}/") and sha(local_child(project.state, relative)) != fingerprint:
-            raise ValueError(f"验收使用的媒体恢复资料已变动 {relative}")
+        if relative.startswith((f"work/{RECOVERY_DIR}/", f"work/{EMBEDDED_MEDIA_DIR}/")):
+            if sha(local_child(project.state, relative)) != fingerprint:
+                raise ValueError(f"验收使用的媒体资料已变动 {relative}")
     check_render(record["obsidian"], digest)
     return record
 

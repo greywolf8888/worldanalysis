@@ -102,8 +102,14 @@ def recovery_files(work, relative, original_sha256, expected_sha256=None):
     return recovered, manifest, spec
 
 
+def original_media_path(raw, work, source, embedded=None):
+    if embedded:
+        return local_child(work, embedded["work_file"])
+    return local_child(raw, source)
+
+
 def media_source(raw, work, record, *, verify_original=False):
-    original = local_child(raw, record["source"])
+    original = original_media_path(raw, work, record["source"], record.get("embedded"))
     recovery = record.get("recovery")
     if (verify_original or recovery) and sha(original) != record["sha256"]:
         raise ValueError(f"原视频身份已变 {record['source']}")

@@ -40,12 +40,14 @@ def gpu_from_args(args, backend, configured=None):
 
 
 def prepare(project, args):
+    from embedded_media import collect_embedded_videos
     from prepare import classify, prepare_project_media
     from prepare_documents import prepare_documents
     from review_media import scan_project
 
     sources = project.validate_raw()
-    videos = classify(sources)
+    embedded = collect_embedded_videos(project.raw, sources, work=project.work)
+    videos = classify(sources, embedded)
     put(project.ledger / "inventory.json", {"sources": sources})
     documents = prepare_documents(project.raw, sources, project.ledger, project.work)
     project.work.mkdir(parents=True, exist_ok=True)
@@ -68,12 +70,18 @@ def prepare(project, args):
         except (ValueError, OSError) as error:
             stale.append(str(error))
     order = project.work / ORDER
+    numbers = [row["lesson"] for row in videos]
     if not order.exists():
-        put(order, [row["lesson"] for row in videos])
+        put(order, numbers)
+    elif embedded:
+        previous = read(order)
+        added = [row["lesson"] for row in embedded if row["lesson"] not in previous]
+        if added and sorted(previous + added) == numbers:
+            put(order, previous + added)
     require_readable_videos(media)
     if stale:
         raise ValueError("；".join(stale))
-    print(f"已准备 {len(videos)} 个原视频和 {documents['total']} 件附件")
+    print(f"已准备 {len(videos)} 个原视频（内嵌 {len(embedded)} 个）和 {documents['total']} 件附件")
     print(f"原件 {project.raw}")
     print(f"编辑与取证 {project.work}")
     print(f"工作稿 {project.work / '教材.md'}")
@@ -81,9 +89,13 @@ def prepare(project, args):
 
 def preview(project):
     from acceptance import TEMPLATE, prepare_review
+    from embedded_media import verify_embedded_videos
     from publish import compile_textbook, render_preview
 
-    project.validate_raw()
+    sources = project.validate_raw()
+    media = read(project.ledger / "media-summary.json")
+    require_readable_videos(media)
+    verify_embedded_videos(project, sources, media["videos"])
     order = read(project.work / ORDER)
     deliver, receipt, figures = compile_textbook(
         project.folder, project.work, project.ledger, art_root=project.art, order=order)
@@ -156,6 +168,7 @@ def show_status(project):
     print(json.dumps({
         "project": str(project.folder), "original_files": len(inventory["sources"]),
         "prepared_videos": len(media["videos"]) if media is not None else None,
+        "embedded_videos": [row for row in media["videos"] if "embedded" in row] if media is not None else [],
         "unreadable_videos": media.get("unreadable", []) if media is not None else [],
         "work": str(project.work),
         "draft": str(project.work / "教材.md"),
@@ -305,9 +318,12 @@ def main(argv=None):
                 if args.action == "accept" and delivery(project):
                     install(project, record)
                 live = delivery_status(project, record, required=getattr(args, "require_vault", False))
+                episodes = record["review"]["episodes"]
                 print(json.dumps({"verified": live["status"] == "已记录日常库重开",
                                   "package_verified": True, "entry": str(project.entry),
-                                  "videos": len(record["review"]["episodes"]),
+                                  "original_files": len(read(project.intake)["sources"]),
+                                  "videos": len(episodes),
+                                  "embedded_videos": sum("embedded" in row for row in episodes),
                                   "attachments": len(record["review"]["documents"]),
                                   "images": len(record["outputs"]) - 1,
                                   "vault_delivery": live}, ensure_ascii=False, indent=2))

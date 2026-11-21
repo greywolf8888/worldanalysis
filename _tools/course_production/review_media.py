@@ -11,7 +11,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageStat
 
 from frames import get_native_frame
 from prepare import MODEL, MODEL_SHA, captions
-from project import local_child, media_source, put, read, sha
+from project import media_source, original_media_path, put, read, sha
 from _tools.course_no_subtitles import speech
 from _tools.course_no_subtitles.speech import load_model
 import av
@@ -293,7 +293,8 @@ def scan_video(course, ledger, work, lesson):
     raw = course / "原始资料"
     source = media_source(raw, work, metadata)
     audio_file = metadata.get("audio_source", metadata["source"])
-    sound = source if audio_file == metadata["source"] else local_child(raw, audio_file)
+    sound = (source if audio_file == metadata["source"] else
+             original_media_path(raw, work, audio_file, metadata.get("audio_embedded")))
     audio_count = metadata["audio_count"]
     sound_sha = metadata.get("audio_source_sha256")
     offset = metadata["audio_offset_s"]

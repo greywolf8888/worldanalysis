@@ -7,7 +7,7 @@ import subprocess
 from tempfile import TemporaryDirectory
 import wave
 
-from project import local_child, media_source, put, read, sha
+from project import local_child, media_source, original_media_path, put, read, sha
 from _tools.course_no_subtitles.speech import RUNTIME
 
 
@@ -145,7 +145,7 @@ def refine_candidates(project, recognizer, lesson=None, ranges=None):
         meta = read(project.ledger / f"{number:02}.json")
         audio_file = meta.get("audio_source", item["source"])
         sound = (media_source(project.raw, project.work, meta) if audio_file == item["source"]
-                 else local_child(project.raw, audio_file))
+                 else original_media_path(project.raw, project.work, audio_file, meta.get("audio_embedded")))
         groups = []
         if ranges:
             groups = [{"start": a, "end": b} for a, b in (valid_span(row, duration) for row in ranges)]

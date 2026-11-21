@@ -201,8 +201,13 @@ def compile_textbook(course, work, ledger, *, art_root, order):
 
     index = ["> [!info]- 原课与配套资料", ">"]
     for number, info in movies.items():
-        raw = info["source"]
+        embedded = info.get("embedded")
+        raw = embedded["document"] if embedded else info["source"]
         title = Path(raw).name
+        if embedded:
+            pages = "、".join(str(page) for page in embedded["pages"])
+            position = f"第 {pages} 页" if pages else "页码未定位"
+            title = f"{title} · {position}内嵌视频"
         url = "../" + quote("原始资料/" + raw, safe=LOCAL_PATH_SAFE)
         suffix = " · 定位基于恢复副本" if info.get("recovery") else ""
         index.append(f"> - 第 {display_numbers[number]} 讲 · [{link_title(title)}]({url}) · {clock(info['duration_s'])}{suffix}")
