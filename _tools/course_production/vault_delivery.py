@@ -2,11 +2,13 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import re
+from tempfile import TemporaryDirectory
 from urllib.parse import quote, unquote
 
-from project import ENTRY, copy_file, local_child, named_entry, put, read, sha
+from project import ENTRY, copy_file, file_lock, local_child, named_entry, put, read, sha
 from publish import LOCAL_LINK, verify_links
 from reader_review import chapters
+from vault_catalog import refresh_catalog
 
 
 DELIVERY = "obsidian-delivery.json"
@@ -77,6 +79,58 @@ def check_legacy_links(vault, entry):
             raise ValueError(f"旧笔记有入链，请先在 Obsidian 内重命名以更新引用 {note}")
 
 
+def install_new_folder(project, vault, target, entry, body, assets, digest):
+    # One folder arrival lets the open reader index a complete course rather than a burst of partial files.
+    config = local_child(vault, ".obsidian")
+    staging_parent = vault.parent if vault.parent != vault and vault.parent.stat().st_dev == vault.stat().st_dev else config
+    try:
+        staging = TemporaryDirectory(prefix=".worldanalysis-course-", dir=staging_parent)
+    except PermissionError:
+        if staging_parent == config:
+            raise
+        staging = TemporaryDirectory(prefix=".worldanalysis-course-", dir=config)
+    with staging as scratch:
+        staged = local_child(Path(scratch), target.name)
+        relative_entry = entry.relative_to(target)
+        for name, fingerprint in assets.items():
+            copy_file(local_child(project.folder, name), local_child(staged, name), fingerprint)
+        copy_file(project.entry, local_child(staged, relative_entry), digest)
+        verify_links(staged, {relative_entry.as_posix(): body}, art_root=staged)
+        with file_lock(local_child(vault, ".obsidian/worldanalysis-install.lock"), blocking=True):
+            if target.exists():
+                raise ValueError(f"交付期间出现同名项目目录，请重新核对后续作 {target}")
+            staged.rename(target)
+
+
+def update_existing_folder(project, target, entry, current, old_sha, body, assets, digest):
+    missing = []
+    for name, fingerprint in assets.items():
+        asset = local_child(target, name)
+        if not asset.exists():
+            missing.append((name, fingerprint))
+        elif not asset.is_file() or sha(asset) != fingerprint:
+            raise ValueError(f"阅读库已有同名但不同的文件，请先核对 {asset}")
+
+    if old_sha and (old_sha != digest or current != entry):
+        archive = local_child(project.ledger, f"obsidian-previous/{old_sha}/{current.name}")
+        copy_file(current, archive, old_sha)
+    for name, fingerprint in missing:
+        asset = local_child(target, name)
+        if asset.exists() and (not asset.is_file() or sha(asset) != fingerprint):
+            raise ValueError(f"交付期间出现不同的同名文件 {asset}")
+        copy_file(local_child(project.folder, name), asset, fingerprint)
+    current_sha = sha(current) if current.is_file() else None
+    if current_sha != old_sha:
+        raise ValueError("交付期间阅读库教材已变更，请保留并对照修改")
+    verify_links(target, {entry.relative_to(target).as_posix(): body}, art_root=target)
+    if current != entry:
+        if entry.exists():
+            raise ValueError(f"交付期间出现同名教材 {entry}")
+        current.rename(entry)
+    copy_file(project.entry, entry, digest)
+    return not missing
+
+
 def install(project, publication, vault=None, folder=None, reviewed_previous=None):
     previous = delivery(project)
     if vault is None and previous is None:
@@ -107,38 +161,22 @@ def install(project, publication, vault=None, folder=None, reviewed_previous=Non
 
     assets = {**publication["outputs"], **linked_originals(project, publication["body"])}
     assets.pop(ENTRY_PATH)
-    missing = []
-    for name, digest in assets.items():
-        asset = local_child(target, name)
-        if not asset.exists():
-            missing.append((name, digest))
-        elif not asset.is_file() or sha(asset) != digest:
-            raise ValueError(f"阅读库已有同名但不同的文件，请先核对 {asset}")
+    if target.exists():
+        assets_unchanged = update_existing_folder(
+            project, target, entry, current, old_sha, publication["body"], assets, expected)
+    else:
+        install_new_folder(project, vault, target, entry, publication["body"], assets, expected)
+        assets_unchanged = False
 
-    if old_sha and (old_sha != expected or current != entry):
-        archive = local_child(project.ledger, f"obsidian-previous/{old_sha}/{current.name}")
-        copy_file(current, archive, old_sha)
-    for name, digest in missing:
-        asset = local_child(target, name)
-        if asset.exists() and (not asset.is_file() or sha(asset) != digest):
-            raise ValueError(f"交付期间出现不同的同名文件 {asset}")
-        copy_file(local_child(project.folder, name), asset, digest)
-    current_sha = sha(current) if current.is_file() else None
-    if current_sha != old_sha:
-        raise ValueError("交付期间阅读库教材已变更，请保留并对照修改")
-    verify_links(target, {entry.relative_to(target).as_posix(): publication["body"]}, art_root=target)
-    if current != entry:
-        if entry.exists():
-            raise ValueError(f"交付期间出现同名教材 {entry}")
-        current.rename(entry)
-    copy_file(project.entry, entry, expected)
-
-    if (previous and previous["entry"] == str(entry) and previous["sha256"] == expected
-            and old_sha == expected and not missing):
-        return previous
-    state = {**binding, "entry": str(entry), "uri": obsidian_uri(entry), "sha256": expected,
-             "installed_at": datetime.now(timezone.utc).isoformat(), "observation": None}
-    put(project.ledger / DELIVERY, state)
+    already_installed = (previous and previous["entry"] == str(entry) and previous["sha256"] == expected
+                         and old_sha == expected and assets_unchanged)
+    if already_installed:
+        state = previous
+    else:
+        state = {**binding, "entry": str(entry), "uri": obsidian_uri(entry), "sha256": expected,
+                 "installed_at": datetime.now(timezone.utc).isoformat(), "observation": None}
+        put(project.ledger / DELIVERY, state)
+    refresh_catalog(vault)
     return state
 
 

@@ -157,17 +157,19 @@ def inventory_files(root):
 
 
 @contextmanager
-def file_lock(path):
+def file_lock(path, *, blocking=False):
     with path.open("a+b") as handle:
         if os.name == "nt":
             import msvcrt
 
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
+            msvcrt.locking(handle.fileno(), mode, 1)
         else:
             import fcntl
 
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            mode = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+            fcntl.flock(handle, mode)
         try:
             yield
         finally:

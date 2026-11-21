@@ -216,6 +216,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
     add_arguments(commands)
+    catalog = commands.add_parser("refresh-catalog", help="按已交付笔记更新 Obsidian 项目总览")
+    catalog.add_argument("vault", type=Path)
     start = commands.add_parser("start", help="从用户提供的文件夹入库，提取文字、转写和画面候选")
     start.add_argument("source", type=Path)
     start.add_argument("--output", type=Path, help="独立课程包完整路径")
@@ -292,6 +294,11 @@ def main(argv=None):
         return run_batch(args)
 
     try:
+        if args.action == "refresh-catalog":
+            from vault_catalog import refresh_catalog
+
+            print(refresh_catalog(args.vault))
+            return 0
         project = (CourseProject.initialize(args.source, args.output) if args.action == "start"
                    else CourseProject.open(args.project))
         if args.action == "status":

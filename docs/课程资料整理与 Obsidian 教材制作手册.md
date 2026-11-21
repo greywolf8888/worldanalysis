@@ -259,6 +259,8 @@ PDF 先读原生文字和图片位置。带内嵌截图的页面同时保留整�
 
 `deliver` 返回日常库实际路径 `entry`、Obsidian 直达链接 `uri`、正文指纹 `sha256` 和落库时间 `installed_at`。链接使用 Obsidian 支持的 `obsidian://open?path=...`，可直接从课单或验收记录打开。 [Obsidian 直达链接](https://obsidian.md/help/Extending%2BObsidian%2BURI)
 
+首次发布会在读者看不到的同盘临时区准备副本，核对正文和链接后把完整项目目录一次移入库。这样 Obsidian 看到新项目时，正文、原图和引用的原件已经到齐。首次 `deliver` 和已绑定课程的 `accept` 都更新库根的 `00 项目总览.md`，按现存同名教材的最近更新时间排列。已有总览可用 `refresh-catalog <日常库路径>` 重建程序维护区，保留其外的手写内容。若日常窗口曾漏掉外部写入，先在实际窗口重载一次并打开总览。后续在打开的库中确认新项目显示，独立阅读回执仍记录整篇核对。
+
 `verify-reader` 从日常库中读取已交付的正文和链接文件，在独立 Obsidian 环境按该项目路径打开、关闭后重开，读到所有章节和文末，确认全部图片已加载、出处默认折叠以及页面无横向溢出。回执保存于 `.course/work/日常库接口验收/`，其版本摘要记录于 `.course/ledger/obsidian-delivery.json`。有额外实际窗口观察时可运行 `confirm-vault <课程包> <观察记录.json>`。手填记录须有同一版的 `entry`、`sha256`、`installed_at`，以及阅读模式、重开、页尾、折叠、引文、已看到的章节和图片，字段详见命令校验。
 
 已绑定的课程后续用 `accept` 时会更新日常库。正文版本变化后重新执行 `verify-reader` 和 `verify --require-vault`。输出中的 `package_verified` 表示独立课程包通过，`verified` 表示日常库也有本版核验结果。`verify --require-vault` 检查现存正文、图片和所链接原件，同时要求该版本的重开记录。最终交付链接必须指到日常库项目名教材。报告有声、部分无口播、全程纯画面等类型的实际复核范围，保留真实听辨和原件缺口。
