@@ -104,7 +104,7 @@ def prepare_documents(raw, records, meta, work):
             cache_name += "-static"
         if ext in ARCHIVE_SIGNATURES:
             cache_name += "-members"
-        if ext == ".srt" or ext in ARCHIVE_SIGNATURES:
+        if ext in (".pdf", ".srt") or ext in ARCHIVE_SIGNATURES:
             cache_name += f"-{PROVIDER_VERSION}"
         cache=docs/(cache_name+".json")
         if cache.is_file():

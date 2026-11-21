@@ -201,6 +201,25 @@ class PdfRenderTests(DocumentTestCase):
         self.assertNotIn("geometry", block["locator"])
         self.assertIn("SYNTHETIC native body", "".join(b.get("text", "") for b in result["blocks"]))
 
+    def test_mixed_page_keeps_native_text_and_runs_rendered_ocr(self):
+        source = self.work / "synthetic-text-and-images-on-one-page.pdf"
+        _pdf(source, mixed_page=True)
+        ocr = mock.Mock(side_effect=synthetic_ocr)
+        result, _ = self.run_extract(source, {"render_pdf_page": render_pdf_page, "ocr": ocr})
+        ocr.assert_called_once()
+        first, mixed, blank = result["metadata"]["pages"]
+        self.assertEqual([first["route"], mixed["route"], blank["route"]],
+                         ["native_text", "native_text", "blank_native"])
+        self.assertEqual(mixed["ocr_source"], "page_render")
+        self.assertEqual(mixed["image_occurrences"], 2)
+        blocks = [b for b in result["blocks"] if b["locator"].get("page_number") == 2]
+        self.assertTrue(any("text over a screenshot" in b.get("text", "") for b in blocks))
+        candidate, = [b for b in blocks if b["origin"] == "ocr"]
+        self.assertIn("OCR stub 42", candidate["text"])
+        receipt, = result["metadata"]["derivations"]
+        artifacts = {row["key"]: row["kind"] for row in result["files"]}
+        self.assertEqual([artifacts[key] for key in receipt["source_file_keys"]], ["page_render"])
+
     def test_scan_page_render_ocr_once_preserves_each_original_occurrence(self):
         source = self.work / "synthetic-mixed-render.pdf"
         _pdf(source)

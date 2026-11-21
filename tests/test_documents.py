@@ -55,7 +55,7 @@ def _png() -> bytes:
     return stream.getvalue()
 
 
-def _pdf(path: Path):
+def _pdf(path: Path, *, mixed_page=False):
     """Three-page synthetic PDF: digital text, repeated raster image, blank page."""
     from pypdf import PdfWriter
     from pypdf.generic import ArrayObject, DecodedStreamObject, DictionaryObject, FloatObject, NameObject, NumberObject
@@ -75,7 +75,11 @@ def _pdf(path: Path):
                   NameObject("/ColorSpace"): NameObject("/DeviceRGB"), NameObject("/BitsPerComponent"): NumberObject(8)})
     scan[NameObject("/Resources")] = DictionaryObject({NameObject("/XObject"): DictionaryObject({NameObject("/Im0"): writer._add_object(image)})})
     content = DecodedStreamObject()
-    content.set_data(b"q 60 0 0 60 20 20 cm /Im0 Do Q q 60 0 0 60 120 20 cm /Im0 Do Q")
+    commands = b"q 60 0 0 60 20 20 cm /Im0 Do Q q 60 0 0 60 120 20 cm /Im0 Do Q"
+    if mixed_page:
+        scan["/Resources"][NameObject("/Font")] = DictionaryObject({NameObject("/F1"): font_ref})
+        commands += b" BT /F1 12 Tf 20 120 Td (synthetic text over a screenshot) Tj ET"
+    content.set_data(commands)
     scan[NameObject("/Contents")] = writer._add_object(content)
     writer.add_blank_page(width=300, height=200)
     writer.add_metadata({"/Title": "synthetic mixed page fixture"})

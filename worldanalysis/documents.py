@@ -44,7 +44,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 PROVIDER_ID = "worldanalysis.documents.native"
-PROVIDER_VERSION = "1.0.1"
+PROVIDER_VERSION = "1.0.2"
 MAX_BLOCK_TEXT = 16000
 DEFAULT_LIMITS = {
     "max_input_bytes": 128 * 1024 * 1024,
@@ -1204,9 +1204,11 @@ def _pdf(r: _Result):
             walk(contents, resources)
             suspect_text = "\ufffd" in native or "\x00" in native
             readable_native = bool(native.strip()) and not native_failed and not suspect_text
-            need_render = bool(page_info["vector_operations"] or native_failed or suspect_text or (not readable_native and page_info["image_occurrences"]))
+            has_raster = bool(page_info["image_occurrences"])
+            need_render = bool(page_info["vector_operations"] or native_failed or suspect_text or has_raster)
             page_info["render_attempted"] = need_render and callable(r.options.get("render_pdf_page"))
-            rendered = r.render_pdf_page(page_no, "vector_or_unreadable_page") if need_render else None
+            render_cause = "mixed_text_and_image" if readable_native and has_raster else "vector_or_unreadable_page"
+            rendered = r.render_pdf_page(page_no, render_cause) if need_render else None
             page_info["page_render_retained"] = bool(rendered)
             if readable_native:
                 page_info["route"] = "native_text"
@@ -1233,10 +1235,10 @@ def _pdf(r: _Result):
                 page_info["route"] = "blank_native"
                 key = r.structured({"page_number": page_no, "blank_by_native_enumeration": True}, "inventory")
                 r.block("metadata", loc, files=[key], text="No native text/image/paint operation discovered on this page")
-            if not readable_native and need_render:
+            if has_raster or (not readable_native and need_render):
                 if rendered:
-                    # Prefer one correctly composed/rotated page OCR, not the same
-                    # text once per native image and again per page rendering.
+                    # Extract labels in the visible page, including screenshots on pages with a text layer.
+                    # Keep native text and derived OCR as separate evidence.
                     r.ocr(rendered["file_key"], rendered["block_indexes"], loc)
                     page_info["ocr_source"] = "page_render"
                 else:
@@ -1246,8 +1248,8 @@ def _pdf(r: _Result):
                             r.ocr(block["file_keys"][0], [index], block["locator"])
                     if image_blocks:
                         page_info["ocr_source"] = "embedded_image"
-                    if page_info["image_occurrences"] and not callable(r.options.get("ocr")):
-                        r.gap("unprocessed", "Image-only PDF page requires OCR; engine not registered, page retained as partial", image_blocks)
+                    if has_raster and not callable(r.options.get("ocr")) and not image_blocks:
+                        r.gap("unprocessed", "PDF image text requires OCR; no raster evidence could be read", image_blocks)
             if page_info["vector_operations"]:
                 r.deferred("chart", loc,
                            "PDF vector paint operations retained in actual page render; visual meaning not interpreted" if rendered else "PDF vector paint operations discovered; appearance/layout not rendered or interpreted",
