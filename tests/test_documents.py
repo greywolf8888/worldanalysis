@@ -273,6 +273,19 @@ class TextTests(DocumentTestCase):
             self.assertEqual(result["processing_status"], "partial")
             self.assertTrue(result["gaps"])
 
+    def test_markdown_guide_with_srt_extension_retains_prose_and_examples(self):
+        text = "# 字幕翻译指南\n\n## 保留时码\n\n保持编号和原时间轴。\n\n"
+        text += "1\n00:00:01,000 --> 00:00:03,000\n翻译示例\n\n## 检查输出\n\n只提交译文。\n"
+        result, output = self.run_extract(self.source("指南.srt", text))
+        self.assertEqual(result["processing_status"], "verified_complete")
+        self.assertEqual(result["metadata"]["declared_text_format"], "srt")
+        self.assertEqual(result["metadata"]["text_format"], "md")
+        block, = result["blocks"]
+        self.assertEqual(block["locator"]["kind"], "asset")
+        self.assertEqual(block["text"], text)
+        self.assertEqual(self.read_file(result, output, block["file_keys"][0]).decode(), text)
+        self.assertNotIn("subtitle_cues", result["metadata"])
+
     def test_missing_figure_reference_not_claimed_complete(self):
         result, _ = self.run_extract(self.source("missing.txt", "设置如下图所示。"))
         self.assertTrue(any(g["kind"] == "missing_visual" for g in result["gaps"]))

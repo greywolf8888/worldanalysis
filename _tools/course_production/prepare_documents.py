@@ -9,7 +9,7 @@ from zipfile import BadZipFile, ZipFile
 from prepare_archive import ARCHIVE_SIGNATURES, read_archive
 from prepare_html import HTML_SUFFIXES, local_html
 from project import put, read, sha, write
-from worldanalysis.documents import extract
+from worldanalysis.documents import PROVIDER_VERSION, extract
 
 
 INLINE_SUFFIXES = {".doc", ".xmind", ".url"} | HTML_SUFFIXES
@@ -104,6 +104,8 @@ def prepare_documents(raw, records, meta, work):
             cache_name += "-static"
         if ext in ARCHIVE_SIGNATURES:
             cache_name += "-members"
+        if ext == ".srt" or ext in ARCHIVE_SIGNATURES:
+            cache_name += f"-{PROVIDER_VERSION}"
         cache=docs/(cache_name+".json")
         if cache.is_file():
             result=read(cache)
@@ -125,6 +127,9 @@ def prepare_documents(raw, records, meta, work):
         item={"id":f"D{i:03}","file":row["file"],"sha256":key,"status":result["processing_status"],
               "text_blocks":len(texts),"text_chars":sum(len(b["text"]) for b in texts),
               "gaps":len(result["gaps"]),"result":cache.relative_to(work).as_posix() if cache.is_file() else None}
+        text_format = result.get("metadata", {}).get("text_format")
+        if text_format:
+            item["text_format"] = text_format
         if result["processing_status"] == "failed":
             item["gaps_detail"] = result["gaps"]
         evidence.append(item)

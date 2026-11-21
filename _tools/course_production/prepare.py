@@ -31,11 +31,12 @@ def classify(sources):
 
 
 def subtitle_choice(video, options, documents):
-    allowed = {row["file"]: row for row in documents if Path(row["file"]).suffix.lower() in {".srt", ".vtt"}}
+    allowed = {row["file"]: row for row in documents
+               if Path(row["file"]).suffix.lower() in {".srt", ".vtt"} and row.get("text_format") != "md"}
     if "subtitle" in options:
         requested = options["subtitle"]
         if requested is not None and requested not in allowed:
-            raise ValueError(f"原字幕路径未登记 {requested}")
+            raise ValueError(f"原字幕路径未登记为带时码的字幕 {requested}")
         return allowed.get(requested), []
     stem = Path(video["file"]).with_suffix("").as_posix().casefold()
     candidates = []

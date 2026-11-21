@@ -44,7 +44,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 PROVIDER_ID = "worldanalysis.documents.native"
-PROVIDER_VERSION = "1.0.0"
+PROVIDER_VERSION = "1.0.1"
 MAX_BLOCK_TEXT = 16000
 DEFAULT_LIMITS = {
     "max_input_bytes": 128 * 1024 * 1024,
@@ -558,6 +558,13 @@ def _text(r: _Result, fmt: str):
     data = r.source.read_bytes()
     text, encoding = _decode(data, r.options.get("encoding"))
     r.meta.update({"encoding": encoding, "source_bytes": len(data), "character_count": len(text)})
+    # Some course archives give their subtitle-writing guide an .srt suffix.
+    # A document title and subordinate headings distinguish it from cue groups,
+    # whose first line is a cue number or timestamp.
+    if (fmt == "srt" and re.match(r"\s*#[ \t]+\S", text)
+            and re.search(r"(?m)^#{2,6}[ \t]+\S", text)):
+        r.meta.update(declared_text_format=fmt, text_format="md")
+        fmt = "md"
     raw_key = r.file(text.encode("utf-8"), "native_text", "text/plain; charset=utf-8", "txt")
     loc = {"kind": "asset", "precision": "exact", "char_start": 0, "char_end": len(text)}
     if fmt in ("txt", "md", "json"):
