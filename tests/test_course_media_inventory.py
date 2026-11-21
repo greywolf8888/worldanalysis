@@ -7,6 +7,7 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 from zipfile import ZipFile
 
 
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "_tools/course_production/course.py"
 sys.path.insert(0, str(CLI.parent))
 
-from archive_media import extract_member, list_members, readable_members
+from archive_media import extract_member, list_members, readable_members, seven_zip_tool
 from media_inventory import DECISIONS, MEDIA_INVENTORY, collect_course_media, verify_course_media
 from prepare_documents import document_ids
 from project import CourseProject, put, read, sha
@@ -94,11 +95,32 @@ class CourseMediaInventoryTest(unittest.TestCase):
         package = self.source / "本课.7z"
         subprocess.run([tar, "-cf", str(package), "--format", "7zip", "-C", str(self.root),
                         lesson.name, other.name], check=True, timeout=20)
-        members = readable_members(list_members(package))
-        self.assertEqual(set(members), {lesson.name, other.name})
         target = self.root / "selected.mp4"
-        extract_member(package, members[lesson.name], target)
+        with patch("archive_media.seven_zip_tool", return_value=None):
+            members = readable_members(list_members(package))
+            self.assertEqual(set(members), {lesson.name, other.name})
+            extract_member(package, members[lesson.name], target)
         self.assertEqual(target.read_bytes(), lesson.read_bytes())
+
+    def test_seven_zip_reads_exact_unicode_member_from_listing(self):
+        tool = seven_zip_tool()
+        if not tool:
+            self.skipTest("7-Zip is needed for Unicode archive recovery")
+        lesson = self.root / "第1讲 • [画面].mp4"
+        other = self.root / "第1讲 • 画.mp4"
+        lesson.write_bytes(b"exact unicode archive member")
+        other.write_bytes(b"a different member")
+        archive = self.source / "工具与课.7z"
+        subprocess.run([tool, "a", "-t7z", "-bd", "-spd", "--", str(archive), lesson.name, other.name],
+                       cwd=self.root, check=True, capture_output=True, timeout=20)
+        members = readable_members(list_members(archive))
+        self.assertEqual(set(members), {lesson.name, other.name})
+        member = members[lesson.name]
+        self.assertEqual(member.size, lesson.stat().st_size)
+        self.assertIsNotNone(member.seven_zip_name)
+        chosen = self.root / "verified-original.mp4"
+        extract_member(archive, member, chosen)
+        self.assertEqual(chosen.read_bytes(), lesson.read_bytes())
 
     def test_reclassification_preserves_document_citation_ids(self):
         meta = self.root / "ledger"

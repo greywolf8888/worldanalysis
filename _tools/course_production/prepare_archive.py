@@ -1,37 +1,21 @@
 """Read course archive members offline using numbered files inside the work directory."""
-import os
+from contextlib import contextmanager
 from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
 import tarfile
 import tempfile
 from threading import Event, Timer
 from zipfile import BadZipFile
 
+from archive_media import ARCHIVE_SIGNATURES, Member, archive_tool, extract_member, list_seven_zip_members
+from archive_media import readable_members, seven_zip_tool
 from project import put, sha
 from worldanalysis.documents import DEFAULT_LIMITS, _safe_member
 
 
-ARCHIVE_SIGNATURES = {
-    ".rar": (b"Rar!\x1a\x07\x00", b"Rar!\x1a\x07\x01\x00"),
-    ".7z": (b"7z\xbc\xaf\x27\x1c",),
-}
 MAX_CONVERSION_SECONDS = 60
-
-
-def archive_tool():
-    if os.name == "nt":
-        system_tar = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "tar.exe"
-        if system_tar.is_file():
-            return str(system_tar)
-    tool = shutil.which("bsdtar")
-    if not tool and sys.platform == "darwin":
-        tool = "/usr/bin/tar"
-    if not tool:
-        raise ValueError("读取 RAR 或 7z 需要本机的 libarchive tar 或 bsdtar")
-    return tool
 
 
 def convert_to_tar(source, stream):
@@ -67,6 +51,29 @@ def convert_to_tar(source, stream):
     stream.seek(0)
 
 
+@contextmanager
+def archive_reader(source, out):
+    if tool := seven_zip_tool():
+        members = list_seven_zip_members(source, tool)
+        readable = readable_members(members)
+
+        def copy(entry, target):
+            extract_member(source, entry, target, limit=DEFAULT_LIMITS["max_member_bytes"])
+
+        yield ((entry, entry, entry.name in readable) for entry in members), copy
+        return
+
+    with tempfile.TemporaryFile(dir=out) as stream:
+        convert_to_tar(source, stream)
+        with tarfile.open(fileobj=stream, mode="r:") as archive:
+            def copy(entry, target):
+                with archive.extractfile(entry) as content, target.open("xb") as output:
+                    shutil.copyfileobj(content, output)
+
+            yield ((Member(entry.name.rstrip("/") + "/" if entry.isdir() else entry.name,
+                           entry.size, entry.isreg()), entry, entry.isreg()) for entry in archive), copy
+
+
 def read_archive(source, out, inspect_document):
     limits = DEFAULT_LIMITS
     if source.stat().st_size > limits["max_input_bytes"]:
@@ -79,61 +86,64 @@ def read_archive(source, out, inspect_document):
     total_bytes = 0
     files = out / "档内原件"
     try:
-        with tempfile.TemporaryFile(dir=out) as stream:
-            convert_to_tar(source, stream)
+        with archive_reader(source, out) as (entries, copy):
             files.mkdir()
-            with tarfile.open(fileobj=stream, mode="r:") as archive:
-                for index, entry in enumerate(archive, 1):
-                    if index > limits["max_archive_members"]:
-                        gaps.append({"reason": "超过可逐件展开的成员数量上限"})
-                        break
-                    path = entry.name
-                    location = {"kind": "archive_member", "member_path": path, "member_index": index}
-                    member = {"path": path, "index": index, "size": entry.size}
-                    members.append(member)
-                    canonical = path.rstrip("/").casefold()
-                    if not _safe_member(path) or canonical in seen:
-                        reason = "档内名称不可安全定位或有重名"
-                    elif entry.isdir():
-                        member["status"] = "directory"
-                        seen.add(canonical)
-                        continue
-                    elif not entry.isreg():
-                        reason = "档内链接或特殊文件需另行核查"
-                    elif (not 0 <= entry.size <= limits["max_member_bytes"] or
-                          total_bytes + entry.size > limits["max_archive_uncompressed_bytes"]):
-                        reason = "档内文件超出读取大小上限"
-                    else:
-                        reason = ""
+            for index, (entry, token, readable) in enumerate(entries, 1):
+                if index > limits["max_archive_members"]:
+                    gaps.append({"reason": "超过可逐件展开的成员数量上限"})
+                    break
+                path = entry.name
+                location = {"kind": "archive_member", "member_path": path, "member_index": index}
+                member = {"path": path, "index": index, "size": entry.size}
+                members.append(member)
+                canonical = path.rstrip("/").casefold()
+                if not _safe_member(path) or canonical in seen:
+                    reason = "档内名称不可安全定位或有重名"
+                elif path.endswith("/"):
+                    member["status"] = "directory"
                     seen.add(canonical)
-                    if reason:
-                        gaps.append({"locator": location, "reason": reason})
-                        member["status"] = "review"
-                        continue
+                    continue
+                elif not readable:
+                    reason = "档内链接、加密或重名文件需另行核查"
+                elif (not 0 <= entry.size <= limits["max_member_bytes"] or
+                      total_bytes + entry.size > limits["max_archive_uncompressed_bytes"]):
+                    reason = "档内文件超出读取大小上限"
+                else:
+                    reason = ""
+                seen.add(canonical)
+                if reason:
+                    gaps.append({"locator": location, "reason": reason})
+                    member["status"] = "review"
+                    continue
 
-                    total_bytes += entry.size
-                    suffix = Path(path).suffix.lower()
-                    safe_suffix = suffix if re.fullmatch(r"\.[a-z0-9]{1,12}", suffix) else ".bin"
-                    target = files / f"{index:05}{safe_suffix}"
-                    with archive.extractfile(entry) as content, target.open("xb") as output:
-                        shutil.copyfileobj(content, output)
-                    member.update(file=target.relative_to(out).as_posix(), sha256=sha(target))
-                    asset_dir = out / "档内取材" / f"{index:05}"
-                    try:
-                        result = inspect_document(target, asset_dir)
-                    except (OSError, ValueError, BadZipFile, subprocess.TimeoutExpired) as error:
-                        result = {"processing_status": "failed", "blocks": [], "gaps": [{"reason": str(error)}]}
-                    if asset_dir.is_dir():
-                        result["asset_root"] = asset_dir.relative_to(out).as_posix()
-                    details = asset_dir.with_suffix(".json")
-                    put(details, result)
-                    member.update(status=result["processing_status"], result=details.relative_to(out).as_posix())
-                    for block in result["blocks"]:
-                        if block.get("text"):
-                            blocks.append({"locator": {**location, "member_locator": block.get("locator", {})},
-                                           "text": block["text"]})
-                    for gap in result["gaps"]:
-                        gaps.append({"locator": location, "reason": gap["reason"]})
+                total_bytes += entry.size
+                suffix = Path(path).suffix.lower()
+                safe_suffix = suffix if re.fullmatch(r"\.[a-z0-9]{1,12}", suffix) else ".bin"
+                target = files / f"{index:05}{safe_suffix}"
+                try:
+                    copy(token, target)
+                except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+                    target.unlink(missing_ok=True)
+                    member["status"] = "review"
+                    gaps.append({"locator": location, "reason": str(error)})
+                    continue
+                member.update(file=target.relative_to(out).as_posix(), sha256=sha(target))
+                asset_dir = out / "档内取材" / f"{index:05}"
+                try:
+                    result = inspect_document(target, asset_dir)
+                except (OSError, ValueError, BadZipFile, subprocess.TimeoutExpired) as error:
+                    result = {"processing_status": "failed", "blocks": [], "gaps": [{"reason": str(error)}]}
+                if asset_dir.is_dir():
+                    result["asset_root"] = asset_dir.relative_to(out).as_posix()
+                details = asset_dir.with_suffix(".json")
+                put(details, result)
+                member.update(status=result["processing_status"], result=details.relative_to(out).as_posix())
+                for block in result["blocks"]:
+                    if block.get("text"):
+                        blocks.append({"locator": {**location, "member_locator": block.get("locator", {})},
+                                       "text": block["text"]})
+                for gap in result["gaps"]:
+                    gaps.append({"locator": location, "reason": gap["reason"]})
     except tarfile.TarError as error:
         raise ValueError(f"无法读取归档工具返回的成员数据：{error}") from error
     if not members:

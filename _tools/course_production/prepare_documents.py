@@ -6,7 +6,8 @@ import json
 import subprocess
 import tempfile
 from zipfile import BadZipFile, ZipFile
-from prepare_archive import ARCHIVE_SIGNATURES, read_archive
+from archive_media import ARCHIVE_SIGNATURES, seven_zip_tool
+from prepare_archive import read_archive
 from prepare_html import HTML_SUFFIXES, local_html
 from project import put, read, sha, write
 from worldanalysis.documents import PROVIDER_VERSION, extract
@@ -122,7 +123,7 @@ def prepare_documents(raw, records, meta, work):
         if ext in HTML_SUFFIXES:
             cache_name += "-static"
         if ext in ARCHIVE_SIGNATURES:
-            cache_name += "-members"
+            cache_name += "-members-7zip" if seven_zip_tool() else "-members"
         if ext in (".pdf", ".srt") or ext in ARCHIVE_SIGNATURES:
             cache_name += f"-{PROVIDER_VERSION}"
         cache=docs/(cache_name+".json")
