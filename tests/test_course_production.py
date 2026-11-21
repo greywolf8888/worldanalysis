@@ -159,12 +159,13 @@ class CourseProductionTest(unittest.TestCase):
         resource.write_text(f"[InternetShortcut]\nURL={url}\n", encoding="utf-16")
         self.start_course()
         self.assertEqual(guide.read_bytes(), (self.package / "原始资料" / guide.name).read_bytes())
-        self.pick([{"name": "比例图", "document": "D001", "page": 1, "scale": 1.2}])
+        figure = "比例图,预览@原图"
+        self.pick([{"name": figure, "document": "D001", "page": 1, "scale": 1.2}])
         draft = self.work / "教材.md"
         draft.write_text(
             "# 画板导出\n\n## 设好画板比例\n\n"
             "我先准备空白画板，打开比例菜单，选 3:4。{{D001|第 1 页，比例和预览设置}}\n\n"
-            "{{img:比例图|450}}\n\n我保存预览。如果比例显示错误，我重新选择比例。\n\n"
+            f"{{{{img:{figure}|450}}}}\n\n我保存预览。如果比例显示错误，我重新选择比例。\n\n"
             "~~~text\nratio={{current_ratio}}\n~~~\n\n"
             "## 随课参考\n\n讲义首页用于复习画板尺寸。{{D001|第 1 页，比例和预览设置}}\n\n"
             "课堂练习可用随课的原始入口。{{D002|InternetShortcut 中的 URL}}\n",
@@ -175,7 +176,9 @@ class CourseProductionTest(unittest.TestCase):
         supplement_file = self.work / "补充内容复核.json"
         self.save(supplement_file, [{**supplemental, "sources": [f"{guide.name} · 第 2 页"]}])
         self.command("preview", self.package)
-        self.assertIn("{{current_ratio}}", (self.work / "阅读预览" / ENTRY).read_text(encoding="utf-8"))
+        preview = (self.work / "阅读预览" / ENTRY).read_text(encoding="utf-8")
+        self.assertIn("{{current_ratio}}", preview)
+        self.assertIn(",%E9%A2%84%E8%A7%88@", preview)
         docs = self.data(self.ledger / "documents-summary.json")["records"]
         self.assertGreater(docs[0]["text_blocks"], 0)
         self.assertEqual(docs[1]["status"], "extracted")
@@ -185,7 +188,7 @@ class CourseProductionTest(unittest.TestCase):
         review["documents"][0]["note"] = "已查看第 1 页的尺寸标签和预览示意"
         review["documents"][1].update(inspected_at="InternetShortcut 节和 URL 条目", note="随课练习入口")
         review["follow_along"] = [self.follow_along(
-            "设好画板比例", ["第 1 页，比例和预览设置"], ["比例图.png"])]
+            "设好画板比例", ["第 1 页，比例和预览设置"], [figure + ".png"])]
         review_path = self.work / "验收记录.json"
         self.save(review_path, review)
         self.assertIn("附件须登记实际检查的页", self.command("accept", self.package, okay=False))

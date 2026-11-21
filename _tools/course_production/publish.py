@@ -17,6 +17,8 @@ ART = re.compile(r"\{\{img:([^{}|]+)\|(\d+)\}\}")
 WIKILINK = re.compile(r"\[\[([^\]]+)\]\]")
 LOCAL_LINK = re.compile(r"\]\(((?:\.\./|file:///)[^)]+)\)")
 LOCAL_IMAGE = re.compile(r"!\[[^\]\n]+\]\(([^)\n]+)\)")
+# Obsidian does not resolve encoded commas or at signs in local image paths.
+LOCAL_PATH_SAFE = "/+@,"
 
 
 def clock(seconds):
@@ -173,7 +175,7 @@ def compile_textbook(course, work, ledger, *, art_root, order):
             indent = prefix if prefix.isspace() else ""
             provenance = hidden_source("配图出处", f"{figure_location(info, display_numbers)} · {title}")
             caption = f"\n\n{indent}*根据原课整理 · {info['diagram']['caption']}*" if "diagram" in info else ""
-            return f"![{title}|{display_width}]({quote(image_path, safe='/+')}){caption}\n\n{indent}{provenance}"
+            return f"![{title}|{display_width}]({quote(image_path, safe=LOCAL_PATH_SAFE)}){caption}\n\n{indent}{provenance}"
 
         def references(match):
             expanded = (reference(ref) for ref in REF.finditer(match[0]))
@@ -199,13 +201,13 @@ def compile_textbook(course, work, ledger, *, art_root, order):
     for number, info in movies.items():
         raw = info["source"]
         title = Path(raw).name
-        url = "../" + quote("原始资料/" + raw, safe="/+")
+        url = "../" + quote("原始资料/" + raw, safe=LOCAL_PATH_SAFE)
         index.append(f"> - 第 {display_numbers[number]} 讲 · [{link_title(title)}]({url}) · {clock(info['duration_s'])}")
     if cited_docs:
         index.extend([">", "> **配套资料**", ">"])
         for doc in sorted(cited_docs):
             raw = docs[doc]["file"]
-            url = "../" + quote("原始资料/" + raw, safe="/+")
+            url = "../" + quote("原始资料/" + raw, safe=LOCAL_PATH_SAFE)
             index.append(f"> - [{link_title(Path(raw).name)}]({url})")
     if re.search(r"(?m)^>\s*\[!info\][+-]?\s*原课与配套资料\s*$", body):
         raise ValueError("原课入口由编译器统一放在文末")
