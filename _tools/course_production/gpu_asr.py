@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 import wave
 
 from project import local_child, media_source, original_media_path, put, read, sha
-from _tools.course_no_subtitles.speech import RUNTIME
+from _tools.course_no_subtitles.speech import RATE, RUNTIME, audio_windows
 
 
 def select_device(executable, requested=None):
@@ -69,16 +69,16 @@ class VulkanASR:
             for index, (start, length, offset) in enumerate(windows):
                 output = Path(folder) / f"transcript-{index:02}"
                 wav = output.with_suffix(".wav")
-                seek = ["-ss", str(start)] if start is not None else []
-                limit = ["-t", str(length)] if length is not None else []
-                subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-xerror", "-protocol_whitelist", "file,pipe",
-                                *seek, "-i", str(source), *limit, "-map", f"0:a:{track}", "-vn", "-ar", "16000",
-                                "-ac", "1", "-c:a", "pcm_s16le", str(wav)], check=True)
-                with wave.open(str(wav)) as pcm:
+                # Decode PCM before writing the WAV header. Source timestamps can jitter
+                # after resampling or seeking and make FFmpeg's WAV muxer reject valid samples.
+                with wave.open(str(wav), "wb") as pcm:
+                    pcm.setparams((1, 2, RATE, 0, "NONE", ""))
+                    for _, chunk in audio_windows(source, start or 0, length, "fixed", track):
+                        pcm.writeframesraw(chunk)
                     samples = pcm.getnframes()
                     self.decoded_windows.append({"requested_start": start or 0, "requested_length": length,
                                                  "timeline_start": offset, "samples": samples,
-                                                 "sample_rate": pcm.getframerate()})
+                                                 "sample_rate": RATE})
                 if not samples:
                     outputs.append((None, offset))
                     continue

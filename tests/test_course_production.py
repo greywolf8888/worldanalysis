@@ -190,19 +190,26 @@ class CourseProductionTest(unittest.TestCase):
         gpu.model = self.root / "model"
         windows = [(0, 1, 0), (1, 1, 1)]
 
+        pcm_samples = {0: bytes(32000), 1: b"\x01\x00" * 16000}
+
+        def decode(source, start, length, mode, track):
+            self.assertEqual((source.name, length, mode, track), ("source.mp4", 1, "fixed", 0))
+            data = pcm_samples[start]
+            yield start, data[:16000]
+            yield start + .5, data[16000:]
+
         def runner(warning):
             def run(command, **options):
-                if command[0] == "ffmpeg":
-                    with wave.open(command[-1], "wb") as sound:
-                        sound.setparams((1, 2, 16000, 0, "NONE", ""))
-                        sound.writeframes(bytes(32000))
-                    return subprocess.CompletedProcess(command, 0)
+                for i, start in enumerate(pcm_samples):
+                    with wave.open(str(Path(options["cwd"]) / f"transcript-{i:02}.wav")) as sound:
+                        self.assertEqual(sound.getframerate(), 16000)
+                        self.assertEqual(sound.readframes(sound.getnframes()), pcm_samples[start])
                 output = Path(options["cwd"]) / "transcript-01.json"
                 self.save(output, {"transcription": [{"offsets": {"from": 100, "to": 480}, "text": "演示"}]})
                 return subprocess.CompletedProcess(command, 0, b"", warning)
             return run
 
-        with patch.object(gpu_asr, "RUNTIME", self.root):
+        with patch.object(gpu_asr, "RUNTIME", self.root), patch.object(gpu_asr, "audio_windows", side_effect=decode):
             with patch.object(gpu_asr.subprocess, "run",
                               side_effect=runner(b"crispasr: warning: no speech detected in 'transcript-00.wav'\n")):
                 result = gpu.transcribe_windows(self.root / "source.mp4", 2, 0, "zh", windows)
