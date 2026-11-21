@@ -20,6 +20,18 @@ OBSIDIAN = os.environ.get("WORLDANALYSIS_TEST_OBSIDIAN")
 
 
 class CourseProductionTest(unittest.TestCase):
+    def test_hidden_provenance_round_trips_attachment_punctuation(self):
+        with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
+            from acceptance import validate_supplements
+            from publish import hidden_source
+
+        label = "[26]--图示&练习.pdf · 第 1 页"
+        comment = hidden_source("段落出处", label)
+        self.assertNotIn("--", comment.removeprefix("<!--").removesuffix("-->"))
+        self.assertIn("[26]&#45;&#45;图示&amp;练习.pdf", comment)
+        supplements = [{"anchor": "练习见附页", "sources": [label]}]
+        validate_supplements(f"练习见附页。 {comment}", supplements, supplements)
+
     def setUp(self):
         scratch = TemporaryDirectory()
         self.addCleanup(scratch.cleanup)

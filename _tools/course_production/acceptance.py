@@ -1,5 +1,6 @@
 """Validate the editor's source review and publish the approved reading copy."""
 import hashlib
+from html import unescape
 import json
 from pathlib import Path
 import re
@@ -289,7 +290,7 @@ def validate_supplements(body, registered, reviewed):
     if not registered:
         return
     blocks = [
-        (COMMENT.sub("", block), [f" · {note} · " for note in PARAGRAPH_SOURCE.findall(block)])
+        (COMMENT.sub("", block), [f" · {unescape(note)} · " for note in PARAGRAPH_SOURCE.findall(block)])
         for is_code, part in markdown_segments(body) if not is_code
         for block in re.split(r"\n[ \t]*\n", COLLAPSED.sub("", part))
     ]
@@ -343,7 +344,7 @@ def validate_review(body, figures, review, template):
         visible = COMMENT.sub("", text)
         if any(case["checks"][key] not in visible for key in ITEMS):
             raise ValueError(f"跟做内容需要写在可见正文 {case['goal']}")
-        hidden = " ".join(PARAGRAPH_SOURCE.findall(text))
+        hidden = " ".join(map(unescape, PARAGRAPH_SOURCE.findall(text)))
         if any(source not in hidden for source in case["sources"]):
             raise ValueError(f"跟做案例的出处需要定位到同节的隐藏注释 {case['goal']}")
     if "source_scope" in template:

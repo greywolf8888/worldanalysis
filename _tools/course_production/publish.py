@@ -50,7 +50,9 @@ def figure_location(info, display_numbers):
 
 
 def hidden_source(kind, detail):
-    return f"<!-- {kind} {escape(detail, quote=False)} -->"
+    # Consecutive hyphens are not safe inside an HTML comment in Obsidian.
+    payload = escape(detail, quote=False).replace("--", "&#45;&#45;")
+    return f"<!-- {kind} {payload} -->"
 
 
 def check_figure(course, info, *, ledger, art_root):

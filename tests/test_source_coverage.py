@@ -86,6 +86,12 @@ class SourceCoverageTest(unittest.TestCase):
         self.assertIn("work/pdf.json", self.evidence)
         validate_source_coverage(self.body, self.scope, self.review)
 
+    def test_escaped_attachment_filename_still_resolves_to_the_original(self):
+        self.scope["documents"][0]["source"] = "[26]--图示&练习.pdf"
+        body = self.body.replace("配套讲义.pdf", "[26]&#45;&#45;图示&amp;练习.pdf")
+        self.set_claims(body)
+        validate_source_coverage(body, self.scope, self.review)
+
     def test_missing_lesson_or_unaccounted_times_are_rejected(self):
         video = self.review["source_coverage"]["videos"].pop()
         with self.assertRaisesRegex(ValueError, "原视频来源复核"):

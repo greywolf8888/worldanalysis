@@ -49,7 +49,7 @@ async function prepareNote(vault, cases, folder, preview, rel) {
     throw Error("缺少隐藏的出处记录 " + note);
   }
   cases.set(name + "/" + rel, {name, images:[...images], urls:originals.size,
-    provenance:provenance.map(match => match[2].replace(/\s+/g, " ")),
+    provenance:provenance.map(match => match[2].replace(/\s+/g, " ").replaceAll("&#45;", "-")),
     bodyCharacters:body.length,
     digest:createHash("sha256").update(body).digest("hex"),
     appendices:[...body.matchAll(/^> \[!info\]- (原课与配套资料|有声原课与工具入口)$/gm)].map(match => match[1]),

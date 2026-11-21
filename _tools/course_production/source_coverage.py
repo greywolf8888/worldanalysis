@@ -1,6 +1,7 @@
 """Source-first scope and bidirectional review for a new textbook publication."""
 
 import hashlib
+from html import unescape
 import json
 from pathlib import Path
 import re
@@ -297,6 +298,7 @@ def citation_syntax(documents):
 
 
 def cite_tokens(note, syntax):
+    note = unescape(note)
     hits = list(syntax.finditer(note))
     if not hits or hits[0].start() != 0:
         yield "unknown", note, None
