@@ -122,18 +122,26 @@ def clip_range(raw, duration):
     return start, end
 
 
-def nearby_figures(text, anchor):
-    blocks = re.split(r"\n[ \t]*\n", COMMENT.sub("", text))
-    for index, block in enumerate(blocks):
-        if anchor not in block:
-            continue
-        found = figure_names(block)
-        for following in blocks[index + 1:]:
-            if following.strip() and re.sub(IMAGE, "", following).strip():
-                break
-            found.update(figure_names(following))
-        return found
-    raise ValueError(f"关键步骤无法定位到教材的可见文字 {anchor}")
+def nearby_figures(text, anchor, *, source=None):
+    text = COMMENT.sub(lambda match: match[0].replace("\n", " "), text)
+    blocks = re.split(r"\n[ \t]*\n", text)
+    visible = [COMMENT.sub("", block) for block in blocks]
+    matches = [index for index, block in enumerate(visible) if anchor in block]
+    if not matches:
+        raise ValueError(f"关键步骤无法定位到教材的可见文字 {anchor}")
+    index = matches[0]
+    if source:
+        display_number, start, end = source
+        index = next((candidate for candidate in matches if any(
+            left <= start + .05 and end <= right + .05
+            for left, right in source_ranges(blocks[candidate], display_number)
+        )), index)
+    found = figure_names(visible[index])
+    for following in visible[index + 1:]:
+        if following.strip() and re.sub(IMAGE, "", following).strip():
+            break
+        found.update(figure_names(following))
+    return found
 
 
 def validate_points(actual, expected, text):
@@ -222,7 +230,7 @@ def validate_episode(actual, expected, text, figures):
         if not anchor:
             raise ValueError(f"第 {display_number} 讲缺关键步骤正文定位")
         chosen = step.get("figures", [])
-        nearby = nearby_figures(text, anchor)
+        nearby = nearby_figures(text, anchor, source=(display_number, start, end))
         if any(name not in nearby for name in chosen) or (not chosen and not step.get("visual_note", "").strip()):
             raise ValueError(f"第 {display_number} 讲的关键图要紧接对应步骤；无图时记录依据 {anchor}")
         for name in chosen:

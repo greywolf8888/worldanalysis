@@ -457,7 +457,7 @@ class CourseProductionTest(unittest.TestCase):
         self.pick([{"name": "菜单初选", "lesson": 1, "time": 1.2},
                    {"name": "静默片段里的菜单", "lesson": 2, "time": 1.2}])
         note = self.work / "教材.md"
-        body = ("# 画板操作\n\n## 设好画板比例\n\n"
+        body = ("# 画板操作\n\n## 设好画板比例\n\n### 打开比例菜单\n\n"
                 "我先准备空白画板，打开比例菜单，选 3:4。{{01|00:00–00:03}} {{D003|第 1 页}}\n\n"
                 "{{img:菜单初选|450}}\n\n我保存预览。如果设置错了，我重新选择比例。\n\n"
                 "## 检查静默录屏设置\n\n我在无口播的界面展开比例列表。{{02|00:00–00:03}}\n\n"
