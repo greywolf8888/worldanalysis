@@ -11,7 +11,8 @@ from unittest.mock import patch
 TOOLS = Path(__file__).resolve().parents[1] / "_tools/course_production"
 with patch.object(sys, "path", [str(TOOLS), *sys.path]):
     from project import put
-    from source_coverage import build_source_manifest, coverage_review_template, document_locator_valid, validate_source_coverage
+    from source_coverage import (build_source_manifest, coverage_review_template, document_locator_valid, document_units,
+                                 validate_source_coverage)
 
 
 START = "打开画板并确认比例。 <!-- 段落出处 第 1 讲 00:00–02:00 -->"
@@ -137,6 +138,25 @@ class SourceCoverageTest(unittest.TestCase):
         archive = {"units": [{"kind": "member", "value": "笔记/复查.md"}]}
         self.assertTrue(document_locator_valid(archive, "档内 笔记/复查.md 第 1 段"))
         self.assertFalse(document_locator_valid(archive, "档内 笔记/复查.md.old"))
+
+    def test_sheet_locators_use_actual_cells_when_declared_dimension_is_stale(self):
+        source = {
+            "metadata": {"sheets": [{"sheet_name": "工作表1", "dimension": "F43"},
+                                    {"sheet_name": "示例", "dimension": "A1:B9"}]},
+            "blocks": [
+                {"locator": {"sheet_name": "工作表1", "cell_range": address}}
+                for address in ("A3:F3", "A22:F22", "H23:K23", "H26:K26")
+            ] + [{"locator": {"sheet_name": "示例", "cell_range": "A1:B2"}}],
+        }
+        first, second = document_units(source)
+        self.assertEqual(first["observed_cell_bounds"], [1, 3, 11, 26])
+        self.assertNotIn("observed_cell_bounds", second)
+        workbook = {"units": [first, second]}
+        self.assertTrue(document_locator_valid(workbook, "工作表1 A3:F22"))
+        self.assertTrue(document_locator_valid(workbook, "工作表1 H23:K26"))
+        self.assertFalse(document_locator_valid(workbook, "工作表1 F43"))
+        self.assertFalse(document_locator_valid(workbook, "工作表1 L25:L26"))
+        self.assertFalse(document_locator_valid(workbook, "示例 H23:K26"))
 
     def test_static_and_nested_members_use_full_archive_inventory(self):
         archive = "配套练习.zip"

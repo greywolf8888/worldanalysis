@@ -66,6 +66,7 @@ def locator_unit(locator):
 def document_units(result):
     meta = result.get("metadata", {})
     units = {}
+    observed_cells = {}
 
     def add(item):
         if item:
@@ -88,7 +89,18 @@ def document_units(result):
         # Archive inventories already distinguish file members from directories.
         if locator.get("member_path") and (result.get("archive_members") or meta.get("archive_members")):
             continue
-        add(locator_unit(locator))
+        item = locator_unit(locator)
+        add(item)
+        if item and item["kind"] == "sheet" and locator.get("cell_range"):
+            observed_cells.setdefault(item["key"], []).extend(cell_coordinates(locator["cell_range"]))
+    for key, cells in observed_cells.items():
+        if not cells:
+            continue
+        observed = cell_bounds(cells)
+        declared = cell_bounds(list(cell_coordinates(units[key].get("dimension", ""))))
+        # A stale worksheet dimension can exclude cells that the extractor actually read.
+        if not declared or not inside_cells(observed[:2], declared) or not inside_cells(observed[2:], declared):
+            units[key]["observed_cell_bounds"] = observed
     gaps = {}
     blocks = result.get("blocks", [])
     for gap in result.get("gaps", []):
@@ -334,27 +346,38 @@ def document_locator_valid(document, label):
     for unit in structured or units:
         if not unit_matches(unit, label):
             continue
-        if not unit.get("dimension") or sheet_cells_valid(unit, label):
+        if unit["kind"] != "sheet" or sheet_cells_valid(unit, label):
             return True
     return False
 
 
-def sheet_cells_valid(unit, label):
-    def coordinates(text):
-        for column, row in CELL_LABEL.findall(text):
-            number = 0
-            for char in column.upper():
-                number = number * 26 + ord(char) - ord("A") + 1
-            yield number, int(row)
+def cell_coordinates(text):
+    for column, row in CELL_LABEL.findall(text):
+        number = 0
+        for char in column.upper():
+            number = number * 26 + ord(char) - ord("A") + 1
+        yield number, int(row)
 
-    dimension = list(coordinates(unit["dimension"]))
-    if not dimension:
+
+def cell_bounds(cells):
+    if not cells:
+        return None
+    columns, rows = zip(*cells)
+    return [min(columns), min(rows), max(columns), max(rows)]
+
+
+def inside_cells(cell, bounds):
+    column, row = cell
+    first_column, first_row, last_column, last_row = bounds
+    return first_column <= column <= last_column and first_row <= row <= last_row
+
+
+def sheet_cells_valid(unit, label):
+    bounds = unit.get("observed_cell_bounds") or cell_bounds(list(cell_coordinates(unit.get("dimension", ""))))
+    if not bounds:
         return True
-    first_column, first_row = dimension[0]
-    last_column, last_row = dimension[-1]
     unlabelled = re.sub(re.escape(str(unit["value"])), "", label, flags=re.IGNORECASE)
-    return all(first_column <= col <= last_column and first_row <= row <= last_row
-               for col, row in coordinates(unlabelled))
+    return all(inside_cells(cell, bounds) for cell in cell_coordinates(unlabelled))
 
 
 def intersects(left, right):
