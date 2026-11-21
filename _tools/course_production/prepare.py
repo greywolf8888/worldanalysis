@@ -11,7 +11,9 @@ from project import ROOT, original_media_path, put, read, recovery_files, sha, w
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from _tools.course_no_subtitles.speech import MODEL, MODEL_SHA, captions, load_model, read_media, transcribe
+from _tools.course_no_subtitles.speech import (
+    AudioDecodeError, MODEL, MODEL_SHA, RATE, audio_windows, captions, load_model, read_media, transcribe,
+)
 
 
 def stamp(s):
@@ -92,7 +94,7 @@ def probe_video(source, kind="video"):
     return meta, duration
 
 
-def probe_course_video(source, recovered, kind="video"):
+def probe_course_video(source, recovered, kind="video", track=0):
     try:
         meta, duration = probe_video(source, kind)
     except ValueError:
@@ -100,9 +102,19 @@ def probe_course_video(source, recovered, kind="video"):
             raise
         meta, duration = probe_video(recovered, kind)
         return recovered, meta, duration
-    if recovered is not None:
-        raise ValueError("原件已可探测，请核对后移除恢复设置")
-    return source, meta, duration
+    if recovered is None:
+        return source, meta, duration
+    if type(track) is int and 0 <= track < sum(stream["codec_type"] == "audio" for stream in meta["streams"]):
+        try:
+            for _ in audio_windows(source, 0, None, "fixed", track):
+                pass
+        except AudioDecodeError:
+            restored_meta, restored_duration = probe_video(recovered, kind)
+            if (abs(restored_duration - duration) > .5
+                    or track >= sum(stream["codec_type"] == "audio" for stream in restored_meta["streams"])):
+                raise ValueError("恢复副本缺少选定音轨或与原件时长相差超过半秒")
+            return recovered, restored_meta, restored_duration
+    raise ValueError("原件及选定音轨可以读取，请核对后移除恢复设置")
 
 
 def prepare_project_media(project, videos, documents, gpu=None, *, routing_unresolved=()):
@@ -120,6 +132,8 @@ def prepare_project_media(project, videos, documents, gpu=None, *, routing_unres
     for item in videos:
         number = item["lesson"]
         kind = item.get("kind", "video")
+        gap = {"lesson": number, "source": item["file"], "sha256": item["sha256"],
+               **{key: item[key] for key in ("embedded", "kind") if key in item}}
         source = original_media_path(project.raw, project.work, item["file"], item.get("embedded"))
         destination = project.ledger / f"{number:02}.json"
         prefs = settings.get(str(number), {})
@@ -144,15 +158,14 @@ def prepare_project_media(project, videos, documents, gpu=None, *, routing_unres
                             "file_sha256": spec["sha256"], "scope": spec["scope"]}
                 signature["recovery"] = recovery
             old = read(destination) if destination.is_file() else {}
-            if old.get("prepare_signature") == signature and (project.work / f"{number:02} 转写.md").is_file():
+            if (old.get("prepare_signature") == signature and not old.get("audio_error")
+                    and (project.work / f"{number:02} 转写.md").is_file()):
                 results.append(old)
                 print(f"第 {number} 讲 · 复用时间轴", flush=True)
                 continue
-            source, meta, duration = probe_course_video(source, recovered, kind)
+            source, meta, duration = probe_course_video(source, recovered, kind, prefs.get("audio_track", 0))
         except ValueError as error:
-            unreadable.append({"lesson": number, "source": item["file"],
-                               "sha256": item["sha256"], "reason": str(error),
-                               **{key: item[key] for key in ("embedded", "kind") if key in item}})
+            unreadable.append(dict(gap, reason=str(error)))
             print(f"第 {number} 讲 · 原件待补查 · {item['file']}", flush=True)
             continue
         origin = source_time(meta["format"].get("start_time"))
@@ -204,8 +217,9 @@ def prepare_project_media(project, videos, documents, gpu=None, *, routing_unres
 
         original_cues = cues
         audio_scope = []
-        if audio:
-            if gpu:
+        audio_error = None
+        try:
+            if audio and gpu:
                 identity = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
                 cache = project.work / "音轨取材" / f"{number:02}" / identity
                 rows = gpu.transcribe(sound, duration, track, language, offset, cache=cache)
@@ -213,7 +227,7 @@ def prepare_project_media(project, videos, documents, gpu=None, *, routing_unres
                 cues = [{"start": row["start"], "end": row["end"], "text": row["text"]}
                         for row in rows if row["text"]]
                 method = gpu.backend + "_vulkan"
-            else:
+            elif audio:
                 if not verified_cpu:
                     if sha(MODEL / "model.int8.onnx") != MODEL_SHA:
                         raise ValueError("本地 SenseVoiceSmall INT8 模型哈希不符")
@@ -225,10 +239,17 @@ def prepare_project_media(project, videos, documents, gpu=None, *, routing_unres
                     row["end"] += offset
                     row["times"] = [t + offset for t in row["times"]]
                 cues = captions(rows)
-                audio_scope = [{"timeline_start": row["start"], "samples": round((row["end"] - row["start"]) * 16000),
-                                "sample_rate": 16000} for row in rows]
+                audio_scope = [{"timeline_start": row["start"], "samples": round((row["end"] - row["start"]) * RATE),
+                                "sample_rate": RATE} for row in rows]
                 method = "sensevoice_cpu"
-        asr_cues = cues if audio else []
+        except AudioDecodeError as error:
+            audio_error = {"reason": str(error), "audio_source": reference or item["file"],
+                           "window_start_s": error.start, "decoded_pcm_s": round(error.samples / RATE, 3)}
+            unreadable.append(dict(gap, stage="audio_decode", **audio_error))
+            method = "audio_decode_failed"
+            notes.append("选定原音轨未完整解码，保留可读画面和原字幕，需补查音轨")
+        audio_processed = bool(audio) and audio_error is None
+        asr_cues = cues if audio_processed else []
         if original_cues and not asr_cues:
             cues, method = original_cues, subtitle_kind
         record = {"lesson": number, "source": item["file"], "sha256": item["sha256"],
@@ -240,9 +261,11 @@ def prepare_project_media(project, videos, documents, gpu=None, *, routing_unres
                   "audio_alignment": alignment,
                   "subtitle": subtitle["file"] if subtitle and subtitle_kind == "original_subtitle" else None,
                   "subtitle_kind": subtitle_kind, "original_cues": original_cues, "asr_cues": asr_cues,
-                  "audio_processed": bool(audio), "audio_scope": audio_scope,
+                  "audio_processed": audio_processed, "audio_scope": audio_scope,
                   "subtitle_candidates": candidates, "notes": notes, "prepare_signature": signature,
                   "cues": cues, "speech_windows": rows}
+        if audio_error:
+            record["audio_error"] = audio_error
         if recovery:
             record["recovery"] = recovery
         if "embedded" in item:

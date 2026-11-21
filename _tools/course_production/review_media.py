@@ -309,16 +309,22 @@ def scan_video(course, ledger, work, lesson):
     }
     signature["prepare"] = metadata["prepare_signature"]
     signature["audio_method"] = {"revision": 3, "min_s": GAP_S, "cue_padding_s": PAD_S} if audio_count else None
+    audio_error = metadata.get("audio_error")
+    if audio_error:
+        signature["audio_error"] = audio_error
     previous = read(output) if output.is_file() else None
     sheet = storage/f"L{lesson:02}.jpg"
     audio_only = metadata.get("kind") == "audio"
     if previous and (audio_only or sheet.is_file()) and previous["signature"] == signature:
         return previous
     started=time.perf_counter()
-    same_audio = previous and all(previous["signature"].get(key)==value for key,value in signature.items()
-                                  if key != "revision")
+    same_audio = (previous and previous["signature"].get("audio_error") == audio_error
+                  and all(previous["signature"].get(key) == value for key, value in signature.items()
+                          if key != "revision"))
     if same_audio:
         sound_info = previous["audio"]
+    elif audio_error:
+        sound_info = {"decode_error": audio_error, "uncovered_candidates": [], "speech_windows": []}
     else:
         sound_info=speech_scan(sound,metadata,offset) if audio_count else {
             "no_audio":True, "uncovered_candidates":[], "speech_windows":[],
@@ -327,7 +333,7 @@ def scan_video(course, ledger, work, lesson):
         display = {"no_video": True, "sample_count": 0, "scene_probes": []}
     else:
         display,pictures=frame_scan(source,metadata["duration_s"],metadata["cues"],
-                                    metadata.get("timeline_origin_s", 0), sound_info.get("speech_windows", []))
+                                    metadata.get("timeline_origin_s", 0), sound_info.get("speech_windows") if not audio_error else None)
         write_strip(storage,lesson,pictures)
     receipt={"course":name,"lesson":lesson,"source":metadata["source"],
              "duration":metadata["duration_s"],"signature":signature,
@@ -339,7 +345,7 @@ def scan_video(course, ledger, work, lesson):
 def scan_project(project, videos, workers):
     if not videos:
         return []
-    has_audio = any(read(project.ledger / f"{row['lesson']:02}.json")["audio_count"] for row in videos)
+    has_audio = any(read(project.ledger / f"{row['lesson']:02}.json").get("audio_processed") for row in videos)
     if has_audio and (sha(VAD_FILE) != VAD_SHA or sha(MODEL / "model.int8.onnx") != MODEL_SHA):
         raise ValueError("补查使用的本地模型哈希不符")
     with ProcessPoolExecutor(max_workers=workers) as pool:

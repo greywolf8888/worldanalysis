@@ -19,6 +19,13 @@ ENGINE=None
 ENGINE_LANGUAGE=None
 
 
+class AudioDecodeError(RuntimeError):
+    def __init__(self, reason, start, samples):
+        super().__init__(reason)
+        self.start = start
+        self.samples = samples
+
+
 def read_media(path):
     p=subprocess.run(["ffprobe","-v","error","-protocol_whitelist","file,pipe","-show_entries","stream=index,codec_type,start_time:format=duration,start_time",
                       "-of","json",str(path)],capture_output=True,check=True)
@@ -58,8 +65,10 @@ def audio_windows(path,start,length,mode,audio_track=0):
             piece=proc.stdout.read(target-len(buf))
             if not piece:
                 if buf:
-                    if len(buf)%2: raise ValueError("Incomplete PCM sample")
+                    if len(buf)%2:
+                        raise AudioDecodeError("Incomplete PCM sample", start, samples + len(buf)//2)
                     yield start+samples/RATE,bytes(buf)
+                    samples+=len(buf)//2
                 break
             buf.extend(piece)
             if len(buf)==target:
@@ -67,7 +76,9 @@ def audio_windows(path,start,length,mode,audio_track=0):
                 yield start+samples/RATE,bytes(buf[:take*2])
                 del buf[:take*2];samples+=take
         error=proc.stderr.read()
-        if proc.wait(): raise RuntimeError(error.decode("utf8","replace")[-600:])
+        if proc.wait():
+            raise AudioDecodeError(error.decode("utf8","replace")[-600:].strip() or "FFmpeg 解码失败",
+                                   start, samples)
     finally:
         if proc.poll() is None:proc.kill();proc.wait()
         proc.stdout.close();proc.stderr.close()
