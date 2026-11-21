@@ -4,13 +4,13 @@ import sys
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_tools/course_production"))
 
 from project import ENTRY, CourseProject, named_entry, sha, write
 import vault_delivery
-from vault_catalog import CATALOG, END, START, refresh_catalog
+from vault_catalog import CATALOG, END, LEGACY_CATALOG, START, refresh_catalog
 
 
 class CourseVaultSyncTest(unittest.TestCase):
@@ -24,6 +24,7 @@ class CourseVaultSyncTest(unittest.TestCase):
         self.vault = self.root / "日常阅读库"
         (self.vault / ".obsidian").mkdir(parents=True)
         self.catalog = self.vault / CATALOG
+        self.legacy_catalog = self.vault / LEGACY_CATALOG
 
     def course(self, name):
         source = self.root / "原件" / name
@@ -42,8 +43,20 @@ class CourseVaultSyncTest(unittest.TestCase):
                                           self.image.as_posix(): sha(project.folder / self.image)}}
 
     def assert_present_in_catalog(self, name):
-        page = unquote(self.catalog.read_text(encoding="utf-8"))
-        self.assertIn(f"{name}/课件/{name}", page)
+        entry = named_entry(self.vault / name)
+        relative = "../" + entry.relative_to(self.vault).as_posix()
+        page = self.catalog.read_text(encoding="utf-8")
+        self.assertIn(f"]({quote(relative, safe='/')})", page)
+        self.assertEqual((self.catalog.parent / relative).resolve(), entry)
+
+    def write_legacy_catalog(self, trailing=""):
+        page = (f"\ufeff# 项目总览\r\n\r\n{START}\r\n\r\n"
+                "已发布 **1** 个项目。教材发布后自动加入本页，最近更新在前。\r\n\r\n"
+                "- [旧测试](旧测试/课件/旧测试.md) · 10-01 08:30:00\r\n\r\n"
+                f"{END}\r\n{trailing}")
+        data = page.encode("utf-8")
+        self.legacy_catalog.write_bytes(data)
+        return data
 
     def test_first_install_is_visible_only_as_a_complete_course(self):
         name = "第2项 图文练习"
@@ -62,6 +75,8 @@ class CourseVaultSyncTest(unittest.TestCase):
         with patch.object(vault_delivery, "copy_file", side_effect=observe_copy):
             state = vault_delivery.install(project, publication, self.vault, name)
 
+        self.assertEqual(CATALOG, Path("00 入口/00 项目总览.md"))
+        self.assertFalse(self.legacy_catalog.exists())
         self.assertEqual(set(copied), {project.entry, project.folder / self.image, project.folder / self.original})
         self.assertEqual(Path(state["entry"]), named_entry(target))
         self.assertEqual(vault_delivery.verify_installed(project, publication, state), named_entry(target))
@@ -140,6 +155,8 @@ class CourseVaultSyncTest(unittest.TestCase):
 
     def test_user_owned_catalog_stays_untouched_when_a_course_is_installed(self):
         note = "# 我自己写的总览\r\n\r\n跟做计划与读书笔记。\r\n".encode("utf-8")
+        legacy = self.write_legacy_catalog()
+        self.catalog.parent.mkdir()
         self.catalog.write_bytes(note)
         project, publication = self.course("单独交付的项目")
 
@@ -148,6 +165,56 @@ class CourseVaultSyncTest(unittest.TestCase):
         self.assertEqual(vault_delivery.verify_installed(project, publication, state), named_entry(self.vault / project.folder.name))
         self.assertEqual(refresh_catalog(self.vault), self.catalog)
         self.assertEqual(self.catalog.read_bytes(), note)
+        self.assertEqual(self.legacy_catalog.read_bytes(), legacy)
+
+    def test_legacy_generated_catalog_moves_to_the_first_folder(self):
+        legacy = self.write_legacy_catalog()
+        project, publication = self.course("最新教材")
+
+        state = vault_delivery.install(project, publication, self.vault)
+
+        self.assertEqual(vault_delivery.verify_installed(project, publication, state), named_entry(self.vault / project.folder.name))
+        self.assertFalse(self.legacy_catalog.exists())
+        self.assert_present_in_catalog(project.folder.name)
+        self.assertNotIn("旧测试", self.catalog.read_text(encoding="utf-8"))
+        before = self.catalog.read_bytes()
+        start, end = START.encode("utf-8"), END.encode("utf-8")
+        self.assertEqual(before.split(start, 1)[0], legacy.split(start, 1)[0])
+        self.assertEqual(before.split(end, 1)[1], legacy.split(end, 1)[1])
+        self.assertNotIn(b"\n", before.replace(b"\r\n", b""))
+        self.assertEqual(refresh_catalog(self.vault), self.catalog)
+        self.assertEqual(self.catalog.read_bytes(), before)
+
+    def test_legacy_private_root_note_is_preserved_when_generating_the_new_catalog(self):
+        original = "\ufeff# 我在库根写的笔记\r\n\r\n[会议笔记](上周会议.md)\r\n".encode("utf-8")
+        self.legacy_catalog.write_bytes(original)
+        project, publication = self.course("新项目")
+
+        vault_delivery.install(project, publication, self.vault)
+
+        self.assertEqual(self.legacy_catalog.read_bytes(), original)
+        self.assert_present_in_catalog(project.folder.name)
+
+    def test_legacy_catalog_with_personal_links_remains_at_its_original_path(self):
+        original = self.write_legacy_catalog("\r\n## 我的笔记\r\n[会议笔记](上周会议.md)\r\n")
+        project, publication = self.course("已审阅的项目")
+
+        vault_delivery.install(project, publication, self.vault)
+        self.assertEqual(refresh_catalog(self.vault), self.catalog)
+
+        self.assertEqual(self.legacy_catalog.read_bytes(), original)
+        self.assert_present_in_catalog(project.folder.name)
+        self.assertNotIn("会议笔记", self.catalog.read_text(encoding="utf-8"))
+
+    def test_generated_catalog_at_new_path_allows_removing_redundant_generated_legacy_page(self):
+        self.assertEqual(refresh_catalog(self.vault), self.catalog)
+        before = self.catalog.read_bytes()
+        self.write_legacy_catalog()
+
+        self.assertEqual(refresh_catalog(self.vault), self.catalog)
+
+        self.assertFalse(self.legacy_catalog.exists())
+        self.assertEqual(self.catalog.read_bytes(), before)
 
     def test_catalog_requires_the_current_named_entry_and_preserves_old_delivery_path(self):
         deep = self.vault / "收纳" / "深层同名项目"
