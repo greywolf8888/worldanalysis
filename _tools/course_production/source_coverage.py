@@ -74,6 +74,9 @@ def document_units(result):
 
     for number in range(1, meta.get("page_count", 0) + 1):
         add(unit("page", number))
+    for link in meta.get("pdf_hyperlinks", []):
+        key = f"page:{link['page_number']}"
+        units[key].setdefault("pdf_hyperlinks", []).append(link)
     for record in [*meta.get("slides", []), *meta.get("sheets", [])]:
         item = locator_unit(record)
         if item and record.get("dimension"):

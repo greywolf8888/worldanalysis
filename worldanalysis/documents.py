@@ -32,6 +32,7 @@ import hashlib
 import importlib.metadata
 import io
 import json
+import math
 import mimetypes
 import posixpath
 import re
@@ -44,7 +45,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 PROVIDER_ID = "worldanalysis.documents.native"
-PROVIDER_VERSION = "1.0.3"
+PROVIDER_VERSION = "1.0.4"
 MAX_BLOCK_TEXT = 16000
 DEFAULT_LIMITS = {
     "max_input_bytes": 128 * 1024 * 1024,
@@ -1044,6 +1045,52 @@ def _pdf_matrix(left, right):
     return (a*g + c*h, b*g + d*h, a*i + c*j, b*i + d*j, a*k + c*l + e, b*k + d*l + f)
 
 
+def _pdf_rectangle(value):
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    if not all(isinstance(coord, (int, float)) and math.isfinite(coord) for coord in value):
+        return None
+    x1, y1, x2, y2 = map(float, value)
+    return [min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]
+
+
+def _pdf_hyperlinks(r, page, loc, annotations):
+    """Inventory URI annotations as local evidence, including those outside the page box."""
+    from pypdf.generic import DictionaryObject
+
+    if not isinstance(annotations, list):
+        return
+    links = r.meta["pdf_hyperlinks"]
+    if len(annotations) > r.limits["max_blocks"] - len(links):
+        raise _Stop("PDF annotation count exceeds max_blocks")
+    crop, media = _pdf_rectangle(page.cropbox), _pdf_rectangle(page.mediabox)
+    for reference in annotations:
+        annotation = reference.get_object()
+        if not isinstance(annotation, DictionaryObject) or annotation.get("/Subtype") != "/Link":
+            continue
+        reference_action = annotation.get("/A")
+        action = reference_action.get_object() if reference_action is not None else None
+        if not isinstance(action, DictionaryObject) or action.get("/S") != "/URI":
+            continue
+        target = action.get("/URI")
+        if target is None:
+            continue
+        target = target.get_object()
+        if not isinstance(target, str) or not target.strip() or len(target) > MAX_BLOCK_TEXT:
+            r.deferred("metadata", loc, "PDF URI target unavailable as bounded text", gap="unreadable")
+            continue
+        raw_rect = annotation.get("/Rect")
+        rect = _pdf_rectangle(raw_rect.get_object()) if raw_rect is not None else None
+        intersects = None
+        if rect and crop and media:
+            intersects = (max(rect[0], crop[0], media[0]) < min(rect[2], crop[2], media[2])
+                          and max(rect[1], crop[1], media[1]) < min(rect[3], crop[3], media[3]))
+        links.append({
+            "page_number": loc["page_number"], "target": target, "rect": rect,
+            "intersects_page_box": intersects, "loaded": False,
+        })
+
+
 def _pdf(r: _Result):
     r.dependency("pypdf")
     from pypdf import PdfReader
@@ -1059,6 +1106,7 @@ def _pdf(r: _Result):
     r.meta["pages"] = []
     r.meta["pdf_text_spans"] = []
     r.meta["pdf_image_placements"] = []
+    r.meta["pdf_hyperlinks"] = []
     if total > r.limits["max_pages"]:
         raise _Stop("PDF page count exceeds max_pages")
     root = reader.trailer.get("/Root", {})
@@ -1259,6 +1307,7 @@ def _pdf(r: _Result):
                            "PDF vector paint operations retained in actual page render; visual meaning not interpreted" if rendered else "PDF vector paint operations discovered; appearance/layout not rendered or interpreted",
                            gap="semantic_gap" if rendered else "missing_visual", files=[rendered["file_key"]] if rendered else None)
             if page.get("/Annots"):
+                _pdf_hyperlinks(r, page, loc, page["/Annots"])
                 r.deferred("comment", loc, "PDF annotations/forms registered; not flattened/rendered or executed", gap="unprocessed")
             if len(r.data["gaps"]) == gap_start:
                 processed_pages += 1

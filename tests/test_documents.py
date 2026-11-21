@@ -697,6 +697,32 @@ class OfficeTests(DocumentTestCase):
 
 
 class PdfTests(DocumentTestCase):
+    def test_pdf_hyperlink_targets_and_cropped_annotations_stay_offline(self):
+        from pypdf import PdfWriter
+        from pypdf.annotations import Link
+        from pypdf.generic import RectangleObject
+
+        path = self.work / "hyperlinks-at-page-positions.pdf"
+        writer = PdfWriter()
+        writer.add_blank_page(300, 200).cropbox = RectangleObject((0, 50, 300, 200))
+        writer.add_blank_page(300, 200)
+        target = "https://example.org/supplement?lesson=12"
+        writer.add_annotation(0, Link(rect=(30, 70, 100, 93), url=target))
+        writer.add_annotation(0, Link(rect=(140, 180, 280, 192), url=target))
+        writer.add_annotation(0, Link(rect=(30, 12, 75, 22), url="https://example.org/cropped"))
+        writer.add_annotation(1, Link(rect=(30, 20, 90, 35), target_page_index=0))
+        writer.write(path)
+
+        result, _ = self.run_extract(path)
+        links = result["metadata"]["pdf_hyperlinks"]
+        self.assertEqual([row["target"] for row in links], [target, target, "https://example.org/cropped"])
+        self.assertEqual([row["page_number"] for row in links], [1, 1, 1])
+        self.assertEqual(links[0]["rect"], [30, 70, 100, 93])
+        self.assertEqual([row["intersects_page_box"] for row in links], [True, True, False])
+        self.assertTrue(all(not row["loaded"] for row in links))
+        self.assertFalse(result["metadata"]["external_content_loaded"])
+        self.assertFalse(result["metadata"]["content_executed"])
+
     def test_pdf_pagewise_native_scan_blank_and_repeated_occurrences(self):
         path = self.work / "synthetic-mixed.pdf"
         _pdf(path)

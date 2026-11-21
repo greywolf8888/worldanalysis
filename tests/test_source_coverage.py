@@ -87,6 +87,18 @@ class SourceCoverageTest(unittest.TestCase):
         self.assertIn("work/pdf.json", self.evidence)
         validate_source_coverage(self.body, self.scope, self.review)
 
+    def test_pdf_links_are_reviewed_with_their_original_pages(self):
+        links = [
+            {"page_number": 2, "target": "https://example.org/supplement",
+             "intersects_page_box": True, "loaded": False},
+            {"page_number": 2, "target": "https://example.org/cropped",
+             "intersects_page_box": False, "loaded": False},
+        ]
+        units = document_units({"metadata": {"page_count": 2, "pdf_hyperlinks": links}})
+        self.assertNotIn("pdf_hyperlinks", units[0])
+        self.assertEqual(units[1]["key"], "page:2")
+        self.assertEqual(units[1]["pdf_hyperlinks"], links)
+
     def test_escaped_attachment_filename_still_resolves_to_the_original(self):
         self.scope["documents"][0]["source"] = "[26]--图示&练习.pdf"
         body = self.body.replace("配套讲义.pdf", "[26]&#45;&#45;图示&amp;练习.pdf")
