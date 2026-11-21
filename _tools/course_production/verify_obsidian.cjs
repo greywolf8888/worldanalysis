@@ -26,10 +26,11 @@ async function prepareNote(vault, cases, folder, preview, rel) {
   for (const match of body.matchAll(/!\[[^\]\n]+\]\(([^)\n]+)\)/g)) {
     addImage(path.resolve(path.dirname(note), decodeURIComponent(match[1])));
   }
-  const urls = new Set([...body.matchAll(/\]\((\.\.\/[^)]+)\)/g)].map(match => match[1]));
-  for (const url of urls) {
-    const file = path.resolve(path.dirname(path.join(folder, rel)), decodeURIComponent(url));
+  const originals = new Set();
+  for (const match of body.matchAll(/\]\((\.\.\/[^)]+)\)/g)) {
+    const file = path.resolve(path.dirname(path.join(folder, rel)), decodeURIComponent(match[1]));
     if (!file.startsWith(path.join(folder, "原始资料") + path.sep)) throw Error("Source escapes course " + file);
+    originals.add(file);
     localLinks.set(file, path.relative(folder, file));
   }
   for (const [file, relative] of localLinks) {
@@ -47,7 +48,7 @@ async function prepareNote(vault, cases, folder, preview, rel) {
       provenance.filter(match => match[1] === "配图出处").length < images.size) {
     throw Error("缺少隐藏的出处记录 " + note);
   }
-  cases.set(name + "/" + rel, {name, images:[...images], urls:urls.size,
+  cases.set(name + "/" + rel, {name, images:[...images], urls:originals.size,
     provenance:provenance.map(match => match[2].replace(/\s+/g, " ")),
     bodyCharacters:body.length,
     digest:createHash("sha256").update(body).digest("hex"),
@@ -191,7 +192,9 @@ async function main(){
         const collectLinks=()=>{
           for(const a of view.querySelectorAll("a[href]")){
             const href=a.getAttribute("href");
-            if(href.startsWith("../") || decodeURIComponent(href).includes("原始资料/")) urls.add(href);
+            let decoded;
+            try { decoded=decodeURIComponent(href); } catch { continue; }
+            if(decoded.startsWith("../") || decoded.includes("原始资料/")) urls.add(decoded);
           }
         };
         let expanded=0, title="", formula=false, code=false, table=false, reachedBottom=false, horizontalOverflow=false;

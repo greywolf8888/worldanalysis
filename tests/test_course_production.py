@@ -321,7 +321,8 @@ class CourseProductionTest(unittest.TestCase):
             "我先准备空白画板，打开比例菜单，选 3:4。{{D001|第 1 页，比例和预览设置}}\n\n"
             f"{{{{img:{figure}|450}}}}\n\n我保存预览。如果比例显示错误，我重新选择比例。\n\n"
             "~~~text\nratio={{current_ratio}}\n~~~\n\n"
-            "## 随课参考\n\n讲义首页用于复习画板尺寸。{{D001|第 1 页，比例和预览设置}}\n\n"
+            "## 随课参考\n\n讲义首页用于复习画板尺寸。"
+            "[打开讲义](../原始资料/A%20操作指南.pdf){{D001|第 1 页，比例和预览设置}}\n\n"
             "课堂练习可用随课的原始入口。{{D002|InternetShortcut 中的 URL}}\n",
             encoding="utf-8",
         )
