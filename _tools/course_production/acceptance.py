@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from urllib.parse import unquote
 
-from project import ENTRY, copy_file, local_child, put, read, sha, write
+from project import ENTRY, RECOVERY_DIR, copy_file, local_child, put, read, recovery_files, sha, write
 from reader_review import IMAGE, ITEMS, chapters, markdown_segments, snapshot, validate_cases
 from publish import timecode
 from transcript import timeline_paths, update_timeline, validate_proof
@@ -71,7 +71,8 @@ def prepare_review(project, body, ordered, receipt):
         cue_sha = hashlib.sha256(json.dumps(meta["cues"], ensure_ascii=False).encode("utf-8")).hexdigest()
         if not (video["sha256"] == meta["sha256"] == signature["raw_sha256"] and
                 video["source"] == meta["source"] == scan["source"] and
-                signature["cues_sha256"] == cue_sha and signature["prepare"] == meta["prepare_signature"]):
+                signature["cues_sha256"] == cue_sha and signature["prepare"] == meta["prepare_signature"] and
+                video.get("recovery") == meta.get("recovery")):
             raise ValueError(f"第 {display_number} 讲的画面或语音扫描过期，请再运行 prepare")
         extra = project.work / "媒体补查" / f"L{lesson:02}-复识.json"
         if extra.is_file() and read(extra)["signature"]["scan_sha256"] == sha(
@@ -91,6 +92,12 @@ def prepare_review(project, body, ordered, receipt):
                          "source_points": [dict(row, anchor="", source_limit="") for row in source_points],
                          "audio_checks": [{"start": row["start"], "end": row["end"], "outcome": "", "note": ""}
                                           for row in scan["audio"]["uncovered_candidates"]]})
+        if recovery := video.get("recovery"):
+            recovered, recovery_manifest, spec = recovery_files(
+                project.work, recovery["manifest"], video["sha256"], recovery["manifest_sha256"])
+            episodes[-1]["recovery"] = recovery
+            evidence[recovered.relative_to(project.state).as_posix()] = spec["sha256"]
+            evidence[recovery_manifest.relative_to(project.state).as_posix()] = recovery["manifest_sha256"]
     supplement_path = project.work / SUPPLEMENTS
     supplements = evidence_from(supplement_path) if supplement_path.is_file() else []
     return {
@@ -164,6 +171,12 @@ def validate_episode(actual, expected, text, figures):
     for key in ("lesson", "display_number", "source", "source_sha256", "duration_s"):
         if actual.get(key) != expected[key]:
             raise ValueError(f"第 {display_number} 讲的原件身份或时长不一致")
+    if recovery := expected.get("recovery"):
+        visible = COMMENT.sub("", COLLAPSED.sub("", text))
+        if actual.get("recovery") != recovery or not any(
+            recovery["scope"] in part for is_code, part in markdown_segments(visible) if not is_code
+        ):
+            raise ValueError(f"第 {display_number} 讲需在正文交代原片恢复范围")
     heading = re.match(r"^第\s*(\d+)\s*讲", actual["chapter"])
     if heading and int(heading[1]) != display_number:
         raise ValueError(f"第 {display_number} 讲的标题讲次与阅读顺序不一致")
@@ -344,6 +357,9 @@ def verify_publication(project, *, raw_verified=False):
             or inputs["evidence"]["ledger/intake.json"] != sha(project.intake)
             or snapshot(project.folder, entry.read_text(encoding="utf-8"))["images"] != inputs["images"]):
         raise ValueError("原件、配图或正文和已审核版本不一致")
+    for relative, fingerprint in inputs["evidence"].items():
+        if relative.startswith(f"work/{RECOVERY_DIR}/") and sha(local_child(project.state, relative)) != fingerprint:
+            raise ValueError(f"验收使用的媒体恢复资料已变动 {relative}")
     check_render(record["obsidian"], digest)
     return record
 

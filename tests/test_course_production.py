@@ -8,6 +8,8 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
+import wave
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +60,99 @@ class CourseProductionTest(unittest.TestCase):
 
     def start_course(self):
         self.command("start", self.source, "--output", self.package, "--workers", 2)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "需要本地 FFmpeg")
+    def test_unreadable_video_leaves_a_gap_and_still_prepares_later_sources(self):
+        damaged = self.source / "01 缺少索引.mp4"
+        damaged.write_bytes(bytes.fromhex("000000146674797069736f6d0000020069736f6d000000086d646174"))
+        valid = self.source / "02 正常无声录屏.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=s=96x96:d=1", "-an",
+                        "-c:v", "libx264", str(valid)], check=True, timeout=20)
+
+        output = self.command("start", self.source, "--output", self.package, "--workers", 1, okay=False)
+        self.assertIn(damaged.name, output)
+        summary = self.data(self.ledger / "media-summary.json")
+        unreadable, = summary["unreadable"]
+        self.assertEqual((unreadable["lesson"], unreadable["source"]), (1, damaged.name))
+        self.assertEqual(unreadable["sha256"], hashlib.sha256(damaged.read_bytes()).hexdigest())
+        self.assertIn("moov", unreadable["reason"])
+        self.assertEqual(self.data(self.work / "讲次顺序.json"), [1, 2])
+        self.assertEqual(self.data(self.work / "媒体补查/L02.json")["source"], valid.name)
+        self.assertTrue((self.work / "采用转写/02.json").is_file())
+        self.assertEqual((self.package / "原始资料" / damaged.name).read_bytes(), damaged.read_bytes())
+
+        self.save(self.work / "讲次顺序.json", [2])
+        output = self.command("preview", self.package, okay=False)
+        self.assertIn("原视频仍有取材缺口", output)
+        self.assertIn(damaged.name, output)
+        self.assertFalse((self.work / "验收填写模板.json").exists())
+
+        recovery = self.work / "媒体恢复"
+        recovery.mkdir()
+        copy = recovery / "01 可读副本.mp4"
+        shutil.copy2(valid, copy)
+        scope = "这一段使用恢复画面，原时间轴不可核实。"
+        self.save(recovery / "01.json", {
+            "original_sha256": unreadable["sha256"], "file": copy.name,
+            "sha256": hashlib.sha256(copy.read_bytes()).hexdigest(), "method": "测试夹具",
+            "scope": scope,
+        })
+        self.save(self.work / "媒体设置.json", {"1": {"recovery": "01.json"}})
+        self.save(self.work / "讲次顺序.json", [1, 2])
+        self.command("prepare", self.package, "--workers", 1)
+        self.assertNotIn("unreadable", self.data(self.ledger / "media-summary.json"))
+        self.assertEqual(self.data(self.ledger / "01.json")["source"], damaged.name)
+        self.assertEqual(self.data(self.work / "采用转写/01.json")["recovery"]["scope"], scope)
+        self.command("window", self.package, 1, 0, .7, "--label", "恢复画面")
+        self.pick([{"name": "恢复帧", "lesson": 1, "time": .2}])
+        (self.work / "教材.md").write_text(
+            f"# 恢复画面\n\n## 第 1 讲 恢复内容\n\n{scope} {{{{01|00:00–00:01}}}}\n\n"
+            "{{img:恢复帧|360}}\n\n## 第 2 讲 正常内容\n\n查看原图。 {{02|00:00–00:01}}\n", encoding="utf-8")
+        self.command("preview", self.package)
+        template = self.data(self.work / "验收填写模板.json")
+        evidence = template["snapshot"]["evidence"]
+        self.assertIn("work/媒体恢复/01.json", evidence)
+        self.assertIn(f"work/媒体恢复/{copy.name}", evidence)
+        self.assertEqual(template["episodes"][0]["recovery"]["scope"], scope)
+
+        copy.write_bytes(b"changed")
+        output = self.command("preview", self.package, okay=False)
+        self.assertIn("恢复视频缺失或已变动", output)
+        self.assertEqual((self.package / "原始资料" / damaged.name).read_bytes(), damaged.read_bytes())
+
+    def test_gpu_silence_warning_applies_to_its_own_decoded_window(self):
+        with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
+            from _tools.course_production import gpu_asr
+
+        gpu = gpu_asr.VulkanASR.__new__(gpu_asr.VulkanASR)
+        gpu.backend = "sensevoice"
+        gpu.device = {"index": 0}
+        gpu.executable = self.root / "crispasr"
+        gpu.model = self.root / "model"
+        windows = [(0, 1, 0), (1, 1, 1)]
+
+        def runner(warning):
+            def run(command, **options):
+                if command[0] == "ffmpeg":
+                    with wave.open(command[-1], "wb") as sound:
+                        sound.setparams((1, 2, 16000, 0, "NONE", ""))
+                        sound.writeframes(bytes(32000))
+                    return subprocess.CompletedProcess(command, 0)
+                output = Path(options["cwd"]) / "transcript-01.json"
+                self.save(output, {"transcription": [{"offsets": {"from": 100, "to": 480}, "text": "演示"}]})
+                return subprocess.CompletedProcess(command, 0, b"", warning)
+            return run
+
+        with patch.object(gpu_asr, "RUNTIME", self.root):
+            with patch.object(gpu_asr.subprocess, "run",
+                              side_effect=runner(b"crispasr: warning: no speech detected in 'transcript-00.wav'\n")):
+                result = gpu.transcribe_windows(self.root / "source.mp4", 2, 0, "zh", windows)
+            self.assertEqual(result, [[], [{"start": 1.1, "end": 1.48, "text": "演示"}]])
+            self.assertEqual([row["samples"] for row in gpu.decoded_windows], [16000, 16000])
+            with patch.object(gpu_asr.subprocess, "run",
+                              side_effect=runner(b"crispasr: warning: no speech detected in 'transcript-01.wav'\n")):
+                with self.assertRaisesRegex(ValueError, "未写入转写文件"):
+                    gpu.transcribe_windows(self.root / "source.mp4", 2, 0, "zh", windows)
 
     def pick(self, records):
         selection = self.work / "取图清单.json"

@@ -11,7 +11,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageStat
 
 from frames import get_native_frame
 from prepare import MODEL, MODEL_SHA, captions
-from project import local_child, put, read, sha
+from project import local_child, media_source, put, read, sha
 from _tools.course_no_subtitles import speech
 from _tools.course_no_subtitles.speech import load_model
 import av
@@ -290,8 +290,10 @@ def write_strip(storage,lesson,pictures):
 def scan_video(course, ledger, work, lesson):
     name = course.name
     metadata=read(ledger/f"{lesson:02}.json")
-    source = local_child(course / "原始资料", metadata["source"])
-    sound = local_child(course / "原始资料", metadata.get("audio_source", metadata["source"]))
+    raw = course / "原始资料"
+    source = media_source(raw, work, metadata)
+    audio_file = metadata.get("audio_source", metadata["source"])
+    sound = source if audio_file == metadata["source"] else local_child(raw, audio_file)
     audio_count = metadata["audio_count"]
     sound_sha = metadata.get("audio_source_sha256")
     offset = metadata["audio_offset_s"]

@@ -11,7 +11,7 @@ from zipfile import ZipFile
 from pathlib import Path, PurePosixPath
 
 from prepare import stamp
-from project import local_child, put, read, sha
+from project import local_child, media_source, put, read, sha
 import av
 from PIL import Image, ImageChops, ImageDraw
 
@@ -37,7 +37,7 @@ def get_native_frame(path, seconds, origin=0):
 
 def orig(path, number, seconds, *, ledger):
     doc = read(ledger / f"{number:02}.json")
-    src = local_child(path / "原始资料", doc["source"])
+    src = media_source(path / "原始资料", ledger.parent / "work", doc)
     if not 0 <= seconds < doc["duration_s"]:
         raise ValueError(f"取图时间超出第 {number} 讲")
     img, pts = get_native_frame(src, seconds, doc.get("timeline_origin_s", 0))
@@ -134,7 +134,7 @@ def review_window(path, lesson, start, stop, step, label, crop=None, *, ledger, 
     if Path(label).name != label or label in ("", ".", ".."):
         raise ValueError("片段标签需要是独立文件名")
     raw = (path / "原始资料").resolve()
-    source = local_child(raw, metadata["source"])
+    source = media_source(raw, work, metadata)
 
     folder = local_child(work / "源片段复核", label)
     folder.mkdir(parents=True, exist_ok=True)

@@ -7,7 +7,7 @@ import subprocess
 from tempfile import TemporaryDirectory
 import wave
 
-from project import local_child, put, read, sha
+from project import local_child, media_source, put, read, sha
 from _tools.course_no_subtitles.speech import RUNTIME
 
 
@@ -94,13 +94,18 @@ class VulkanASR:
                                       "-m", str(self.model), "-l", language, "-t", "4", "-bs", "1", "-bo", "1",
                                       "-oj", *outfile_args], cwd=folder, check=True, capture_output=True,
                                      timeout=max(180, seconds * 2))
+            log = process.stderr.decode("utf-8", "replace")
+            no_speech = set(re.findall(r"(?m)^crispasr: warning: no speech detected in '([^'\r\n]+)'\s*$", log))
             transcripts = []
             for result, offset in outputs:
                 if result is None:
                     transcripts.append([])
                     continue
                 if not result.is_file():
-                    reason = process.stderr.decode("utf-8", "replace").strip().splitlines()
+                    if result.with_suffix(".wav").name in no_speech:
+                        transcripts.append([])
+                        continue
+                    reason = log.strip().splitlines()
                     raise ValueError("CrispASR 未写入转写文件。" + (" " + reason[-1] if reason else ""))
                 rows = []
                 for line in read(result)["transcription"]:
@@ -138,7 +143,9 @@ def refine_candidates(project, recognizer, lesson=None, ranges=None):
         cues = read(scan)["audio"]["uncovered_candidates"]
         duration = item["duration_s"]
         meta = read(project.ledger / f"{number:02}.json")
-        sound = local_child(project.raw, meta.get("audio_source", item["source"]))
+        audio_file = meta.get("audio_source", item["source"])
+        sound = (media_source(project.raw, project.work, meta) if audio_file == item["source"]
+                 else local_child(project.raw, audio_file))
         groups = []
         if ranges:
             groups = [{"start": a, "end": b} for a, b in (valid_span(row, duration) for row in ranges)]

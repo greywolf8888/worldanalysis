@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 
-from project import ROOT, VIDEO_EXTENSIONS, local_child, put, read, sha, write
+from project import ROOT, VIDEO_EXTENSIONS, local_child, put, read, recovery_files, sha, write
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -86,12 +86,40 @@ def source_time(value, fallback=0.0):
     return float(value) if value not in (None, "N/A") else fallback
 
 
+def probe_video(source):
+    try:
+        meta = read_media(source)
+    except subprocess.CalledProcessError as error:
+        reason = (error.stderr or b"").decode("utf-8", errors="replace").strip()
+        raise ValueError(reason.splitlines()[0] if reason else "原视频探测失败") from error
+    duration = source_time(meta["format"].get("duration"))
+    if not math.isfinite(duration) or duration <= 0 or not any(
+        stream["codec_type"] == "video" for stream in meta["streams"]
+    ):
+        raise ValueError("没有可定位的原视频时间轴")
+    return meta, duration
+
+
+def probe_course_video(source, recovered):
+    try:
+        meta, duration = probe_video(source)
+    except ValueError:
+        if recovered is None:
+            raise
+        meta, duration = probe_video(recovered)
+        return recovered, meta, duration
+    if recovered is not None:
+        raise ValueError("原件已可探测，请核对后移除恢复设置")
+    return source, meta, duration
+
+
 def prepare_project_media(project, videos, documents, gpu=None):
     settings_file = project.work / "媒体设置.json"
     settings = read(settings_file) if settings_file.is_file() else {}
     if not isinstance(settings, dict) or set(settings) - {str(row["lesson"]) for row in videos}:
         raise ValueError("媒体设置须用本课程的讲号作为键")
     results = []
+    unreadable = []
     verified_cpu = False
     sources = {row["file"]: row for row in videos}
     for item in videos:
@@ -99,7 +127,7 @@ def prepare_project_media(project, videos, documents, gpu=None):
         source = local_child(project.raw, item["file"])
         destination = project.ledger / f"{number:02}.json"
         prefs = settings.get(str(number), {})
-        if not isinstance(prefs, dict) or set(prefs) - {"language", "audio_track", "subtitle", "voiced_reference"}:
+        if not isinstance(prefs, dict) or set(prefs) - {"language", "audio_track", "subtitle", "voiced_reference", "recovery"}:
             raise ValueError(f"第 {number} 讲的媒体设置含未知字段")
         language = prefs.get("language", "auto")
         if language not in {"auto", "zh", "en", "ja", "ko", "yue"}:
@@ -108,18 +136,24 @@ def prepare_project_media(project, videos, documents, gpu=None):
         signature = {"version": 2, "raw_sha256": item["sha256"], "file": item["file"],
                      "settings": prefs, "subtitle_sha256": subtitle["sha256"] if subtitle else None,
                      "asr": gpu.identity if gpu else MODEL_SHA}
-        old = read(destination) if destination.is_file() else {}
-        if old.get("prepare_signature") == signature and (project.work / f"{number:02} 转写.md").is_file():
-            results.append(old)
-            print(f"第 {number} 讲 · 复用时间轴", flush=True)
+        recovery = recovered = None
+        try:
+            if prefs.get("recovery") is not None:
+                recovered, manifest, spec = recovery_files(project.work, prefs["recovery"], item["sha256"])
+                recovery = {"manifest": prefs["recovery"], "manifest_sha256": sha(manifest),
+                            "file_sha256": spec["sha256"], "scope": spec["scope"]}
+                signature["recovery"] = recovery
+            old = read(destination) if destination.is_file() else {}
+            if old.get("prepare_signature") == signature and (project.work / f"{number:02} 转写.md").is_file():
+                results.append(old)
+                print(f"第 {number} 讲 · 复用时间轴", flush=True)
+                continue
+            source, meta, duration = probe_course_video(source, recovered)
+        except ValueError as error:
+            unreadable.append({"lesson": number, "source": item["file"],
+                               "sha256": item["sha256"], "reason": str(error)})
+            print(f"第 {number} 讲 · 原件待补查 · {item['file']}", flush=True)
             continue
-
-        meta = read_media(source)
-        duration = source_time(meta["format"].get("duration"))
-        if not math.isfinite(duration) or duration <= 0 or not any(
-            stream["codec_type"] == "video" for stream in meta["streams"]
-        ):
-            raise ValueError(f"第 {number} 讲没有可定位的原视频时间轴 {item['file']}")
         origin = source_time(meta["format"].get("start_time"))
         sound = source
         audio_meta = meta
@@ -208,16 +242,23 @@ def prepare_project_media(project, videos, documents, gpu=None):
                   "audio_processed": bool(audio), "audio_scope": audio_scope,
                   "subtitle_candidates": candidates, "notes": notes, "prepare_signature": signature,
                   "cues": cues, "speech_windows": rows}
-        text = [f"# {number:02} {source.stem}"]
+        if recovery:
+            record["recovery"] = recovery
+        text = [f"# {number:02} {Path(item['file']).stem}"]
+        if recovery:
+            text.append(recovery["scope"])
         text.extend(f"[{stamp(cue['start'])}–{stamp(cue['end'])}] {cue['text']}" for cue in cues)
         write(project.work / f"{number:02} 转写.md", "\n\n".join(text) + "\n")
         put(destination, record)
         results.append(record)
         print(f"第 {number} 讲 · {method} · {len(cues)} 段", flush=True)
     summary = {
-        "videos": [{k: row[k] for k in ("lesson", "source", "duration_s", "sha256")} for row in results],
+        "videos": [{k: row[k] for k in ("lesson", "source", "duration_s", "sha256", "recovery") if k in row}
+                   for row in results],
         "duration_s": sum(row["duration_s"] for row in results),
         "cue_total": sum(len(row["cues"]) for row in results),
     }
+    if unreadable:
+        summary["unreadable"] = unreadable
     put(project.ledger / "media-summary.json", summary)
     return summary

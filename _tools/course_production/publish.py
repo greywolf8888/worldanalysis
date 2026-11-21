@@ -5,7 +5,7 @@ import re
 from urllib.parse import quote, unquote
 
 from frames import diagram_source, document_image, orig
-from project import ENTRY, copy_file, local_child, read, sha, write
+from project import ENTRY, copy_file, local_child, read, require_readable_videos, sha, write
 from reader_review import markdown_segments
 from transcript import stamp
 from PIL import Image, ImageChops
@@ -115,7 +115,9 @@ def verify_links(course, deliver, *, art_root):
 
 
 def compile_textbook(course, work, ledger, *, art_root, order):
-    movies = {row["lesson"]: row for row in read(ledger / "media-summary.json")["videos"]}
+    media = read(ledger / "media-summary.json")
+    require_readable_videos(media)
+    movies = {row["lesson"]: row for row in media["videos"]}
     if not isinstance(order, list) or any(type(number) is not int for number in order) or (
             len(order) != len(movies) or set(order) != set(movies)):
         raise ValueError("讲次顺序须恰好包含全部视频讲号，各一次")
@@ -202,7 +204,8 @@ def compile_textbook(course, work, ledger, *, art_root, order):
         raw = info["source"]
         title = Path(raw).name
         url = "../" + quote("原始资料/" + raw, safe=LOCAL_PATH_SAFE)
-        index.append(f"> - 第 {display_numbers[number]} 讲 · [{link_title(title)}]({url}) · {clock(info['duration_s'])}")
+        suffix = " · 定位基于恢复副本" if info.get("recovery") else ""
+        index.append(f"> - 第 {display_numbers[number]} 讲 · [{link_title(title)}]({url}) · {clock(info['duration_s'])}{suffix}")
     if cited_docs:
         index.extend([">", "> **配套资料**", ">"])
         for doc in sorted(cited_docs):

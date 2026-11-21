@@ -103,6 +103,8 @@ def update_timeline(project, lesson, reviewed=None):
         "audio_scope": meta.get("audio_scope", []), "cues": cues, "differences": differences,
         "confirmed_windows": [] if spec is None else [row["range_s"] for row in spec["windows"]],
     }
+    if recovery := meta.get("recovery"):
+        result["recovery"] = recovery
     if reviewed is not None:
         put(decisions, reviewed)
     put(path, result)
@@ -130,6 +132,8 @@ def reading_packet(project, lesson, start, end=None, observations=()):
         plan = record["plan"]
         if (plan["source_sha256"] != material["source_sha256"] or plan["source"] != material["source"]):
             raise ValueError(f"视觉记录与本集原件不一致 {name}")
+        if plan.get("recovery_sha256") != material.get("recovery", {}).get("file_sha256"):
+            raise ValueError(f"视觉记录与本集采用的恢复副本不一致 {name}")
         visual.append({"path": name, "sha256": sha(observation), "range_s": plan["range_s"],
                        "text_cues": [row for row in record["text_cues"]
                                      if row["start"] < end and row["end"] > start],

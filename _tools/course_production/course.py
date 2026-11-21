@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from project import CourseProject, ENTRY, ROOT, local_child, put, read, sha
+from project import CourseProject, ENTRY, ROOT, local_child, put, read, require_readable_videos, sha
 
 sys.path.insert(0, str(ROOT))
 
@@ -70,6 +70,7 @@ def prepare(project, args):
     order = project.work / ORDER
     if not order.exists():
         put(order, [row["lesson"] for row in videos])
+    require_readable_videos(media)
     if stale:
         raise ValueError("；".join(stale))
     print(f"已准备 {len(videos)} 个原视频和 {documents['total']} 件附件")
@@ -149,11 +150,13 @@ def verify_reader(project, publication, executable):
 
 
 def show_status(project):
-    media = project.ledger / "media-summary.json"
+    media_file = project.ledger / "media-summary.json"
+    media = read(media_file) if media_file.is_file() else None
     inventory = read(project.intake)
     print(json.dumps({
         "project": str(project.folder), "original_files": len(inventory["sources"]),
-        "prepared_videos": len(read(media)["videos"]) if media.is_file() else None,
+        "prepared_videos": len(media["videos"]) if media is not None else None,
+        "unreadable_videos": media.get("unreadable", []) if media is not None else [],
         "work": str(project.work),
         "draft": str(project.work / "教材.md"),
         "preview": str(project.preview / ENTRY) if (project.preview / ENTRY).is_file() else None,

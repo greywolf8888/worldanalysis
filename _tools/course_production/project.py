@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = ROOT / "整理结果/课程教材"
 STATE = ".course"
 ENTRY = Path("课件/00 开始学习.md")
+RECOVERY_DIR = "媒体恢复"
 VIDEO_EXTENSIONS = {
     ".mp4", ".mkv", ".mov", ".m4v", ".webm", ".avi", ".mpg", ".mpeg",
     ".mts", ".m2ts", ".wmv", ".flv", ".ogv", ".ts",
@@ -80,6 +81,41 @@ def local_child(root, name):
 
 def named_entry(folder):
     return local_child(folder, ENTRY.parent / f"{folder.name}.md")
+
+
+def recovery_files(work, relative, original_sha256, expected_sha256=None):
+    if not isinstance(relative, str) or not relative.strip():
+        raise ValueError("须给出课内的媒体恢复清单路径")
+    directory = local_child(work, RECOVERY_DIR)
+    manifest = local_child(directory, relative)
+    if not manifest.is_file() or (expected_sha256 and sha(manifest) != expected_sha256):
+        raise ValueError(f"媒体恢复清单缺失或已变动 {relative}")
+    spec = read(manifest)
+    if (not isinstance(spec, dict) or spec.get("original_sha256") != original_sha256
+            or not all(isinstance(spec.get(key), str) and spec[key].strip()
+                       for key in ("file", "sha256", "method", "scope"))
+            or "\n" in spec["scope"] or "\r" in spec["scope"]):
+        raise ValueError(f"媒体恢复清单须对应原件摘要、恢复方法及可核对范围 {relative}")
+    recovered = local_child(directory, spec["file"])
+    if recovered.suffix.lower() not in VIDEO_EXTENSIONS or not recovered.is_file() or sha(recovered) != spec["sha256"]:
+        raise ValueError(f"恢复视频缺失或已变动 {recovered.name}")
+    return recovered, manifest, spec
+
+
+def media_source(raw, work, record, *, verify_original=False):
+    original = local_child(raw, record["source"])
+    recovery = record.get("recovery")
+    if (verify_original or recovery) and sha(original) != record["sha256"]:
+        raise ValueError(f"原视频身份已变 {record['source']}")
+    if recovery:
+        return recovery_files(work, recovery["manifest"], record["sha256"], recovery["manifest_sha256"])[0]
+    return original
+
+
+def require_readable_videos(media):
+    if unreadable := media.get("unreadable"):
+        files = "、".join(row["source"] for row in unreadable)
+        raise ValueError(f"原视频仍有取材缺口，补查后才能完成整课验收。待补原件 {files}")
 
 
 def inventory_files(root):

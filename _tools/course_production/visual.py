@@ -4,7 +4,7 @@ import json
 import unicodedata
 
 from frames import get_native_frame
-from project import local_child, put, read, sha
+from project import media_source, put, read, sha
 from transcript import valid_span
 
 
@@ -34,12 +34,12 @@ def observe(project, lesson, start, end, step, crop, ocr):
     valid_span([start, end], meta["duration_s"])
     if not .04 <= step <= 30:
         raise ValueError("帧观察步长应在 0.04–30 秒之间")
-    source = local_child(project.raw, meta["source"])
-    if sha(source) != meta["sha256"]:
-        raise ValueError("观察时原视频身份已变")
+    source = media_source(project.raw, project.work, meta, verify_original=True)
     plan = {"revision": 2, "source": meta["source"], "source_sha256": meta["sha256"],
             "range_s": [start, end], "step": step, "crop": crop,
             "ocr": PROVIDER_VERSION if ocr else None}
+    if recovery := meta.get("recovery"):
+        plan["recovery_sha256"] = recovery["file_sha256"]
     job = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()[:18]
     folder = project.work / "视觉核查" / f"{lesson:02}" / job
     result_file = folder / "observations.json"
