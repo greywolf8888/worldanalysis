@@ -31,6 +31,8 @@ def observe(project, lesson, start, end, step, crop, ocr):
     from worldanalysis.ocr import PROVIDER_VERSION, ocr_image
 
     meta = read(project.ledger / f"{lesson:02}.json")
+    if meta.get("kind") == "audio":
+        raise ValueError(f"第 {lesson} 讲是独立音频，没有原视频帧")
     valid_span([start, end], meta["duration_s"])
     if not .04 <= step <= 30:
         raise ValueError("帧观察步长应在 0.04–30 秒之间")

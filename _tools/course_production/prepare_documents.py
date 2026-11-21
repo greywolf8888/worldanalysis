@@ -85,11 +85,30 @@ def inspect_document(source, out, options):
     return extract(source, out, options=options)
 
 
+def document_ids(meta, items):
+    registry = meta / "document-ids.json"
+    previous = meta / "documents-summary.json"
+    if registry.is_file():
+        assigned = read(registry)
+    elif previous.is_file():
+        assigned = {row["file"]: row["id"] for row in read(previous)["records"]}
+    else:
+        assigned = {}
+    next_id = max((int(identifier[1:]) for identifier in assigned.values()), default=0) + 1
+    for row in items:
+        if row["file"] not in assigned:
+            assigned[row["file"]] = f"D{next_id:03}"
+            next_id += 1
+    put(registry, assigned)
+    return assigned
+
+
 def prepare_documents(raw, records, meta, work):
     docs=work/"资料"
     docs.mkdir(parents=True,exist_ok=True)
     evidence=[]
     items = [row for row in records if "lesson" not in row]
+    ids = document_ids(meta, items)
     from worldanalysis.ocr import ocr_image
     from worldanalysis.pdf_render import render_pdf_page
 
@@ -124,7 +143,7 @@ def prepare_documents(raw, records, meta, work):
                 result={"processing_status":"failed","blocks":[],"gaps":[{"reason":str(error)}]}
             if result["processing_status"]!="failed":put(cache,result)
         texts=[b for b in result["blocks"] if b.get("text")]
-        item={"id":f"D{i:03}","file":row["file"],"sha256":key,"status":result["processing_status"],
+        item={"id":ids[row["file"]],"file":row["file"],"sha256":key,"status":result["processing_status"],
               "text_blocks":len(texts),"text_chars":sum(len(b["text"]) for b in texts),
               "gaps":len(result["gaps"]),"result":cache.relative_to(work).as_posix() if cache.is_file() else None}
         text_format = result.get("metadata", {}).get("text_format")

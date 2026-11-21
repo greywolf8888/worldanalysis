@@ -311,7 +311,8 @@ def scan_video(course, ledger, work, lesson):
     signature["audio_method"] = {"revision": 3, "min_s": GAP_S, "cue_padding_s": PAD_S} if audio_count else None
     previous = read(output) if output.is_file() else None
     sheet = storage/f"L{lesson:02}.jpg"
-    if previous and sheet.is_file() and previous["signature"] == signature:
+    audio_only = metadata.get("kind") == "audio"
+    if previous and (audio_only or sheet.is_file()) and previous["signature"] == signature:
         return previous
     started=time.perf_counter()
     same_audio = previous and all(previous["signature"].get(key)==value for key,value in signature.items()
@@ -322,9 +323,12 @@ def scan_video(course, ledger, work, lesson):
         sound_info=speech_scan(sound,metadata,offset) if audio_count else {
             "no_audio":True, "uncovered_candidates":[], "speech_windows":[],
         }
-    display,pictures=frame_scan(source,metadata["duration_s"],metadata["cues"],
-                                metadata.get("timeline_origin_s", 0), sound_info.get("speech_windows", []))
-    write_strip(storage,lesson,pictures)
+    if audio_only:
+        display = {"no_video": True, "sample_count": 0, "scene_probes": []}
+    else:
+        display,pictures=frame_scan(source,metadata["duration_s"],metadata["cues"],
+                                    metadata.get("timeline_origin_s", 0), sound_info.get("speech_windows", []))
+        write_strip(storage,lesson,pictures)
     receipt={"course":name,"lesson":lesson,"source":metadata["source"],
              "duration":metadata["duration_s"],"signature":signature,
              "audio":sound_info,"picture":display,"elapsed_s":round(time.perf_counter()-started,2)}

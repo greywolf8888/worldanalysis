@@ -1,4 +1,4 @@
-"""Prepare, write, and accept one textbook from a local course folder."""
+"""Prepare and review local textbooks and resume ordered course batches."""
 import argparse
 import json
 import os
@@ -40,14 +40,16 @@ def gpu_from_args(args, backend, configured=None):
 
 
 def prepare(project, args):
-    from embedded_media import collect_embedded_videos
-    from prepare import classify, prepare_project_media
+    from media_inventory import collect_course_media
+    from prepare import prepare_project_media
     from prepare_documents import prepare_documents
     from review_media import scan_project
 
     sources = project.validate_raw()
-    embedded = collect_embedded_videos(project.raw, sources, work=project.work)
-    videos = classify(sources, embedded)
+    selection = collect_course_media(project, sources)
+    videos = selection["selected"]
+    loose = {row["file"]: row["lesson"] for row in videos if "embedded" not in row}
+    sources = [dict(row, lesson=loose[row["file"]]) if row["file"] in loose else row for row in sources]
     put(project.ledger / "inventory.json", {"sources": sources})
     documents = prepare_documents(project.raw, sources, project.ledger, project.work)
     project.work.mkdir(parents=True, exist_ok=True)
@@ -59,7 +61,8 @@ def prepare(project, args):
                       "device": gpu.device["index"]})
     elif videos and args.cpu:
         put(runtime, {"backend": "cpu"})
-    media = prepare_project_media(project, videos, documents["records"], gpu)
+    media = prepare_project_media(project, videos, documents["records"], gpu,
+                                  routing_unresolved=selection["unresolved"])
     scan_project(project, media["videos"], args.workers)
     from transcript import update_timeline
 
@@ -71,17 +74,23 @@ def prepare(project, args):
             stale.append(str(error))
     order = project.work / ORDER
     numbers = [row["lesson"] for row in videos]
-    if not order.exists():
-        put(order, numbers)
-    elif embedded:
+    if order.exists():
         previous = read(order)
-        added = [row["lesson"] for row in embedded if row["lesson"] not in previous]
-        if added and sorted(previous + added) == numbers:
-            put(order, previous + added)
+        known = set(selection["lesson_ids"].values())
+        if (not isinstance(previous, list) or any(type(number) is not int or number not in known for number in previous)
+                or len(set(previous)) != len(previous)):
+            raise ValueError("讲次顺序包含未登记或重复的讲号，请核对原件身份")
+        updated = [number for number in previous if number in numbers]
+        updated.extend(number for number in numbers if number not in previous)
+        if updated != previous:
+            put(order, updated)
+    else:
+        put(order, numbers)
     require_readable_videos(media)
     if stale:
         raise ValueError("；".join(stale))
-    print(f"已准备 {len(videos)} 个原视频（内嵌 {len(embedded)} 个）和 {documents['total']} 件附件")
+    print(f"已准备 {len(videos)} 个教学媒体（其中独立音频 {sum(row.get('kind') == 'audio' for row in videos)} 个，"
+          f"内嵌或档内 {sum('embedded' in row for row in videos)} 个）和 {documents['total']} 件附件")
     print(f"原件 {project.raw}")
     print(f"编辑与取证 {project.work}")
     print(f"工作稿 {project.work / '教材.md'}")
@@ -89,13 +98,13 @@ def prepare(project, args):
 
 def preview(project):
     from acceptance import TEMPLATE, prepare_review
-    from embedded_media import verify_embedded_videos
+    from media_inventory import verify_course_media
     from publish import compile_textbook, render_preview
 
     sources = project.validate_raw()
     media = read(project.ledger / "media-summary.json")
     require_readable_videos(media)
-    verify_embedded_videos(project, sources, media["videos"])
+    verify_course_media(project, sources, media["videos"])
     order = read(project.work / ORDER)
     deliver, receipt, figures = compile_textbook(
         project.folder, project.work, project.ledger, art_root=project.art, order=order)
@@ -106,9 +115,8 @@ def preview(project):
     return body, figures, template
 
 
-def accept(project, obsidian_exe):
-    from acceptance import REVIEW, commit, validate_review, validate_review_proofs, verify_publication
-    from reader_review import snapshot
+def reviewed_preview(project):
+    from acceptance import REVIEW, validate_review, validate_review_proofs
 
     body, figures, template = preview(project)
     review_path = project.work / REVIEW
@@ -117,6 +125,15 @@ def accept(project, obsidian_exe):
     review = read(review_path)
     validate_review(body, figures, review, template)
     validate_review_proofs(project, review)
+    return body, figures, template, review
+
+
+def accept(project, obsidian_exe):
+    from acceptance import commit, validate_review_proofs, verify_publication
+    from media_inventory import verify_course_media
+    from reader_review import snapshot
+
+    body, figures, template, review = reviewed_preview(project)
     run_obsidian(obsidian_exe, "--project", project.folder, project.preview)
     render = read(project.preview / "obsidian-render.json")
     current = (project.preview / ENTRY).read_text(encoding="utf-8")
@@ -126,7 +143,8 @@ def accept(project, obsidian_exe):
              for name, digest in template["snapshot"]["evidence"].items()):
         raise ValueError("阅读检查期间预览或配图已修改，请重新验收")
     validate_review_proofs(project, review)
-    project.validate_raw()
+    sources = project.validate_raw()
+    verify_course_media(project, sources, review["episodes"])
     commit(project, body, figures, review, render)
     return verify_publication(project, raw_verified=True)
 
@@ -162,14 +180,21 @@ def verify_reader(project, publication, executable):
 
 
 def show_status(project):
+    from media_inventory import MEDIA_INVENTORY
+
     media_file = project.ledger / "media-summary.json"
     media = read(media_file) if media_file.is_file() else None
+    routes_file = project.ledger / MEDIA_INVENTORY
+    routes = read(routes_file) if routes_file.is_file() else None
     inventory = read(project.intake)
     print(json.dumps({
         "project": str(project.folder), "original_files": len(inventory["sources"]),
-        "prepared_videos": len(media["videos"]) if media is not None else None,
+        "prepared_videos": sum(row.get("kind") != "audio" for row in media["videos"]) if media is not None else None,
+        "prepared_audio": sum(row.get("kind") == "audio" for row in media["videos"]) if media is not None else None,
         "embedded_videos": [row for row in media["videos"] if "embedded" in row] if media is not None else [],
         "unreadable_videos": media.get("unreadable", []) if media is not None else [],
+        "media_inventory": str(routes_file) if routes is not None else None,
+        "media_pending": routes["unresolved"] if routes is not None else [],
         "work": str(project.work),
         "draft": str(project.work / "教材.md"),
         "preview": str(project.preview / ENTRY) if (project.preview / ENTRY).is_file() else None,
@@ -186,8 +211,11 @@ def preparation_options(parser):
 
 
 def main(argv=None):
+    from batch import add_arguments, run as run_batch
+
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
+    add_arguments(commands)
     start = commands.add_parser("start", help="从用户提供的文件夹入库，提取文字、转写和画面候选")
     start.add_argument("source", type=Path)
     start.add_argument("--output", type=Path, help="独立课程包完整路径")
@@ -197,7 +225,9 @@ def main(argv=None):
     preparation_options(rerun)
     for name, help_text in (
         ("status", "查看课程包内的当前产物"),
+        ("coverage", "从原件和取材记录列出独立核查范围"),
         ("preview", "编译一篇阅读稿和逐集验收填写模板"),
+        ("check-review", "运行双向内容验收，暂不发布或打开阅读器"),
         ("accept", "核验课程包预览并更新已绑定的日常阅读库"),
         ("verify", "复验课程包文件与交付状态"),
         ("deliver", "在日常 Obsidian 阅读库更新课程入口"),
@@ -208,6 +238,8 @@ def main(argv=None):
         command.add_argument("project", type=Path)
         if name in ("accept", "verify-reader"):
             command.add_argument("--obsidian-exe", type=Path)
+        if name == "coverage":
+            command.add_argument("--write", action="store_true", help="保存核查范围和未填写的模板到课程工作区")
         if name == "verify":
             command.add_argument("--require-vault", action="store_true", help="要求日常阅读入口及同版重开核验")
         if name == "deliver":
@@ -256,6 +288,8 @@ def main(argv=None):
     visual.add_argument("--crop", nargs=4, type=int)
     visual.add_argument("--ocr", action="store_true")
     args = parser.parse_args(argv)
+    if args.action == "batch":
+        return run_batch(args)
 
     try:
         project = (CourseProject.initialize(args.source, args.output) if args.action == "start"
@@ -266,6 +300,21 @@ def main(argv=None):
         with project.locked():
             if args.action in ("start", "prepare"):
                 prepare(project, args)
+            elif args.action == "coverage":
+                from source_coverage import build_source_manifest, coverage_review_template
+
+                project.validate_raw()
+                scope, _ = build_source_manifest(project)
+                record = {"source_scope": scope, "source_coverage": coverage_review_template(scope)}
+                if args.write:
+                    path = project.work / "原件核查范围.json"
+                    put(path, record)
+                    print(path)
+                else:
+                    print(json.dumps(record, ensure_ascii=False, indent=2))
+            elif args.action == "check-review":
+                reviewed_preview(project)
+                print("双向内容核对通过，尚未发布")
             elif args.action == "window":
                 from frames import review_window
 
@@ -306,6 +355,8 @@ def main(argv=None):
 
                 record = accept(project, args.obsidian_exe) if args.action == "accept" else verify_publication(project)
                 if args.action == "deliver":
+                    if record["review"].get("schema") != 2:
+                        raise ValueError("旧版回执可复验现有交付，重新发布需要先完成新版双向内容验收")
                     print(json.dumps(install(project, record, args.vault, args.course_folder, args.reviewed_previous),
                                      ensure_ascii=False, indent=2))
                     return 0
@@ -321,9 +372,11 @@ def main(argv=None):
                 episodes = record["review"]["episodes"]
                 print(json.dumps({"verified": live["status"] == "已记录日常库重开",
                                   "package_verified": True, "entry": str(project.entry),
+                                  "source_review_version": record["review"]["schema"],
                                   "original_files": len(read(project.intake)["sources"]),
-                                  "videos": len(episodes),
-                                  "embedded_videos": sum("embedded" in row for row in episodes),
+                                  "videos": sum(row.get("kind") != "audio" for row in episodes),
+                                  "audio": sum(row.get("kind") == "audio" for row in episodes),
+                                  "embedded_videos": sum("embedded" in row and row.get("kind") != "audio" for row in episodes),
                                   "attachments": len(record["review"]["documents"]),
                                   "images": len(record["outputs"]) - 1,
                                   "vault_delivery": live}, ensure_ascii=False, indent=2))

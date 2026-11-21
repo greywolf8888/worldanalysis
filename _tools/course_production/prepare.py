@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 
-from project import ROOT, VIDEO_EXTENSIONS, original_media_path, put, read, recovery_files, sha, write
+from project import ROOT, original_media_path, put, read, recovery_files, sha, write
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -20,20 +20,6 @@ def stamp(s):
 
 def natural(name):
     return tuple((0,int(s)) if s.isdigit() else (1,s.lower()) for s in re.split(r"(\d+)",name.strip()))
-
-
-def classify(sources, embedded=()):
-    videos = sorted((row for row in sources if row["extension"] in VIDEO_EXTENSIONS),
-                    key=lambda row: (natural(row["file"]), row["file"]))
-    videos.extend(sorted(embedded, key=lambda row: (
-        natural(row["embedded"]["document"]), not row["embedded"]["pages"],
-        row["embedded"]["pages"], row["embedded"]["member"],
-    )))
-    if len({row["file"] for row in videos}) != len(videos):
-        raise ValueError("原视频与附件内嵌视频的路径标识发生重复")
-    for number, row in enumerate(videos, 1):
-        row["lesson"] = number
-    return videos
 
 
 def subtitle_choice(video, options, documents):
@@ -92,7 +78,7 @@ def source_time(value, fallback=0.0):
     return float(value) if value not in (None, "N/A") else fallback
 
 
-def probe_video(source):
+def probe_video(source, kind="video"):
     try:
         meta = read_media(source)
     except subprocess.CalledProcessError as error:
@@ -100,29 +86,32 @@ def probe_video(source):
         raise ValueError(reason.splitlines()[0] if reason else "原视频探测失败") from error
     duration = source_time(meta["format"].get("duration"))
     if not math.isfinite(duration) or duration <= 0 or not any(
-        stream["codec_type"] == "video" for stream in meta["streams"]
+        stream["codec_type"] == kind for stream in meta["streams"]
     ):
-        raise ValueError("没有可定位的原视频时间轴")
+        raise ValueError("没有可定位的原音频时间轴" if kind == "audio" else "没有可定位的原视频时间轴")
     return meta, duration
 
 
-def probe_course_video(source, recovered):
+def probe_course_video(source, recovered, kind="video"):
     try:
-        meta, duration = probe_video(source)
+        meta, duration = probe_video(source, kind)
     except ValueError:
         if recovered is None:
             raise
-        meta, duration = probe_video(recovered)
+        meta, duration = probe_video(recovered, kind)
         return recovered, meta, duration
     if recovered is not None:
         raise ValueError("原件已可探测，请核对后移除恢复设置")
     return source, meta, duration
 
 
-def prepare_project_media(project, videos, documents, gpu=None):
+def prepare_project_media(project, videos, documents, gpu=None, *, routing_unresolved=()):
     settings_file = project.work / "媒体设置.json"
     settings = read(settings_file) if settings_file.is_file() else {}
-    if not isinstance(settings, dict) or set(settings) - {str(row["lesson"]) for row in videos}:
+    active_ids = {str(row["lesson"]) for row in videos}
+    inventory_path = project.ledger / "media-inventory.json"
+    retired_ids = {str(number) for number in read(inventory_path)["lesson_ids"].values()} if inventory_path.is_file() else set()
+    if not isinstance(settings, dict) or set(settings) - active_ids - retired_ids:
         raise ValueError("媒体设置须用本课程的讲号作为键")
     results = []
     unreadable = []
@@ -130,6 +119,7 @@ def prepare_project_media(project, videos, documents, gpu=None):
     sources = {row["file"]: row for row in videos}
     for item in videos:
         number = item["lesson"]
+        kind = item.get("kind", "video")
         source = original_media_path(project.raw, project.work, item["file"], item.get("embedded"))
         destination = project.ledger / f"{number:02}.json"
         prefs = settings.get(str(number), {})
@@ -144,6 +134,8 @@ def prepare_project_media(project, videos, documents, gpu=None):
                      "asr": gpu.identity if gpu else MODEL_SHA}
         if "embedded" in item:
             signature["embedded"] = item["embedded"]
+        if kind == "audio":
+            signature["kind"] = kind
         recovery = recovered = None
         try:
             if prefs.get("recovery") is not None:
@@ -156,10 +148,11 @@ def prepare_project_media(project, videos, documents, gpu=None):
                 results.append(old)
                 print(f"第 {number} 讲 · 复用时间轴", flush=True)
                 continue
-            source, meta, duration = probe_course_video(source, recovered)
+            source, meta, duration = probe_course_video(source, recovered, kind)
         except ValueError as error:
             unreadable.append({"lesson": number, "source": item["file"],
-                               "sha256": item["sha256"], "reason": str(error)})
+                               "sha256": item["sha256"], "reason": str(error),
+                               **{key: item[key] for key in ("embedded", "kind") if key in item}})
             print(f"第 {number} 讲 · 原件待补查 · {item['file']}", flush=True)
             continue
         origin = source_time(meta["format"].get("start_time"))
@@ -171,7 +164,7 @@ def prepare_project_media(project, videos, documents, gpu=None):
         if reference is not None:
             from review_media import align_video
 
-            if reference not in sources or reference == item["file"]:
+            if kind == "audio" or reference not in sources or reference == item["file"] or sources[reference].get("kind") == "audio":
                 raise ValueError(f"第 {number} 讲的补录须指向包内另一原视频")
             if any(stream["codec_type"] == "audio" for stream in meta["streams"]):
                 raise ValueError(f"第 {number} 讲已有正式音轨，保留原声")
@@ -254,6 +247,8 @@ def prepare_project_media(project, videos, documents, gpu=None):
             record["recovery"] = recovery
         if "embedded" in item:
             record["embedded"] = item["embedded"]
+        if kind == "audio":
+            record["kind"] = kind
         if reference and "embedded" in sources[reference]:
             record["audio_embedded"] = sources[reference]["embedded"]
         text = [f"# {number:02} {Path(item['file']).stem}"]
@@ -265,12 +260,14 @@ def prepare_project_media(project, videos, documents, gpu=None):
         results.append(record)
         print(f"第 {number} 讲 · {method} · {len(cues)} 段", flush=True)
     summary = {
-        "videos": [{k: row[k] for k in ("lesson", "source", "duration_s", "sha256", "recovery", "embedded") if k in row}
+        "videos": [{k: row[k] for k in ("lesson", "source", "duration_s", "sha256", "recovery", "embedded", "kind") if k in row}
                    for row in results],
         "duration_s": sum(row["duration_s"] for row in results),
         "cue_total": sum(len(row["cues"]) for row in results),
     }
     if unreadable:
         summary["unreadable"] = unreadable
+    if routing_unresolved:
+        summary["routing_unresolved"] = list(routing_unresolved)
     put(project.ledger / "media-summary.json", summary)
     return summary

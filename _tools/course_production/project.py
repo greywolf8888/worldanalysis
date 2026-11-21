@@ -18,6 +18,9 @@ VIDEO_EXTENSIONS = {
     ".mp4", ".mkv", ".mov", ".m4v", ".webm", ".avi", ".mpg", ".mpeg",
     ".mts", ".m2ts", ".wmv", ".flv", ".ogv", ".ts",
 }
+AUDIO_EXTENSIONS = {
+    ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".m4b", ".aiff", ".aif", ".amr", ".ac3",
+}
 
 
 def read(path):
@@ -97,8 +100,8 @@ def recovery_files(work, relative, original_sha256, expected_sha256=None):
             or "\n" in spec["scope"] or "\r" in spec["scope"]):
         raise ValueError(f"媒体恢复清单须对应原件摘要、恢复方法及可核对范围 {relative}")
     recovered = local_child(directory, spec["file"])
-    if recovered.suffix.lower() not in VIDEO_EXTENSIONS or not recovered.is_file() or sha(recovered) != spec["sha256"]:
-        raise ValueError(f"恢复视频缺失或已变动 {recovered.name}")
+    if recovered.suffix.lower() not in VIDEO_EXTENSIONS | AUDIO_EXTENSIONS or not recovered.is_file() or sha(recovered) != spec["sha256"]:
+        raise ValueError(f"恢复媒体缺失或已变动 {recovered.name}")
     return recovered, manifest, spec
 
 
@@ -122,6 +125,9 @@ def require_readable_videos(media):
     if unreadable := media.get("unreadable"):
         files = "、".join(row["source"] for row in unreadable)
         raise ValueError(f"原视频仍有取材缺口，补查后才能完成整课验收。待补原件 {files}")
+    if unresolved := media.get("routing_unresolved"):
+        files = "、".join(row["source"] for row in unresolved[:8])
+        raise ValueError(f"{len(unresolved)} 项媒体或档内内容仍待核对。见 media-inventory.json 和媒体归类.json。{files}")
 
 
 def inventory_files(root):

@@ -194,7 +194,7 @@ def compile_textbook(course, work, ledger, *, art_root, order):
 
     body = render(work / "教材.md")
     if not cited_lessons and not cited_docs:
-        raise ValueError("学习正文需要视频或文档出处")
+        raise ValueError("学习正文需要音视频或文档出处")
 
     def link_title(text):
         return text.replace("[", r"\[").replace("]", r"\]")
@@ -204,12 +204,16 @@ def compile_textbook(course, work, ledger, *, art_root, order):
         embedded = info.get("embedded")
         raw = embedded["document"] if embedded else info["source"]
         title = Path(raw).name
-        if embedded:
+        if embedded and embedded.get("container"):
+            title = f"{title} · 档内 {' › '.join(embedded['member_chain'])}"
+        elif embedded:
             pages = "、".join(str(page) for page in embedded["pages"])
             position = f"第 {pages} 页" if pages else "页码未定位"
             title = f"{title} · {position}内嵌视频"
         url = "../" + quote("原始资料/" + raw, safe=LOCAL_PATH_SAFE)
         suffix = " · 定位基于恢复副本" if info.get("recovery") else ""
+        if info.get("kind") == "audio":
+            suffix += " · 独立音频"
         index.append(f"> - 第 {display_numbers[number]} 讲 · [{link_title(title)}]({url}) · {clock(info['duration_s'])}{suffix}")
     if cited_docs:
         index.extend([">", "> **配套资料**", ">"])

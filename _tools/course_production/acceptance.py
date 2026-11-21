@@ -5,10 +5,12 @@ from pathlib import Path
 import re
 from urllib.parse import unquote
 
-from embedded_media import DIRECTORY as EMBEDDED_MEDIA_DIR, verify_embedded_videos
+from embedded_media import DIRECTORY as EMBEDDED_MEDIA_DIR
 from project import ENTRY, RECOVERY_DIR, copy_file, local_child, put, read, recovery_files, sha, write
 from reader_review import IMAGE, ITEMS, chapters, markdown_segments, snapshot, validate_cases
 from publish import timecode
+from source_coverage import NON_TEACHING, build_source_manifest, coverage_review_template, fingerprint as source_scope_digest
+from source_coverage import validate_source_coverage
 from transcript import timeline_paths, update_timeline, validate_proof
 
 
@@ -24,7 +26,7 @@ COLLAPSED = re.compile(
     r"^ {0,3}>[ \t]*\[![^\]\n]+\]-[^\n]*(?:\n[ \t]*>[^\n]*)*"
     r"|<details\b[^>]*>[\s\S]*?</details\s*>", re.MULTILINE | re.IGNORECASE
 )
-SPANS = {"教学", "原例", "说明", "过场"}
+SPANS = {"教学", "原例", "说明"} | NON_TEACHING
 POINTS = {"概念", "输入", "操作", "参数", "条件", "原例", "纠错", "结果", "画面", "说明"}
 AUDIO_OUTCOMES = {"已补正文", "正文已涵盖", "非教学声音", "听辨缺口"}
 DOCUMENT_USES = {"引用", "用作转写", "参考", "重复", "原样存档", "提取缺口"}
@@ -96,6 +98,8 @@ def prepare_review(project, body, ordered, receipt):
         if embedded := video.get("embedded"):
             episodes[-1]["embedded"] = embedded
             evidence[f"work/{embedded['work_file']}"] = video["sha256"]
+        if video.get("kind") == "audio":
+            episodes[-1]["kind"] = "audio"
         if recovery := video.get("recovery"):
             recovered, recovery_manifest, spec = recovery_files(
                 project.work, recovery["manifest"], video["sha256"], recovery["manifest_sha256"])
@@ -104,8 +108,16 @@ def prepare_review(project, body, ordered, receipt):
             evidence[recovery_manifest.relative_to(project.state).as_posix()] = recovery["manifest_sha256"]
     supplement_path = project.work / SUPPLEMENTS
     supplements = evidence_from(supplement_path) if supplement_path.is_file() else []
+    source_scope, coverage_evidence = build_source_manifest(project)
+    for name, digest in coverage_evidence.items():
+        if name in evidence and evidence[name] != digest:
+            raise ValueError(f"生成来源复核清单时证据已变动 {name}")
+    evidence.update(coverage_evidence)
     return {
-        "schema": 1, "snapshot": {**snapshot(project.preview, body), "evidence": evidence},
+        "schema": 2, "snapshot": {**snapshot(project.preview, body), "evidence": evidence,
+                                  "source_scope_sha256": source_scope_digest(source_scope)},
+        "source_scope": source_scope,
+        "source_coverage": coverage_review_template(source_scope, body),
         "episodes": episodes,
         "documents": [{"id": row["id"], "source": row["file"], "sha256": row["sha256"],
                        "use": "引用" if row["id"] in receipt["document_refs"] else "",
@@ -172,7 +184,7 @@ def validate_points(actual, expected, text):
         spans.append((start, end))
     for part in actual["watched"]:
         left, right = part["range_s"]
-        if part["kind"] != "过场" and not any(start < right and end > left for start, end in spans):
+        if part["kind"] not in NON_TEACHING and not any(start < right and end > left for start, end in spans):
             raise ValueError(f"第 {display_number} 讲在 {left:g}–{right:g} 秒缺来源要点")
 
 
@@ -185,6 +197,8 @@ def validate_episode(actual, expected, text, figures):
             raise ValueError(f"第 {display_number} 讲的原件身份或时长不一致")
     if actual.get("embedded") != expected.get("embedded"):
         raise ValueError(f"第 {display_number} 讲的内嵌附件和页码不一致")
+    if actual.get("kind", "video") != expected.get("kind", "video"):
+        raise ValueError(f"第 {display_number} 讲的原件媒体类型不一致")
     if recovery := expected.get("recovery"):
         visible = COMMENT.sub("", COLLAPSED.sub("", text))
         if actual.get("recovery") != recovery or not any(
@@ -222,6 +236,8 @@ def validate_episode(actual, expected, text, figures):
     basis = actual.get("visual_basis")
     if basis not in VISUAL_BASES or not actual.get("visual_note", "").strip():
         raise ValueError(f"第 {display_number} 讲需要确认原片画面、附件原图或无可教学画面的依据")
+    if expected.get("kind") == "audio" and basis == "原片":
+        raise ValueError(f"第 {display_number} 讲为独立音频，配图须使用相应附件原图或注明来源的示意图")
     if basis == "原片" and not any(figures[name].get("lesson") == source_lesson for name in present):
         raise ValueError(f"第 {display_number} 讲的正文缺本集原片配图")
     if basis == "附件原图" and not any("document" in figures[name] for name in present):
@@ -290,7 +306,7 @@ def validate_supplements(body, registered, reviewed):
 
 
 def validate_review(body, figures, review, template):
-    if review.get("schema") != 1 or review.get("snapshot") != template["snapshot"]:
+    if review.get("schema") != template.get("schema", 1) or review.get("snapshot") != template["snapshot"]:
         raise ValueError("验收记录与当前预览、配图或证据版本不一致")
     sections = chapters(body)
     files = {Path(info["name"]).name: info for info in figures}
@@ -330,6 +346,10 @@ def validate_review(body, figures, review, template):
         hidden = " ".join(PARAGRAPH_SOURCE.findall(text))
         if any(source not in hidden for source in case["sources"]):
             raise ValueError(f"跟做案例的出处需要定位到同节的隐藏注释 {case['goal']}")
+    if "source_scope" in template:
+        if review.get("source_scope") != template["source_scope"]:
+            raise ValueError("验收记录的来源范围与当前原件清单不一致，请从预览模板更新")
+        validate_source_coverage(body, template["source_scope"], review)
 
 
 def check_render(render, digest):
@@ -355,9 +375,14 @@ def publication_receipt(project):
 
 
 def verify_publication(project, *, raw_verified=False):
+    from media_inventory import verify_course_media
+
     sources = read(project.intake)["sources"] if raw_verified else project.validate_raw()
     record = publication_receipt(project)
-    verify_embedded_videos(project, sources, record["review"]["episodes"])
+    review = record["review"]
+    inputs = review["snapshot"]
+    verify_course_media(project, sources, review["episodes"], require_current=False,
+                        manifest_sha256=inputs["evidence"].get("ledger/media-inventory.json"))
     entry = project.entry
     for name, digest in record["outputs"].items():
         file = entry if name == ENTRY.as_posix() else local_child(project.folder, name)
@@ -366,7 +391,6 @@ def verify_publication(project, *, raw_verified=False):
     if set(entry.parent.rglob("*.md")) != {entry}:
         raise ValueError("课件目录需要且仅保留一篇 Markdown")
     digest = record["outputs"][ENTRY.as_posix()]
-    inputs = record["review"]["snapshot"]
     if (inputs["text_sha256"] != digest or hashlib.sha256(record["body"].encode("utf-8")).hexdigest() != digest
             or inputs["evidence"]["ledger/intake.json"] != sha(project.intake)
             or snapshot(project.folder, entry.read_text(encoding="utf-8"))["images"] != inputs["images"]):
@@ -375,11 +399,19 @@ def verify_publication(project, *, raw_verified=False):
         if relative.startswith((f"work/{RECOVERY_DIR}/", f"work/{EMBEDDED_MEDIA_DIR}/")):
             if sha(local_child(project.state, relative)) != fingerprint:
                 raise ValueError(f"验收使用的媒体资料已变动 {relative}")
+    if review.get("schema") == 2:
+        scope = review.get("source_scope")
+        if (not scope or inputs.get("source_scope_sha256") != source_scope_digest(scope)
+                or scope.get("intake_sha256") != inputs["evidence"]["ledger/intake.json"]):
+            raise ValueError("已发布版本的来源覆盖清单与验收回执不一致")
+        validate_source_coverage(record["body"], scope, review)
     check_render(record["obsidian"], digest)
     return record
 
 
 def commit(project, body, figures, review, render):
+    if review.get("schema") != 2 or not review.get("source_scope") or not review.get("source_coverage"):
+        raise ValueError("新发布版本需要当前来源覆盖复核")
     digest = sha(project.preview / ENTRY)
     check_render(render, digest)
     if project.entry.exists():

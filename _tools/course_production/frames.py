@@ -37,6 +37,8 @@ def get_native_frame(path, seconds, origin=0):
 
 def orig(path, number, seconds, *, ledger):
     doc = read(ledger / f"{number:02}.json")
+    if doc.get("kind") == "audio":
+        raise ValueError(f"第 {number} 讲是独立音频，没有原视频帧")
     src = media_source(path / "原始资料", ledger.parent / "work", doc)
     if not 0 <= seconds < doc["duration_s"]:
         raise ValueError(f"取图时间超出第 {number} 讲")
@@ -129,6 +131,8 @@ def save_sheet(cells, output):
 
 def review_window(path, lesson, start, stop, step, label, crop=None, *, ledger, work):
     metadata = read(ledger / f"{lesson:02}.json")
+    if metadata.get("kind") == "audio":
+        raise ValueError(f"第 {lesson} 讲是独立音频，没有原视频帧")
     if not (0 <= start < stop <= metadata["duration_s"] and math.isfinite(step) and step > 0):
         raise ValueError("片段区间超出原课，或取图间隔无效")
     if Path(label).name != label or label in ("", ".", ".."):
@@ -191,8 +195,7 @@ def diagram_source(path, ledger, work, spec):
     valid_span(spec["range_s"], meta["duration_s"])
     if not spec["basis"].strip() or not spec["caption"].strip():
         raise ValueError("整理示意图需要标明该处原课依据和图注")
-    if sha(local_child(path / "原始资料", meta["source"])) != meta["sha256"]:
-        raise ValueError("整理示意图对应的课程原件已变")
+    media_source(path / "原始资料", work, meta, verify_original=True)
     return meta["source"], image, sha(file)
 
 

@@ -67,7 +67,10 @@ class CourseProductionTest(unittest.TestCase):
         standalone = self.source / "01 无声录屏.mp4"
         subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=navy:s=96x96:d=1", "-an",
                         "-c:v", "libx264", str(standalone)], check=True, timeout=20)
-        video = standalone.read_bytes()
+        slide_video = self.root / "演示页录屏.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=orange:s=96x96:d=1", "-an",
+                        "-c:v", "libx264", str(slide_video)], check=True, timeout=20)
+        video = slide_video.read_bytes()
         deck = self.source / "演示讲义.pptx"
         relationship = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
         xmlns = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -112,7 +115,7 @@ class CourseProductionTest(unittest.TestCase):
         self.assertEqual(episode["embedded"], second["embedded"])
 
         self.save(media_file, {**media, "videos": [first]})
-        self.assertIn("原附件内嵌视频与课件采用范围不一致", self.command("preview", self.package, okay=False))
+        self.assertIn("教学媒体和归类结果不一致", self.command("preview", self.package, okay=False))
         self.save(media_file, media)
         clip.write_bytes(b"changed")
         self.assertIn("原视频身份已变", self.command("preview", self.package, okay=False))
@@ -176,7 +179,7 @@ class CourseProductionTest(unittest.TestCase):
 
         copy.write_bytes(b"changed")
         output = self.command("preview", self.package, okay=False)
-        self.assertIn("恢复视频缺失或已变动", output)
+        self.assertIn("恢复媒体缺失或已变动", output)
         self.assertEqual((self.package / "原始资料" / damaged.name).read_bytes(), damaged.read_bytes())
 
     def test_gpu_silence_warning_applies_to_its_own_decoded_window(self):
@@ -233,6 +236,14 @@ class CourseProductionTest(unittest.TestCase):
             "sources": sources, "figures": figures,
         }
 
+    def complete_claims(self, review):
+        for claim in review["source_coverage"]["claims"]:
+            if claim["sources"]:
+                claim.update(outcome="原件已核", note="已按相邻出处对照本样本的原始操作或讲义说明")
+            else:
+                self.assertIn("练习", claim["text"])
+                claim.update(outcome="整理示例", note="这一段是作者明确标记的练习步骤")
+
     def test_archive_member_retains_unicode_path_and_content(self):
         tool = shutil.which("bsdtar") or shutil.which("tar")
         if not tool or b"bsdtar" not in subprocess.check_output([tool, "--version"], timeout=10):
@@ -247,7 +258,7 @@ class CourseProductionTest(unittest.TestCase):
                         member.as_posix()], check=True, timeout=10)
         old_digest = hashlib.sha256(source.read_bytes()).hexdigest()
         (self.source / "零字节.rar").write_bytes(b"")
-        self.start_course()
+        self.assertIn("零字节.rar", self.command("start", self.source, "--output", self.package, okay=False))
         docs = self.data(self.ledger / "documents-summary.json")["records"]
         doc = next(record for record in docs if record["file"] == source.name)
         failed = next(record for record in docs if record["file"] == "零字节.rar")
@@ -264,7 +275,7 @@ class CourseProductionTest(unittest.TestCase):
         retained = self.work / result["asset_root"] / record["file"]
         self.assertEqual(retained.read_text(encoding="utf-8"), text)
         self.assertEqual(hashlib.sha256(retained.read_bytes()).hexdigest(), record["sha256"])
-        self.command("prepare", self.package)
+        self.assertIn("零字节.rar", self.command("prepare", self.package, okay=False))
         self.assertEqual(self.data(self.ledger / "documents-summary.json")["records"], docs)
 
     def test_html_handout_preserves_sections_links_and_unread_visuals(self):
@@ -326,7 +337,7 @@ class CourseProductionTest(unittest.TestCase):
         draft.write_text(
             "# 画板导出\n\n## 设好画板比例\n\n"
             "我先准备空白画板，打开比例菜单，选 3:4。{{D001|第 1 页，比例和预览设置}}\n\n"
-            f"{{{{img:{figure}|450}}}}\n\n我保存预览。如果比例显示错误，我重新选择比例。\n\n"
+            f"{{{{img:{figure}|450}}}}\n\n练习中我保存预览。如果比例显示错误，我重新选择比例。\n\n"
             "~~~text\nratio={{current_ratio}}\n~~~\n\n"
             "## 随课参考\n\n讲义首页用于复习画板尺寸。"
             "[打开讲义](../原始资料/A%20操作指南.pdf){{D001|第 1 页，比例和预览设置}}\n\n"
@@ -365,6 +376,15 @@ class CourseProductionTest(unittest.TestCase):
         self.command("preview", self.package)
         review["snapshot"] = self.data(self.work / "验收填写模板.json")["snapshot"]
         review["supplements"] = [supplemental]
+        for doc, (anchor, note) in zip(review["source_coverage"]["documents"], [
+            ("选 3:4", "讲义第一页图文给出画板比例和导出预览"),
+            ("课堂练习可用随课的原始入口", "原快捷方式的 URL 提供独立练习入口"),
+        ]):
+            for unit in doc["units"]:
+                unit.update(outcome="正文已覆盖", note=note, anchor=anchor)
+            for candidate in doc["candidates"]:
+                candidate.update(kind="非渠道", note="原快捷方式的 URL 指向课后练习，未声称是联系账号")
+        self.complete_claims(review)
         self.save(review_path, review)
         self.publish(expected_videos=0)
         if OBSIDIAN:
@@ -526,15 +546,15 @@ class CourseProductionTest(unittest.TestCase):
         note = self.work / "教材.md"
         body = ("# 画板操作\n\n## 设好画板比例\n\n### 打开比例菜单\n\n"
                 "我先准备空白画板，打开比例菜单，选 3:4。{{01|00:00–00:03}} {{D003|第 1 页}}\n\n"
-                "{{img:菜单初选|450}}\n\n我保存预览。如果设置错了，我重新选择比例。\n\n"
+                "{{img:菜单初选|450}}\n\n练习中我保存预览。如果设置错了，我重新选择比例。\n\n"
                 "## 检查静默录屏设置\n\n我在无口播的界面展开比例列表。{{02|00:00–00:03}}\n\n"
-                "{{img:静默片段里的菜单|450}}\n\n我等面板收起，再检查 3:4 已应用。\n")
+                "{{img:静默片段里的菜单|450}}\n\n我等面板收起，再检查 3:4 已应用。{{02|00:01.60–00:03}}\n")
         note.write_text(body, encoding="utf-8")
         point_dir = self.work / "逐段要点"
         point_dir.mkdir()
         for lesson in (1, 2):
             self.save(point_dir / f"{lesson:02}.json", [
-                {"range_s": [1, 1.6], "kind": "画面", "source_note": "原片中显示短暂的 3:4 比例菜单"}])
+                {"range_s": [0, 3], "kind": "画面", "source_note": "空白画板经过短暂菜单，最后显示 3:4 已应用"}])
         self.command("preview", self.package)
         review = self.data(self.work / "验收填写模板.json")
         review_path = self.work / "验收记录.json"
@@ -557,6 +577,18 @@ class CourseProductionTest(unittest.TestCase):
                            note="说明页展示导出前的比例确认")
         review["follow_along"] = [self.follow_along(
             "设好画板比例", ["第 1 讲 00:00–00:03"], ["菜单初选.png"])]
+        for episode in review["source_coverage"]["videos"]:
+            for window in episode["windows"]:
+                window.update(outcome="正文已覆盖", note="窗口从空白画板展示到 3:4 比例菜单消失")
+            for zone in episode["channels"]:
+                zone.update(outcome="已查", note="原片从空白画板到比例应用完成，四周没有作者联系入口")
+        for document in review["source_coverage"]["documents"]:
+            for unit in document["units"]:
+                if document["id"] == "D003":
+                    unit.update(outcome="正文已覆盖", note="PDF 画板比例和预览标签", anchor="选 3:4")
+                else:
+                    unit.update(outcome="无独立教学", note="字幕为对应录屏的操作文字，已经并入视频原件复核")
+        self.complete_claims(review)
         complete = review["episodes"]
         review["episodes"] = complete[:1]
         self.save(review_path, review)
@@ -567,8 +599,8 @@ class CourseProductionTest(unittest.TestCase):
         self.assertIn("片头、片尾、画面署名及作者渠道", self.command("accept", self.package, okay=False))
         complete[0]["channel_review"]["closing"] = close
         self.save(review_path, review)
-        displaced = body.replace("{{img:菜单初选|450}}\n\n我保存预览。如果设置错了，我重新选择比例。",
-                                 "我保存预览。如果设置错了，我重新选择比例。\n\n{{img:菜单初选|450}}")
+        displaced = body.replace("{{img:菜单初选|450}}\n\n练习中我保存预览。如果设置错了，我重新选择比例。",
+                                 "练习中我保存预览。如果设置错了，我重新选择比例。\n\n{{img:菜单初选|450}}")
         note.write_text(displaced, encoding="utf-8")
         self.command("preview", self.package)
         initial_snapshot = review["snapshot"]
