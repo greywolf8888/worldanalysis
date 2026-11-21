@@ -44,7 +44,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 PROVIDER_ID = "worldanalysis.documents.native"
-PROVIDER_VERSION = "1.0.2"
+PROVIDER_VERSION = "1.0.3"
 MAX_BLOCK_TEXT = 16000
 DEFAULT_LIMITS = {
     "max_input_bytes": 128 * 1024 * 1024,
@@ -1100,11 +1100,12 @@ def _pdf(r: _Result):
             r.meta["pdf_text_spans"].append({"page_number": page_no, "spans": spans,
                                             "coordinate_note": "Raw pypdf matrices only; glyph bbox/reading order not guaranteed, no invented bbox"})
             image_blocks = []
+            raster_has_detail = False
             op_count = 0
             inline_index = 0
             # Use source content instructions for occurrence enumeration, not unique image resources.
             def walk(stream, resources, path=(), active=(), depth=0, ctm=(1., 0., 0., 1., 0., 0.)):
-                nonlocal op_count, inline_index
+                nonlocal op_count, inline_index, raster_has_detail
                 if depth > r.limits["max_form_depth"]:
                     raise _Stop("PDF form nesting exceeds max_form_depth")
                 if stream is None:
@@ -1180,6 +1181,7 @@ def _pdf(r: _Result):
                         continue
                     image_no = page_info["image_occurrences"]
                     page_info["image_occurrences"] += 1
+                    raster_has_detail = raster_has_detail or (width, height) != (1, 1)
                     iloc = {**loc, "node_id": "pdf-page:" + str(page_no) + ":image:" + str(image_no)}
                     try:
                         image = page.images[names[0] if len(names) == 1 else list(names)]
@@ -1204,10 +1206,12 @@ def _pdf(r: _Result):
             walk(contents, resources)
             suspect_text = "\ufffd" in native or "\x00" in native
             readable_native = bool(native.strip()) and not native_failed and not suspect_text
-            has_raster = bool(page_info["image_occurrences"])
-            need_render = bool(page_info["vector_operations"] or native_failed or suspect_text or has_raster)
+            image_count = page_info["image_occurrences"]
+            # A lone source pixel adds no text to a page with a readable text layer.
+            review_raster = bool(image_count and (not readable_native or raster_has_detail or image_count > 1))
+            need_render = bool(page_info["vector_operations"] or native_failed or suspect_text or review_raster)
             page_info["render_attempted"] = need_render and callable(r.options.get("render_pdf_page"))
-            render_cause = "mixed_text_and_image" if readable_native and has_raster else "vector_or_unreadable_page"
+            render_cause = "mixed_text_and_image" if readable_native and review_raster else "vector_or_unreadable_page"
             rendered = r.render_pdf_page(page_no, render_cause) if need_render else None
             page_info["page_render_retained"] = bool(rendered)
             if readable_native:
@@ -1235,7 +1239,7 @@ def _pdf(r: _Result):
                 page_info["route"] = "blank_native"
                 key = r.structured({"page_number": page_no, "blank_by_native_enumeration": True}, "inventory")
                 r.block("metadata", loc, files=[key], text="No native text/image/paint operation discovered on this page")
-            if has_raster or (not readable_native and need_render):
+            if review_raster or (not readable_native and need_render):
                 if rendered:
                     # Extract labels in the visible page, including screenshots on pages with a text layer.
                     # Keep native text and derived OCR as separate evidence.
@@ -1248,7 +1252,7 @@ def _pdf(r: _Result):
                             r.ocr(block["file_keys"][0], [index], block["locator"])
                     if image_blocks:
                         page_info["ocr_source"] = "embedded_image"
-                    if has_raster and not callable(r.options.get("ocr")) and not image_blocks:
+                    if review_raster and not callable(r.options.get("ocr")) and not image_blocks:
                         r.gap("unprocessed", "PDF image text requires OCR; no raster evidence could be read", image_blocks)
             if page_info["vector_operations"]:
                 r.deferred("chart", loc,
