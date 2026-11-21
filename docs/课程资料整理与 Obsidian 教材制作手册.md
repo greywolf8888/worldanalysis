@@ -109,6 +109,14 @@ $course = 'G:\Worldanalysis\整理结果\课程教材\一门课'
 
 GPU 初稿用 `prepare` 或 `start` 的 `--gpu-exe` 与 `--model`。先用 CrispASR `--diagnostics` 核对 Vulkan 构建和实际显卡。可以 `--device` 指定诊断中的序号，省略时选择诊断出的最大显存设备。SenseVoiceSmall GGUF 使用 30 秒分段和零重叠。每 600 秒保存已完成的长轨窗口供续作。GPU 运行成功后课程包记住运行配置，`prepare --cpu` 可显式切回 CPU。
 
+CrispASR 成功退出且明确报告某个输入音频没有语音时，对相应窗口保存已解码采样数和空转写。人声检测继续独立核查，结合音乐、短动作和同屏变化判定用法。缺输出且该窗口无明确提示时仍需排查识别失败。
+
+原视频无法探测时，`start` 或 `prepare` 继续生成其他视频和附件的成果，保留原讲号，并在 `media-summary.json` 的 `unreadable` 中登记文件、摘要和探测错误。`status` 显示待补视频。整课预览和验收需要有可读的来源。若找到同一课的完整可读原件，用新来源快照做后续核对，已有核验结果按文件身份续用。
+
+在额外副本上做恢复时，核对原件指纹、音视频包的来源、全段解码、关键画面和实际恢复的声音。确认可作为来源后，在 `.course/work/媒体恢复` 保存可读副本和同目录 JSON 清单，并用 `媒体设置.json` 的讲号键指向该清单，例如 `{"3":{"recovery":"03.json"}}`。清单字段包含 `original_sha256`、相对该目录的 `file`、恢复文件 `sha256`、恢复方法 `method` 和一行说明 `scope`。说明写出哪些画面和音轨可以查到，以及时间位置的依据。把它放到对应章节的正常正文中。
+
+重新运行 `prepare` 后，转写、补查、取图及预览按同一份核验副本和原始身份运行。恢复前的原件在清单和文末保留原名，文末出处注明是恢复定位。接受整课时同时核对恢复清单和文件摘要，换副本后需要重新核验。缺失 MP4 索引可在工作副本上用工具试验，播放成功后还要核对实际像素和声音。参见 [untrunc 官方项目](https://github.com/anthwlock/untrunc)。
+
 ~~~powershell
 & $courseTool prepare $course --gpu-exe 'G:\本地运行包\crispasr.exe' --model 'G:\本地模型\sensevoice-small-q8_0.gguf'
 & $courseTool refine $course --gpu-exe 'G:\本地运行包\crispasr.exe' --model 'G:\本地模型\ggml-large-v3-turbo-q5_0.bin'
