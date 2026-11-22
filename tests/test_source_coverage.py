@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 TOOLS = Path(__file__).resolve().parents[1] / "_tools/course_production"
 with patch.object(sys, "path", [str(TOOLS), *sys.path]):
+    from acceptance import validate_supplements
     from project import put
     from source_coverage import (build_source_manifest, coverage_review_template, document_candidates,
                                  document_locator_valid, document_units, validate_source_coverage, video_candidates)
@@ -151,6 +152,47 @@ class SourceCoverageTest(unittest.TestCase):
         candidate, = document_candidates("D001", "说明.docx", result, {})
         self.assertEqual(candidate["value"], "示范课堂·第2站")
         self.assertEqual(candidate["unit"], "file")
+
+    def test_screenshot_project_links_keep_their_pages_and_partial_values(self):
+        result = {"metadata": {"page_count": 3}, "blocks": [
+            {"locator": {"page_number": 1}, "text": "github.com/example-pr..."},
+            {"locator": {"page_number": 2}, "text": "普通附录。"},
+            {"locator": {"page_number": 3},
+             "text": "github.com/\n example-project\n\n gitee.com/tutorials/demo"},
+        ]}
+        units = {item["key"]: item for item in document_units(result)}
+        candidates = document_candidates("D001", "课程.pdf", result, units)
+        self.assertEqual([(item["unit"], item["value"]) for item in candidates], [
+            ("page:1", ""), ("page:3", "github.com/example-project"), ("page:3", "gitee.com/tutorials/demo"),
+        ])
+        self.assertIn("example-pr...", candidates[0]["cue"])
+
+    def test_project_links_in_pdf_annotations_enter_review_with_stated_location(self):
+        target = "https://github.com/example-project/course"
+        result = {"metadata": {"page_count": 2, "pdf_hyperlinks": [
+            {"page_number": 1, "target": target, "intersects_page_box": True},
+            {"page_number": 2, "target": target, "intersects_page_box": False},
+        ]}, "blocks": [
+            {"locator": {"page_number": 1}, "text": "github.com/example-project/course"},
+        ]}
+        units = {item["key"]: item for item in document_units(result)}
+        first, second = document_candidates("D001", "课程.pdf", result, units)
+        self.assertEqual(first["value"], "github.com/example-project/course")
+        self.assertEqual(second["unit"], "page:2")
+        self.assertEqual(second["value"], target)
+        self.assertIn("PDF 链接注释", second["cue"])
+
+    def test_two_bare_project_links_in_the_same_paragraph_remain_distinct(self):
+        result = {"blocks": [{"text": "github.com/example-a gitee.com/example-b"}]}
+        candidates = document_candidates("D001", "补充.txt", result, {})
+        self.assertEqual({item["value"] for item in candidates}, {"github.com/example-a", "gitee.com/example-b"})
+        self.assertEqual(len({item["id"] for item in candidates}), 2)
+
+    def test_original_supplement_reference_with_external_provenance_on_same_line(self):
+        source = "配套讲义.pdf · 第 2 页"
+        body = f"原作者入口。 <!-- 段落出处 {source} --> <!-- 外部出处 https://example.org/author -->"
+        supplement = [{"anchor": "原作者入口", "sources": [source]}]
+        validate_supplements(body, supplement, supplement)
 
     def test_manually_read_author_identifier_matches_the_same_source_block(self):
         self.scope["videos"][0]["candidates"].clear()

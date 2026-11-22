@@ -15,7 +15,7 @@ from source_coverage import validate_source_coverage
 from transcript import timeline_paths, update_timeline, validate_proof
 
 
-PARAGRAPH_SOURCE = re.compile(r"<!-- 段落出处 (.*) -->")
+PARAGRAPH_SOURCE = re.compile(r"<!-- 段落出处 ([^\n]+?) -->")
 VIDEO_RANGE = re.compile(r"第 (\d+) 讲 ([\d:.]+)(?:–([\d:.]+))?")
 
 

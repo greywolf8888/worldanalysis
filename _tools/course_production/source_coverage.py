@@ -39,6 +39,11 @@ CHANNEL_NAME = re.compile(
 CONTACT_TOKEN = re.compile(r"https?://\S+|(?:\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b)|[a-z0-9_-]{5,}", re.IGNORECASE)
 DIRECT_CONTACT = re.compile(r"https?://[^\s<>）】\]]+|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b", re.IGNORECASE)
 CONTACT_ID = re.compile(r"^\s*(?:是|为)?\s*[:：]?\s*([a-z0-9_][a-z0-9_.-]{4,63})", re.IGNORECASE)
+PROJECT_LINK = re.compile(
+    r"(?<![A-Za-z0-9_@./-])(?P<base>(?:https?://)?(?:github\.com|gitee\.com)/)"
+    r"[ \t]*(?:\r?\n[ \t]*)?(?P<path>[a-z0-9_-]+(?:/[a-z0-9_.-]+)*)(?P<ellipsis>\.{2,}|…+)?",
+    re.IGNORECASE,
+)
 COMMENTS = re.compile(r"<!--([\s\S]*?)-->")
 PARAGRAPH_SOURCE = re.compile(r"<!-- 段落出处 ([^\n]+?) -->")
 VIDEO_LABEL = re.compile(r"第 (\d+) 讲 ([0-9:.]+)(?:–([0-9:.]+))?(?=$| · )")
@@ -159,6 +164,18 @@ def contact_hint(text):
 
 def document_candidates(identifier, name, result, known_units):
     candidates = {}
+    recorded = set()
+
+    def add(key, cue, value):
+        identity = (key, re.sub(r"^https?://", "", value, flags=re.IGNORECASE).casefold() if value else cue)
+        if identity in recorded:
+            return
+        recorded.add(identity)
+        candidate_id = f"{identifier}-{fingerprint([key, cue])[:12]}"
+        if candidate_id in candidates:
+            candidate_id = f"{identifier}-{fingerprint([key, cue, value])[:12]}"
+        candidates[candidate_id] = {"id": candidate_id, "unit": key, "cue": cue, "value": value}
+
     for block in result.get("blocks", []):
         text = block.get("text") or ""
         locator = block.get("locator", {})
@@ -166,22 +183,35 @@ def document_candidates(identifier, name, result, known_units):
         key = location["key"] if location and location["key"] in known_units else "file"
         explicit_link = (Path(name).suffix.lower() == ".url" and locator.get("field") == "URL")
         match = contact_hint(text)
-        if not explicit_link and not match:
-            continue
-        start = max(0, match.start() - 24) if match else 0
-        cue = text[start:start + 150].strip()
-        if not explicit_link and not (
-            CONTACT_TOKEN.search(cue) or CHANNEL_LABEL.search(cue) or CHANNEL_INVITATION.search(cue)
-        ):
-            continue
-        cand_id = f"{identifier}-{fingerprint([key, cue])[:12]}"
-        candidates[cand_id] = {"id": cand_id, "unit": key, "cue": cue,
-                               "value": contact_value(cue)}
+        if explicit_link or match:
+            start = max(0, match.start() - 24) if match else 0
+            cue = text[start:start + 150].strip()
+            if explicit_link or CONTACT_TOKEN.search(cue) or CHANNEL_LABEL.search(cue) or CHANNEL_INVITATION.search(cue):
+                add(key, cue, contact_value(cue))
+        for link in PROJECT_LINK.finditer(text):
+            # Keep the exact printed fragment as evidence. A line break alone
+            # can be joined, but an ellipsis cannot supply missing characters.
+            cue = text[max(0, link.start() - 24):link.end() + 36].strip()
+            add(key, cue, project_link_value(link))
+    for key, item in known_units.items():
+        for link in item.get("pdf_hyperlinks", []):
+            target = link["target"].strip()
+            if match := PROJECT_LINK.fullmatch(target):
+                add(key, f"PDF 链接注释：{target}", project_link_value(match))
     return list(candidates.values())
+
+
+def project_link_value(link):
+    path = link["path"]
+    if link["ellipsis"] or path.endswith(".."):
+        return ""
+    return link["base"] + path.rstrip(".")
 
 
 def contact_value(cue):
     if direct := DIRECT_CONTACT.search(cue):
+        if link := PROJECT_LINK.fullmatch(direct[0]):
+            return project_link_value(link)
         return direct[0].rstrip(".,;，。；）)")
     if label := CHANNEL_LABEL.search(cue):
         if name := CHANNEL_NAME.match(cue, label.end()):
