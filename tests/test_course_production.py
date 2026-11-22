@@ -32,6 +32,27 @@ class CourseProductionTest(unittest.TestCase):
         supplements = [{"anchor": "练习见附页", "sources": [label]}]
         validate_supplements(f"练习见附页。 {comment}", supplements, supplements)
 
+    def test_reused_footage_requires_a_visible_target_and_current_clip_proof(self):
+        with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
+            from acceptance import validate_shared_visual
+
+        chapter = "第 1 讲 打开比例菜单"
+        figure = "菜单.png"
+        proof = {"path": "第2讲复看/原画对照.json", "sha256": "a" * 64}
+        episode = {"display_number": 2, "visual_basis": "复用同一原画", "checked_sources": [proof],
+                   "shared_visual": {"chapter": chapter, "figure": figure, "proof": proof}}
+        figures = {figure: {"lesson": 7}}
+        earlier = {chapter: {"lesson": 7, "figures": {figure}}}
+        passage = f"参数选项沿用原界面，见[[#{chapter}|前一讲的比例菜单原图]]。"
+        validate_shared_visual(episode, passage, figures, earlier)
+
+        with self.assertRaisesRegex(ValueError, "指纹化"):
+            validate_shared_visual({**episode, "checked_sources": []}, passage, figures, earlier)
+        with self.assertRaisesRegex(ValueError, "前文已插入"):
+            validate_shared_visual(episode, passage, figures, {})
+        with self.assertRaisesRegex(ValueError, "读者定位"):
+            validate_shared_visual(episode, f"<!-- {passage} -->", figures, earlier)
+
     def setUp(self):
         scratch = TemporaryDirectory()
         self.addCleanup(scratch.cleanup)

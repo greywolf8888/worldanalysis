@@ -31,7 +31,7 @@ SPANS = {"教学", "原例", "说明"} | NON_TEACHING
 POINTS = {"概念", "输入", "操作", "参数", "条件", "原例", "纠错", "结果", "画面", "说明"}
 AUDIO_OUTCOMES = {"已补正文", "正文已涵盖", "非教学声音", "听辨缺口"}
 DOCUMENT_USES = {"引用", "用作转写", "参考", "重复", "原样存档", "提取缺口"}
-VISUAL_BASES = {"原片", "附件原图", "无可教学画面"}
+VISUAL_BASES = {"原片", "附件原图", "复用同一原画", "无可教学画面"}
 CHANNEL_CHECKS = ("opening", "closing", "screen", "finding")
 
 
@@ -236,7 +236,7 @@ def validate_episode(actual, expected, text, figures):
     present = figure_names(text)
     basis = actual.get("visual_basis")
     if basis not in VISUAL_BASES or not actual.get("visual_note", "").strip():
-        raise ValueError(f"第 {display_number} 讲需要确认原片画面、附件原图或无可教学画面的依据")
+        raise ValueError(f"第 {display_number} 讲需要确认原片、复用原画、附件原图或无可教学画面的依据")
     if expected.get("kind") == "audio" and basis == "原片":
         raise ValueError(f"第 {display_number} 讲为独立音频，配图须使用相应附件原图或注明来源的示意图")
     if basis == "原片" and not any(figures[name].get("lesson") == source_lesson for name in present):
@@ -283,6 +283,32 @@ def validate_review_proofs(project, review):
             validate_proof(project.work, proof)
 
 
+def validate_shared_visual(episode, text, figures, earlier_chapters):
+    shared = episode.get("shared_visual")
+    if episode["visual_basis"] != "复用同一原画":
+        if shared is not None:
+            raise ValueError("只有复用同一原画时填写 shared_visual")
+        return
+    display = episode["display_number"]
+    if episode.get("kind") == "audio" or not isinstance(shared, dict):
+        raise ValueError(f"第 {display} 讲复用原画须登记本集原片对照和前一处读者配图")
+    chapter, name, proof = (shared.get(field) for field in ("chapter", "figure", "proof"))
+    if not isinstance(chapter, str) or not isinstance(name, str):
+        raise ValueError(f"第 {display} 讲复用原画需指定已经验收的章节和原图")
+    earlier = earlier_chapters.get(chapter)
+    if (earlier is None or name not in earlier["figures"] or
+            figures.get(name, {}).get("lesson") != earlier["lesson"]):
+        raise ValueError(f"第 {display} 讲复用原画须指向前文已插入的本课原图")
+    if (not isinstance(proof, dict) or not isinstance(proof.get("path"), str) or not proof["path"].strip() or
+            not isinstance(proof.get("sha256"), str) or not re.fullmatch(r"[a-f0-9]{64}", proof["sha256"]) or
+            proof not in episode.get("checked_sources", [])):
+        raise ValueError(f"第 {display} 讲复用原画缺本集指纹化的原片对照")
+    visible = COMMENT.sub("", COLLAPSED.sub("", text))
+    target = r"\[\[#"+re.escape(chapter)+r"(?:\|[^\]\n]+)?\]\]"
+    if not any(re.search(target, part) for is_code, part in markdown_segments(visible) if not is_code):
+        raise ValueError(f"第 {display} 讲正文缺前文复用原画的读者定位")
+
+
 def validate_supplements(body, registered, reviewed):
     """A supplemental item must be readable in the same block as its hidden evidence."""
     if not isinstance(registered, list) or reviewed != registered:
@@ -317,8 +343,13 @@ def validate_review(body, figures, review, template):
     headings = [row.get("chapter") for row in episodes]
     if len(set(headings)) != len(headings) or headings != [title for title in sections if title in headings]:
         raise ValueError("逐集验收须使用对应的正文二级标题，并保持原课顺序")
+    earlier_chapters = {}
     for actual, expected in zip(episodes, template["episodes"]):
-        validate_episode(actual, expected, sections[actual["chapter"]], files)
+        chapter = actual["chapter"]
+        section = sections[chapter]
+        validate_episode(actual, expected, section, files)
+        validate_shared_visual(actual, section, files, earlier_chapters)
+        earlier_chapters[chapter] = {"lesson": actual["lesson"], "figures": figure_names(section)}
     expected_docs = {row["id"]: row for row in template["documents"]}
     documents = review.get("documents", [])
     if len(documents) != len(expected_docs) or {row.get("id") for row in documents} != set(expected_docs):
