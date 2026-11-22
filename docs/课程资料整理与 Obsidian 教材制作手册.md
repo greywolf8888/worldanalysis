@@ -323,6 +323,15 @@ Word 字段中的链接可能和显示网址不同，核对两者及所在段落
 
 `claim` 绑定现有包、原件指纹和目标文件夹，同一项目中断后从绑定信息续做。遇到同源重复时查原包和重复内容，确需独立项目笔记用 `--separate` 记录依据。待补的项目用 `batch defer` 记录所需原件和影响，下一项可继续。补件后用 `batch reopen`，核实变动时再明确登记变更。批次目录新增一级项目时用 `batch refresh` 纳入，既有顺位编号保留。`finish` 复验本项目的原件、已验收正文及同版 Obsidian 阅读回执后更新批次。清单、原件和回执留在本地。
 
+处理中发现另一个本地目录含同课缺讲时，比较共有视频的讲名、时长、多个时间点的画面和声音。转码可能改变文件哈希，可以用对齐后的音画核实。逐件检查另版独有教材、名片和附加资料，记录补入文件的路径、指纹及归属依据。把当前全部原件和确定的新增原件放在独立补料目录，经 `start` 建立另一份课程包。
+
+~~~powershell
+& $courseTool start $supplementSource --output $newCourse
+& $courseTool batch supplement $batchManifest $sequence $newCourse --reason $sourceReview
+~~~
+
+`supplement` 核对旧包的每条相对路径和文件指纹，要求新包确有新增原件，并与独立补料目录一致。批次保留原顺位、日常库目录、前一课程包和补料依据。重用旧有取材时保留匹配原件的稳定媒体编号，在 `讲次顺序.json` 中将新增讲次放回原位置。再用 `prepare` 复核缓存，按新阅读版次编写引用、配图和双向验收。
+
 ## 5. 开发入口与维护
 
 | 代码 | 责任 |
@@ -336,6 +345,7 @@ Word 字段中的链接可能和显示网址不同，核对两者及所在段落
 | [publish.py](../_tools/course_production/publish.py)、[reader_review.py](../_tools/course_production/reader_review.py)、[acceptance.py](../_tools/course_production/acceptance.py) | 同篇编译、隐藏出处、跟做校验、逐集门槛、发布与回读。 |
 | [verify_obsidian.cjs](../_tools/course_production/verify_obsidian.cjs) | 在独立 Obsidian 环境验证课程包和日常入口的同版文件，检查全部二级标题、页尾、图片与折叠。 |
 | [vault_delivery.py](../_tools/course_production/vault_delivery.py) | 更新日常库的项目名入口，保留旧版正文，生成直达链接，核对重开回执及现存文件。 |
+| [batch.py](../_tools/course_production/batch.py) 和 [test_course_batch.py](../tests/test_course_batch.py) | 批次续作、同课补料校验、保留原入口及同版回读验收。 |
 | [test_course_production.py](../tests/test_course_production.py) | 用独立生成的原料验证纯文档、全音轨、短缺口、暗色、硬字幕、采用稿更新、配套正文与出处、附件部位及作者核查、过期验收和续作。 |
 | [test_course_audio_recovery.py](../tests/test_course_audio_recovery.py) | 损坏一帧测试音频，验证其余集与原画继续取材、整课预览提示缺口，以及登记同源可读副本后按原身份续作。 |
 
