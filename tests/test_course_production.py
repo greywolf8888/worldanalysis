@@ -1,9 +1,11 @@
 """Integration coverage for fresh course folders, independent of the archived batch."""
 import hashlib
+from io import BytesIO
 import json
 import os
 from pathlib import Path
 import shutil
+from struct import pack
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -52,6 +54,41 @@ class CourseProductionTest(unittest.TestCase):
             validate_shared_visual(episode, passage, figures, {})
         with self.assertRaisesRegex(ValueError, "读者定位"):
             validate_shared_visual(episode, f"<!-- {passage} -->", figures, earlier)
+
+    def test_legacy_word_picture_inventory_keeps_original_bytes_and_separate_citations(self):
+        from PIL import Image
+        with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
+            import prepare_documents
+            from source_coverage import document_locator_valid, document_units, unit_matches
+            from word_pictures import scan_word_blips
+
+        def image_record(record_type, instance, format_name, color, uid_count):
+            content = BytesIO()
+            Image.new("RGB", (8, 5), color).save(content, format=format_name)
+            payload = b"\x00" * 16 * uid_count + b"\xff" + content.getvalue()
+            return pack("<HHI", instance << 4, record_type, len(payload)) + payload, content.getvalue()
+
+        jpeg, original = image_record(0xF01D, 0x46A, "JPEG", "navy", 1)
+        png, original_png = image_record(0xF01E, 0x6E1, "PNG", "maroon", 2)
+        pictures, gaps = scan_word_blips([("Data", b"\xff\xd8\xff" + jpeg + jpeg), ("1Table", png)])
+        self.assertFalse(gaps)
+        self.assertEqual([payload for _, payload in pictures], [original, original_png])
+        self.assertEqual([row["picture_number"] for row, _ in pictures], [1, 2])
+        self.assertEqual(len(pictures[0][0]["occurrences"]), 2)
+        document = {"units": document_units({"metadata": {"word_pictures": [row for row, _ in pictures]}})}
+        self.assertEqual([row["key"] for row in document["units"]], ["picture:1", "picture:2", "file"])
+        self.assertTrue(unit_matches(document["units"][0], "第 1 幅内嵌原图，图左上角"))
+        self.assertFalse(unit_matches(document["units"][1], "第 1 幅内嵌原图"))
+        self.assertTrue(document_locator_valid(document, "正文 · 发稿参数"))
+        self.assertFalse(document_locator_valid(document, "第 3 幅内嵌原图"))
+        _, truncated = scan_word_blips([("Data", jpeg[:-16])])
+        self.assertIn("超出原件数据范围", truncated[0]["reason"])
+        with (patch.object(prepare_documents, "legacy_doc_text", side_effect=ValueError("字体表无法读取")),
+              patch.object(prepare_documents, "read_word_pictures", return_value=(pictures, []))):
+            partial = prepare_documents.legacy_doc(self.source / "讲义.doc")
+        self.assertEqual(partial["processing_status"], "partial")
+        self.assertEqual(len(partial["metadata"]["word_pictures"]), 2)
+        self.assertIn("文字提取需要补查", partial["gaps"][0]["reason"])
 
     def setUp(self):
         scratch = TemporaryDirectory()

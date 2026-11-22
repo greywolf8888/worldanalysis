@@ -10,6 +10,7 @@ from archive_media import ARCHIVE_SIGNATURES, seven_zip_tool
 from prepare_archive import read_archive
 from prepare_html import HTML_SUFFIXES, local_html
 from project import put, read, sha, write
+from word_pictures import SOURCE_CACHE_VERSION as WORD_CACHE_VERSION, read_word_pictures
 from worldanalysis.documents import PROVIDER_VERSION, extract
 
 
@@ -36,14 +37,34 @@ def mindmap(file):
     return {"processing_status":"extracted","blocks":blocks,"gaps":[]}
 
 
-def legacy_doc(file):
+def legacy_doc_text(file):
     runner=Path(__file__).with_name("word_body.cjs")
     run=subprocess.run(["node",str(runner),str(file)],capture_output=True,timeout=45)
     if run.returncode:raise ValueError(run.stderr.decode("utf8","replace").strip()[:240])
     result=json.loads(run.stdout)
-    blocks=[{"locator":{"part":part},"text":value} for part,value in result.items() if value and value.strip()]
-    if blocks:return {"processing_status":"extracted","blocks":blocks,"gaps":[]}
-    return {"processing_status":"review_visual","blocks":[],"gaps":[{"reason":"正文为空，待检查嵌图或版式"}]}
+    return [{"locator":{"part":part},"text":value} for part,value in result.items() if value and value.strip()]
+
+
+def legacy_doc(file):
+    gaps = []
+    try:
+        blocks = legacy_doc_text(file)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        blocks = []
+        gaps.append({"reason": f"旧版 Word 文字提取需要补查。{error}"})
+    try:
+        pictures, picture_gaps = read_word_pictures(file)
+        gaps.extend(picture_gaps)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        pictures = []
+        gaps.append({"reason": f"旧版 Word 原图提取需要补查。{error}"})
+    if not pictures and any("\ufffc" in block["text"] for block in blocks) and not gaps:
+        gaps.append({"reason":"旧版 Word 文本含对象占位，需确认原图或对象的实际用途"})
+    if not blocks and not pictures:
+        gaps.append({"reason":"正文与原图为空，待检查原件版式"})
+    status = "partial" if gaps and (blocks or pictures) else "review_visual" if gaps else "extracted"
+    return {"processing_status":status,"blocks":blocks,"gaps":gaps,
+            "metadata":{"word_pictures":[picture for picture,_ in pictures]}}
 
 
 def internet_shortcut(file):
@@ -124,6 +145,8 @@ def prepare_documents(raw, records, meta, work):
             cache_name += "-static"
         if ext in ARCHIVE_SIGNATURES:
             cache_name += "-members-7zip" if seven_zip_tool() else "-members"
+        if ext == ".doc":
+            cache_name += f"-{WORD_CACHE_VERSION}" + ("-7zip" if seven_zip_tool() else "")
         if ext in (".pdf", ".srt") or ext in ARCHIVE_SIGNATURES:
             cache_name += f"-{PROVIDER_VERSION}"
         cache=docs/(cache_name+".json")

@@ -7,6 +7,15 @@ const WordExtractor = require(path.join(path.resolve(runtime), "course-method-do
 async function main() {
   const parser = new WordExtractor();
   const doc = await parser.extract(fs.readFileSync(process.argv[2]));
-  process.stdout.write(JSON.stringify({body:doc.getBody(),textboxes:doc.getTextboxes()}));
+  process.stdout.write(JSON.stringify({
+    body: doc.getBody(),
+    textboxes: doc.getTextboxes({includeHeadersAndFooters: false}),
+    headerTextboxes: doc.getTextboxes({includeBody: false}),
+    headers: doc.getHeaders({includeFooters: false}),
+    footers: doc.getFooters(),
+    footnotes: doc.getFootnotes(),
+    endnotes: doc.getEndnotes(),
+    annotations: doc.getAnnotations(),
+  }));
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

@@ -44,6 +44,8 @@ def figure_location(info, display_numbers):
         start, end = spec["range_s"]
         return f"第 {display_numbers[spec['lesson']]} 讲 {stamp(start)}–{stamp(end)} · {spec['basis']}"
     if "document" in info:
+        if "picture" in info:
+            return f"《{Path(info['source']).name}》第 {info['picture']} 幅内嵌原图"
         return f"《{Path(info['source']).name}》第 {info['page']} 页"
     hours, remainder = divmod(round(info["pts"] * 100), 360000)
     minutes, centiseconds = divmod(remainder, 6000)
@@ -63,9 +65,11 @@ def check_figure(course, info, *, ledger, art_root):
         if digest != info["diagram_sha256"]:
             raise ValueError(f"整理示意图已变动 {info['name']}")
     elif "document" in info:
+        embedded_picture = "picture" in info
+        page = info["picture" if embedded_picture else "page"]
         original, frame = document_image(
-            course, info["document"], info["page"], info["scale"], ledger=ledger,
-            full_slide=info.get("full_slide", False),
+            course, info["document"], page, info["scale"], ledger=ledger,
+            full_slide=info.get("full_slide", False), embedded_picture=embedded_picture,
         )
     else:
         original, frame, pts = orig(course, info["lesson"], info["pts"], ledger=ledger)

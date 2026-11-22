@@ -90,19 +90,31 @@ def rendered_slide(filename, page):
             return image.copy()
 
 
-def document_image(path, doc_id, page, scale, *, ledger, full_slide=False):
-    import pypdfium2 as pdfium
+def document_image(path, doc_id, page, scale, *, ledger, full_slide=False, embedded_picture=False):
     if not isinstance(page, int) or isinstance(page, bool) or page < 1 or not math.isfinite(scale) or not 0 < scale <= 4:
-        raise ValueError("使用正整数页码，PDF 取图倍率须大于 0 且不超过 4")
+        raise ValueError("使用从 1 开始的页码或内嵌图编号，取图倍率须大于 0 且不超过 4")
     inventory=read(ledger / "documents-summary.json")["records"]
     source=next(v["file"] for v in inventory if v["id"]==doc_id)
     raw=(path/"原始资料").resolve()
     filename=local_child(raw, source)
+    if embedded_picture:
+        if filename.suffix.lower() != ".doc" or full_slide or scale != 1:
+            raise ValueError("旧版 Word 原图按内嵌图编号原倍率读取")
+        from word_pictures import read_word_pictures
+
+        pictures, _ = read_word_pictures(filename)
+        if page > len(pictures):
+            raise ValueError(f"找不到旧版 Word 第 {page} 幅内嵌原图")
+        _, payload = pictures[page - 1]
+        with Image.open(BytesIO(payload)) as image:
+            return source, image.copy()
     if full_slide:
         if filename.suffix.lower() != ".pptx":
             raise ValueError("完整幻灯片渲染只用于 PPTX")
         return source, rendered_slide(filename, page)
     if filename.suffix.lower()==".pdf":
+        import pypdfium2 as pdfium
+
         with pdfium.PdfDocument(filename) as pdf:
             if page > len(pdf):
                 raise ValueError(f"页码超出 PDF 范围 {page}")
@@ -215,10 +227,17 @@ def keep(path, entries, append=False, *, ledger, output_root):
             src, img, digest = diagram_source(path, ledger, output_root.parent, spec)
             locator = {"diagram": spec, "diagram_sha256": digest}
         elif "document" in entry:
-            doc=entry["document"];page=entry["page"];scale=entry.get("scale",1)
+            doc = entry["document"]
+            embedded_picture = "picture" in entry
+            if embedded_picture and "page" in entry:
+                raise ValueError("同一张图只能按原件页码或按内嵌图编号登记")
+            locator_key = "picture" if embedded_picture else "page"
+            page = entry[locator_key]
+            scale = entry.get("scale", 1)
             full_slide = entry.get("full_slide", False)
-            src,img=document_image(path,doc,page,scale,ledger=ledger,full_slide=full_slide)
-            locator={"document":doc,"page":page,"scale":scale}
+            src, img = document_image(path, doc, page, scale, ledger=ledger, full_slide=full_slide,
+                                      embedded_picture=embedded_picture)
+            locator = {"document":doc, locator_key:page, "scale":scale}
             if full_slide:
                 locator["full_slide"] = True
         else:

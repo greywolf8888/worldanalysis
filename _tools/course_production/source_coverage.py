@@ -32,6 +32,7 @@ COMMENTS = re.compile(r"<!--([\s\S]*?)-->")
 PARAGRAPH_SOURCE = re.compile(r"<!-- 段落出处 ([^\n]+?) -->")
 VIDEO_LABEL = re.compile(r"第 (\d+) 讲 ([0-9:.]+)(?:–([0-9:.]+))?(?=$| · )")
 PAGE_LABEL = re.compile(r"(?:第\s*)?(\d+)\s*(?:(?:[–—~～-]|至|到)\s*(\d+)\s*)?(?:页|張|张|张幻灯片)")
+PICTURE_LABEL = re.compile(r"第\s*(\d+)\s*(?:幅|张)\s*内嵌原图")
 CELL_LABEL = re.compile(r"(?<![A-Z0-9_])\$?([A-Z]{1,3})\$?([1-9][0-9]*)(?![A-Z0-9_])", re.IGNORECASE)
 COLLAPSED = re.compile(
     r"^ {0,3}>[ \t]*\[![^\]\n]+\]-[^\n]*(?:\n[ \t]*>[^\n]*)*"
@@ -74,6 +75,9 @@ def document_units(result):
 
     for number in range(1, meta.get("page_count", 0) + 1):
         add(unit("page", number))
+    pictures = meta.get("word_pictures", [])
+    for picture in pictures:
+        add({**unit("picture", picture["picture_number"]), "source_picture": picture})
     for link in meta.get("pdf_hyperlinks", []):
         key = f"page:{link['page_number']}"
         units[key].setdefault("pdf_hyperlinks", []).append(link)
@@ -113,7 +117,7 @@ def document_units(result):
             located = locator_unit(blocks[indexes[0]].get("locator"))
         key = located["key"] if located and located["key"] in units else "file"
         gaps.setdefault(key, []).append(gap.get("reason", "原件提取缺口"))
-    if not units or "file" in gaps:
+    if pictures or not units or "file" in gaps:
         units["file"] = {"key": "file", "kind": "file", "value": "整份原件"}
     for key, item in units.items():
         if key in gaps:
@@ -330,6 +334,8 @@ def unit_matches(unit, label):
     kind, value = unit["kind"], unit["value"]
     if kind in {"page", "slide"}:
         return any(int(first) <= value <= int(last or first) for first, last in PAGE_LABEL.findall(label))
+    if kind == "picture":
+        return value in {int(number) for number in PICTURE_LABEL.findall(label)}
     if kind == "sheet":
         return bool(re.search(r"(?<![a-z0-9_])" + re.escape(str(value)) + r"(?![a-z0-9_])", label, re.IGNORECASE))
     if kind == "member":
@@ -340,6 +346,10 @@ def unit_matches(unit, label):
 
 def document_locator_valid(document, label):
     units = document["units"]
+    pictures = {unit["value"] for unit in units if unit["kind"] == "picture"}
+    if pictures:
+        requested = {int(number) for number in PICTURE_LABEL.findall(label)}
+        return requested <= pictures and populated(label)
     pages = {unit["value"] for unit in units if unit["kind"] in {"page", "slide"}}
     if pages:
         ranges = [(int(first), int(last or first)) for first, last in PAGE_LABEL.findall(label)]
