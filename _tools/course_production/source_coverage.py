@@ -25,6 +25,17 @@ CONTACT = re.compile(
     r"\b(?:WeChat|QQ)\s*(?:ID|群|号|[:：])|作者(?:主页|频道|微信)|讲师(?:主页|频道|微信)|"
     r"资料(?:领取|下载)链接|(?:作者|讲师|技术)支持", re.IGNORECASE,
 )
+CHANNEL_LABEL = re.compile(r"(?:公众号|视频号|(?:作者|讲师)(?:主页|频道))(?:名称|账号)?[ \t]*[:：]")
+CHANNEL_INVITATION = re.compile(
+    r"(?:关注|订阅|搜索|搜一下|我(?:也|还)?会在)[^。！？\r\n]{0,30}"
+    r"(?:公众号|视频号|我的主页|作者主页|作者频道|课程群)|"
+    r"(?:在|到)[^。！？\r\n]{0,16}(?:评论区|下方|下面|底下)[^。！？\r\n]{0,12}"
+    r"留言[^。！？\r\n]{0,30}(?:资料|文件|模板|提示词|答疑)",
+)
+CHANNEL_NAME = re.compile(
+    r"[ \t]*[「『“\"《]?([\u3400-\u9fffA-Za-z0-9_.·-]{2,32})"
+    r"(?=[ \t]*(?:[」』”\"》，,。；;：（(\r\n]|$))"
+)
 CONTACT_TOKEN = re.compile(r"https?://\S+|(?:\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b)|[a-z0-9_-]{5,}", re.IGNORECASE)
 DIRECT_CONTACT = re.compile(r"https?://[^\s<>）】\]]+|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b", re.IGNORECASE)
 CONTACT_ID = re.compile(r"^\s*(?:是|为)?\s*[:：]?\s*([a-z0-9_][a-z0-9_.-]{4,63})", re.IGNORECASE)
@@ -142,6 +153,10 @@ def archive_unit_index(classified):
     return index
 
 
+def contact_hint(text):
+    return CHANNEL_LABEL.search(text) or CONTACT.search(text) or CHANNEL_INVITATION.search(text)
+
+
 def document_candidates(identifier, name, result, known_units):
     candidates = {}
     for block in result.get("blocks", []):
@@ -150,12 +165,14 @@ def document_candidates(identifier, name, result, known_units):
         location = locator_unit(locator)
         key = location["key"] if location and location["key"] in known_units else "file"
         explicit_link = (Path(name).suffix.lower() == ".url" and locator.get("field") == "URL")
-        match = CONTACT.search(text)
+        match = contact_hint(text)
         if not explicit_link and not match:
             continue
         start = max(0, match.start() - 24) if match else 0
         cue = text[start:start + 150].strip()
-        if not explicit_link and not CONTACT_TOKEN.search(cue):
+        if not explicit_link and not (
+            CONTACT_TOKEN.search(cue) or CHANNEL_LABEL.search(cue) or CHANNEL_INVITATION.search(cue)
+        ):
             continue
         cand_id = f"{identifier}-{fingerprint([key, cue])[:12]}"
         candidates[cand_id] = {"id": cand_id, "unit": key, "cue": cue,
@@ -166,6 +183,9 @@ def document_candidates(identifier, name, result, known_units):
 def contact_value(cue):
     if direct := DIRECT_CONTACT.search(cue):
         return direct[0].rstrip(".,;，。；）)")
+    if label := CHANNEL_LABEL.search(cue):
+        if name := CHANNEL_NAME.match(cue, label.end()):
+            return name[1]
     if hint := CONTACT.search(cue):
         if account := CONTACT_ID.match(cue[hint.end():]):
             return account[1]
@@ -176,7 +196,7 @@ def video_candidates(lesson, duration, sources):
     candidates = {}
     for row in sources:
         text = row.get("text", "")
-        match = CONTACT.search(text)
+        match = contact_hint(text)
         if not match:
             continue
         start, end = row["start"], min(row["end"], duration)

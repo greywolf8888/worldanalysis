@@ -11,8 +11,8 @@ from unittest.mock import patch
 TOOLS = Path(__file__).resolve().parents[1] / "_tools/course_production"
 with patch.object(sys, "path", [str(TOOLS), *sys.path]):
     from project import put
-    from source_coverage import (build_source_manifest, coverage_review_template, document_locator_valid, document_units,
-                                 validate_source_coverage)
+    from source_coverage import (build_source_manifest, coverage_review_template, document_candidates,
+                                 document_locator_valid, document_units, validate_source_coverage, video_candidates)
 
 
 START = "打开画板并确认比例。 <!-- 段落出处 第 1 讲 00:00–02:00 -->"
@@ -135,6 +135,22 @@ class SourceCoverageTest(unittest.TestCase):
         self.review["source_coverage"]["videos"][0]["candidates"].clear()
         with self.assertRaisesRegex(ValueError, "作者候选"):
             validate_source_coverage(body, self.scope, self.review)
+
+    def test_spoken_invitations_require_a_source_review_without_a_transcribed_name(self):
+        cues = [
+            {"start": 0, "end": 4, "text": "视频号可以发布自己的原创短片。"},
+            {"start": 4, "end": 9, "text": "有兴趣可以关注一下我自己的公众号，课后案例还会继续分享。"},
+            {"start": 9, "end": 14, "text": "可以在原视频底下留言，我会把提示词文件给你。"},
+        ]
+        candidates = video_candidates(1, 14, cues)
+        self.assertEqual([item["range_s"] for item in candidates], [[4, 9], [9, 14]])
+        self.assertTrue(all(item["value"] == "" for item in candidates))
+
+    def test_attachment_with_a_chinese_channel_name_remains_a_review_candidate(self):
+        result = {"blocks": [{"text": "公众号：『示范课堂·第2站』。可查询课后问题。"}]}
+        candidate, = document_candidates("D001", "说明.docx", result, {})
+        self.assertEqual(candidate["value"], "示范课堂·第2站")
+        self.assertEqual(candidate["unit"], "file")
 
     def test_manually_read_author_identifier_matches_the_same_source_block(self):
         self.scope["videos"][0]["candidates"].clear()
