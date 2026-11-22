@@ -175,6 +175,10 @@ PDF 先读原生文字和图片位置。带内嵌截图的页面同时保留整�
 
 PDF 的 URI 链接注释离线保存到提取结果的 `metadata.pdf_hyperlinks`，`coverage` 按原页列出。记录原始目标、PDF 用户空间中的矩形以及它是否与有效页面范围相交。相交只是定位信息，仍要看渲染页确定实际可见内容与归属。提取只记录本地原件中的目标和位置。按原链接阅读时另记可访问到的内容。有两处点击区域指向同一个教学资料时，读者入口合并，原件回执保留两处。文本层残留的页外广告、图内的新规则和作者小字均用原页或局部放大图定位。
 
+旧版二进制 Word 用 `word-extractor` 读正文、正文和页边文本框、页眉页脚、脚注、尾注及批注。本机 7-Zip 按索引只读展开可用的 `Data`、表流和 `WordDocument`，识别并校验 OfficeArt 中的 JPEG、PNG 和 TIFF 原图。提取结果的 `metadata.word_pictures` 保留图号、尺寸、原数据指纹，以及各重复项的原始流和字节范围。图号供定位源资源，段落安排仍以文档和原课实际内容为准。疑似损坏或未能解码的图保留缺口。 [Word 内嵌图片记录](https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-doc/dedb7505-8cc4-4053-aa2d-431b18d4bd97) · [OfficeArt 图片类型](https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-odraw/c67b883b-8136-4e91-a1a3-2981d16e934f)
+
+用 `keep` 选旧 DOC 原图时，图片条目填 `document`、`picture` 和 `name`，裁切框可选，图片保持原倍率。段落用 `{{D003|第 2 幅内嵌原图}}` 关联到附件图片。预览会从 DOC 重取原图并核像素。只读验收须逐个确认为学习样例、操作界面、作者渠道或没有独立教学用途。
+
 课程脚本用 7-Zip 或 libarchive 读取 RAR 和 7z。可通过 PATH 中的 `7z` 或 `7zz` 使用 7-Zip，也可以将 `WORLDANALYSIS_7ZIP` 指向本机的绝对路径。没有配置 7-Zip 时使用 Windows 的 `tar.exe` 或系统中的 `bsdtar`。如果归档工具漏读 Unicode 文件名，将运行环境指向 7-Zip 后复跑 `prepare`，再核成员清单、字节与原片。成员以编号存入课程包的 `.course/work/资料`，由资料记录中的 `archive_members` 对应原路径、文件指纹、保留副本与提取结果。档内文字按工作表、段落等位置复核，图片读实际画面。特殊成员、加密、超限和无法读取的内容在资料记录中留下缺口。旧版已核的音画取材可以复用。 [7-Zip](https://www.7-zip.org/) · [libarchive 官方手册](https://github.com/libarchive/libarchive/blob/master/tar/bsdtar.1)
 
 媒体盘点独立查看 ZIP、RAR、7z 的原路径和可读成员，逐层登记教学音视频。`status` 报告待核媒体和 `.course/ledger/media-inventory.json` 的位置。核对待定媒体的实际用途后，在 `.course/work/媒体归类.json` 以完整来源定位为键，填 `role` 和 `reason`。角色使用 `教学`、`参考` 或 `重复`。重复项用 `target` 指向已确认的教学源。字节相同可共用取材，画面或转写相似的版本先核特有操作、配音和时间轴。回跑 `prepare` 后查看讲次顺序，已有讲号会保留，新增教学媒体使用新讲号。音频讲解完整转写，沿录音时间定位正文。有并行原片时保留音画对应证据。
