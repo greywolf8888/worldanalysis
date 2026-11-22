@@ -199,6 +199,28 @@ class SourceCoverageTest(unittest.TestCase):
         self.assertEqual({item["value"] for item in candidates}, {"github.com/example-a", "gitee.com/example-b"})
         self.assertEqual(len({item["id"] for item in candidates}), 2)
 
+    def test_plain_text_course_pointer_remains_an_independent_candidate(self):
+        url = "https://example.org/docs/course?from=share"
+        result = {"blocks": [{"text": f"{url}\r\n\r\n复制链接在浏览器中打开。"},
+                             {"text": "更多项目见 https://example.org/advertising 的说明。"},
+                             {"text": "tool.example.ai\n参考素材.png"}]}
+        candidates = document_candidates("D002", "课程入口.txt", result, {})
+        self.assertEqual([(item["unit"], item["value"]) for item in candidates],
+                         [("file", url), ("file", "tool.example.ai")])
+
+    def test_pdf_links_keep_distinct_case_sensitive_targets_and_page_locations(self):
+        first = "https://example.org/share/AB"
+        second = "https://example.org/share/ab"
+        result = {"metadata": {"page_count": 2, "pdf_hyperlinks": [
+            {"page_number": 1, "target": first, "intersects_page_box": True},
+            {"page_number": 1, "target": second, "intersects_page_box": True},
+            {"page_number": 2, "target": first, "intersects_page_box": False},
+        ]}, "blocks": [{"locator": {"page_number": 1}, "text": first}]}
+        units = {item["key"]: item for item in document_units(result)}
+        candidates = document_candidates("D001", "讲义.pdf", result, units)
+        self.assertEqual([(item["unit"], item["value"]) for item in candidates],
+                         [("page:1", first), ("page:1", second), ("page:2", first)])
+
     def test_original_supplement_reference_with_external_provenance_on_same_line(self):
         source = "配套讲义.pdf · 第 2 页"
         body = f"原作者入口。 <!-- 段落出处 {source} --> <!-- 外部出处 https://example.org/author -->"

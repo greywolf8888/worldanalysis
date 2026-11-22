@@ -43,6 +43,11 @@ CHANNEL_NAME = re.compile(
 )
 CONTACT_TOKEN = re.compile(r"https?://\S+|(?:\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b)|[a-z0-9_-]{5,}", re.IGNORECASE)
 DIRECT_CONTACT = re.compile(r"https?://[^\s<>）】\]]+|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b", re.IGNORECASE)
+STANDALONE_URL = re.compile(
+    r"^[ \t]*(https?://[^\s<>]+|"
+    r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com\.cn|com|cn|org|net|ai|io|edu|gov)"
+    r"(?::[0-9]+)?(?:[/?#][^\s<>]*)?)[ \t]*\r?$", re.IGNORECASE | re.MULTILINE,
+)
 CONTACT_ID = re.compile(r"^\s*(?:是|为)?\s*[:：]?\s*([a-z0-9_][a-z0-9_.-]{4,63})", re.IGNORECASE)
 PROJECT_LINK = re.compile(
     r"(?<![A-Za-z0-9_@./-])(?P<base>(?:https?://)?(?:github\.com|gitee\.com)/)"
@@ -173,7 +178,9 @@ def document_candidates(identifier, name, result, known_units):
     recorded = set()
 
     def add(key, cue, value):
-        identity = (key, re.sub(r"^https?://", "", value, flags=re.IGNORECASE).casefold() if value else cue)
+        comparable = re.sub(r"^https?://", "", value, flags=re.IGNORECASE)
+        comparable = re.sub(r"^[^/?#]+", lambda authority: authority[0].casefold(), comparable)
+        identity = (key, comparable if value else cue)
         if identity in recorded:
             return
         recorded.add(identity)
@@ -195,16 +202,30 @@ def document_candidates(identifier, name, result, known_units):
             if (explicit_link or CONTACT_TOKEN.search(cue) or CHANNEL_LABEL.search(cue)
                     or CHANNEL_INVITATION.search(cue) or COURSE_SUPPORT.search(cue)):
                 add(key, cue, contact_value(cue))
+        wrapped_links = set()
         for link in PROJECT_LINK.finditer(text):
             # Keep the exact printed fragment as evidence. A line break alone
             # can be joined, but an ellipsis cannot supply missing characters.
             cue = text[max(0, link.start() - 24):link.end() + 36].strip()
             add(key, cue, project_link_value(link))
+            if "\n" in link[0]:
+                wrapped_links.add(link.start())
+        for link in STANDALONE_URL.finditer(text):
+            if link.start(1) in wrapped_links:
+                continue
+            cue = link[1]
+            if match := PROJECT_LINK.fullmatch(cue):
+                if not project_link_value(match):
+                    continue
+            value = contact_value(cue) or cue
+            add(key, cue, value)
     for key, item in known_units.items():
         for link in item.get("pdf_hyperlinks", []):
             target = link["target"].strip()
             if match := PROJECT_LINK.fullmatch(target):
                 add(key, f"PDF 链接注释：{target}", project_link_value(match))
+            elif re.fullmatch(r"https?://[^\s<>]+", target, re.IGNORECASE):
+                add(key, f"PDF 链接注释：{target}", target)
     return list(candidates.values())
 
 
