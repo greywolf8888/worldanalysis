@@ -32,6 +32,11 @@ CHANNEL_INVITATION = re.compile(
     r"(?:在|到)[^。！？\r\n]{0,16}(?:评论区|下方|下面|底下)[^。！？\r\n]{0,12}"
     r"留言[^。！？\r\n]{0,30}(?:资料|文件|模板|提示词|答疑)",
 )
+COURSE_SUPPORT = re.compile(
+    r"(?:联系|问|找|艾特|私信|@)[ \t]*(?:一下)?(?:咱们|你们|我们|我的|你的)?的?"
+    r"(?:值班老师|带班老师|团长|师傅|助教)|"
+    r"(?:给|向)(?:我|老师|助教)发(?:条|一条)?(?:消息|信息)"
+)
 CHANNEL_NAME = re.compile(
     r"[ \t]*[「『“\"《]?([\u3400-\u9fffA-Za-z0-9_.·-]{2,32})"
     r"(?=[ \t]*(?:[」』”\"》，,。；;：（(\r\n]|$))"
@@ -159,7 +164,8 @@ def archive_unit_index(classified):
 
 
 def contact_hint(text):
-    return CHANNEL_LABEL.search(text) or CONTACT.search(text) or CHANNEL_INVITATION.search(text)
+    return (CHANNEL_LABEL.search(text) or CONTACT.search(text) or
+            CHANNEL_INVITATION.search(text) or COURSE_SUPPORT.search(text))
 
 
 def document_candidates(identifier, name, result, known_units):
@@ -186,7 +192,8 @@ def document_candidates(identifier, name, result, known_units):
         if explicit_link or match:
             start = max(0, match.start() - 24) if match else 0
             cue = text[start:start + 150].strip()
-            if explicit_link or CONTACT_TOKEN.search(cue) or CHANNEL_LABEL.search(cue) or CHANNEL_INVITATION.search(cue):
+            if (explicit_link or CONTACT_TOKEN.search(cue) or CHANNEL_LABEL.search(cue)
+                    or CHANNEL_INVITATION.search(cue) or COURSE_SUPPORT.search(cue)):
                 add(key, cue, contact_value(cue))
         for link in PROJECT_LINK.finditer(text):
             # Keep the exact printed fragment as evidence. A line break alone

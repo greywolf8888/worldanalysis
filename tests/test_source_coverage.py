@@ -147,6 +147,17 @@ class SourceCoverageTest(unittest.TestCase):
         self.assertEqual([item["range_s"] for item in candidates], [[4, 9], [9, 14]])
         self.assertTrue(all(item["value"] == "" for item in candidates))
 
+    def test_class_support_roles_without_a_public_account_are_still_candidates(self):
+        cues = [
+            {"start": 0, "end": 4, "text": "笔记已经发到各位团长手里。"},
+            {"start": 4, "end": 9, "text": "提示词需要的话可以找你们的团长。"},
+            {"start": 9, "end": 14, "text": "不清楚的在交流群艾特咱们的值班老师。"},
+            {"start": 14, "end": 20, "text": "不会的话也可以给我发信息。"},
+        ]
+        candidates = video_candidates(1, 20, cues)
+        self.assertEqual([item["range_s"] for item in candidates], [[4, 9], [9, 14], [14, 20]])
+        self.assertTrue(all(item["value"] == "" for item in candidates))
+
     def test_attachment_with_a_chinese_channel_name_remains_a_review_candidate(self):
         result = {"blocks": [{"text": "公众号：『示范课堂·第2站』。可查询课后问题。"}]}
         candidate, = document_candidates("D001", "说明.docx", result, {})
