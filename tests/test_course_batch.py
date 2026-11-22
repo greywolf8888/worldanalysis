@@ -211,6 +211,55 @@ class CourseBatchTest(unittest.TestCase):
         self.assertIn("不在原路径", self.command("claim", self.state, 1, package, success=False))
         self.assertIn("已绑定课程包", self.command("claim", self.state, 1, backup, success=False))
 
+    def test_supplement_preserves_sequence_and_reuses_the_named_vault_entry(self):
+        source = self.source_folder("第2项", "课程说明")
+        self.source_folder("第3项", "另一门课")
+        self.initialize()
+        previous = CourseProject.initialize(source, self.root / "初版")
+        before = self.command("claim", self.state, 1, previous.folder, "--course-folder", "已有课程名")
+        combined = self.root / "补料原件"
+        (combined / "资料").mkdir(parents=True)
+        (combined / "资料/说明.md").write_text("课程说明", encoding="utf-8")
+        (combined / "首讲.md").write_text("从同课完整版本核出的新增材料", encoding="utf-8")
+        package = self.root / "新版"
+        project = CourseProject.initialize(combined, package)
+
+        reason = "同课另一版的共有材料已比对，补回首讲"
+        result = self.command("supplement", self.state, 1, package, "--reason", reason)
+        self.assertEqual(result["status"], batch.ACTIVE)
+        self.assertEqual(result["course_folder"], before["course_folder"])
+        self.assertEqual(result["source_sha256"], before["source_sha256"])
+        self.assertEqual(result["supplemented_sha256"], batch.source_fingerprint(project.validate_raw()))
+        self.assertIn("补回首讲", result["supplement_reason"])
+        self.assertEqual(len(previous.validate_raw()), 1)
+        self.assertEqual(batch.read(self.state)["projects"][0]["history"][-1]["package"], str(previous.folder))
+        self.assertEqual(self.command("status", self.state)["next"], 1)
+        once = self.state.read_bytes()
+        self.assertEqual(self.command("supplement", self.state, 1, package, "--reason", reason), result)
+        self.assertEqual(self.command("claim", self.state, 1, package), result)
+        self.assertEqual(self.state.read_bytes(), once)
+        self.existing_publication(combined, package, folder=before["course_folder"])
+        finished = self.command("finish", self.state, 1, package)
+        self.assertEqual(finished["status"], batch.COMPLETE)
+        self.assertEqual(Path(finished["publication"]["entry"]).name, "已有课程名.md")
+        self.assertEqual(self.command("status", self.state)["next"], 2)
+
+    def test_supplement_cannot_replace_an_existing_original(self):
+        source = self.source_folder("课程", "课程原件")
+        self.initialize()
+        previous = CourseProject.initialize(source, self.root / "初版")
+        self.command("claim", self.state, 1, previous.folder)
+        combined = self.root / "补料原件"
+        (combined / "资料").mkdir(parents=True)
+        (combined / "资料/说明.md").write_text("替换内容", encoding="utf-8")
+        (combined / "首讲.md").write_text("新增原件", encoding="utf-8")
+        project = CourseProject.initialize(combined, self.root / "新版")
+        unchanged = self.state.read_bytes()
+        error = self.command("supplement", self.state, 1, project.folder, "--reason", "待补第一讲", success=False)
+        self.assertIn("逐件保留原快照", error)
+        self.assertEqual(self.state.read_bytes(), unchanged)
+        self.assertEqual(len(previous.validate_raw()), 1)
+
     def test_simultaneous_claims_cannot_bind_different_course_packages(self):
         self.source_folder("文档项目", "课程说明")
         self.initialize()

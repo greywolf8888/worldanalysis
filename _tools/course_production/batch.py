@@ -254,7 +254,8 @@ def require_turn(queue, row):
 
 def preserve(row):
     prior = {k: row[k] for k in ("status", "reason", "package", "course_folder", "source_sha256",
-                               "content_sha256", "publication", "package_ready", "last_changed") if k in row}
+                               "content_sha256", "publication", "package_ready", "last_changed",
+                               "supplemented_origin", "supplemented_sha256", "supplement_reason") if k in row}
     row.setdefault("history", []).append({**prior, "metadata_sha256": digest(row["metadata"])})
 
 
@@ -285,6 +286,44 @@ def claim(queue, row, package, folder=None, separate=None):
            duplicates=duplicates, duplicate_decision=decision, reason=None)
 
 
+def supplement(queue, row, package, reason):
+    require_turn(queue, row)
+    reason = reason.strip()
+    if row["status"] != ACTIVE or not row.get("package") or not reason:
+        raise ValueError("请先领取项目，并给出同一课程补料的核对依据")
+    previous_path = safe_path(row["package"])
+    package = safe_path(package)
+    check_target(queue, dict(row, package=None, package_ready=False), package, row["course_folder"])
+    source, originals, identity = identify(queue, row)
+    project = CourseProject.open(package)
+    if package == previous_path:
+        if row.get("supplement_reason") != reason:
+            raise ValueError("补料需要另一份新入库的课程包")
+        with project.locked():
+            verify_identity(project, source, originals, row)
+        return
+
+    origin = safe_path(project_origin(project))
+    archive = Path(queue["source"])
+    vault = Path(queue["vault"]) if queue["vault"] else None
+    if (origin.is_relative_to(archive) or archive.is_relative_to(origin)
+            or (vault and (origin.is_relative_to(vault) or vault.is_relative_to(origin)))):
+        raise ValueError("请在批次原件和日常库之外准备补料快照")
+    previous = CourseProject.open(previous_path)
+    with previous.locked(), project.locked():
+        retained = verify_identity(previous, source, originals, row)
+        combined = project.validate_raw()
+        by_name = {item["file"]: item for item in combined}
+        if len(combined) <= len(retained) or any(by_name.get(item["file"]) != item for item in retained):
+            raise ValueError("补料包须逐件保留原快照的路径和指纹，并包含新增原件")
+        if inventory_files(origin) != combined:
+            raise ValueError("补料快照和新课程包的原件不一致")
+        check_current_metadata(queue, row)
+        change(row, ACTIVE, **identity, package=str(package), package_ready=True,
+               supplemented_origin=str(origin), supplemented_sha256=source_fingerprint(combined),
+               supplemented_confirmed=True, supplement_reason=reason)
+
+
 def defer(queue, row, reason):
     if not reason.strip():
         raise ValueError("请登记缺少的原件或具体阻塞")
@@ -309,7 +348,8 @@ def reopen(queue, row, accept_changes=None):
         if row["status"] != PENDING or current != row["metadata"] or row.get("reason") != accept_changes:
             preserve(row)
             for key in ("source_sha256", "content_sha256", "package", "package_ready", "duplicates", "duplicate_decision",
-                        "publication", "supplemented_origin", "supplemented_sha256", "supplemented_confirmed"):
+                        "publication", "supplemented_origin", "supplemented_sha256", "supplemented_confirmed",
+                        "supplement_reason"):
                 row.pop(key, None)
             row.update(status=PENDING, metadata=current, reason=accept_changes, last_changed=timestamp())
         return
@@ -582,17 +622,19 @@ def add_arguments(commands):
                       help="核实当前续作原件，历史验收项目保留回执和版次，稍后逐项复验")
     sub.add_parser("status", help="查看项目进度和原件范围变化").add_argument("manifest", type=Path)
     sub.add_parser("refresh", help="登记新增项目并保留原有项目编号").add_argument("manifest", type=Path)
-    for name in ("claim", "defer", "reopen", "finish"):
+    for name in ("claim", "defer", "reopen", "finish", "supplement"):
         action = sub.add_parser(name)
         action.add_argument("manifest", type=Path)
         action.add_argument("sequence", type=int)
-        if name in ("claim", "finish"):
+        if name in ("claim", "finish", "supplement"):
             action.add_argument("package", type=Path)
         if name == "claim":
             action.add_argument("--course-folder")
             action.add_argument("--separate", metavar="REASON")
         if name == "defer":
             action.add_argument("reason")
+        if name == "supplement":
+            action.add_argument("--reason", required=True, help="同一课程新增原件的核对依据")
         if name == "reopen":
             action.add_argument("--accept-changes", metavar="REASON")
 
@@ -625,6 +667,8 @@ def run(args):
                             defer(queue, row, args.reason)
                         elif action == "reopen":
                             reopen(queue, row, args.accept_changes)
+                        elif action == "supplement":
+                            supplement(queue, row, args.package, args.reason)
                         else:
                             finish(queue, row, args.package)
                         result = describe_row(queue, row)
