@@ -1,5 +1,6 @@
 """Record the follow-along review of a compiled textbook and its inline figures."""
 import hashlib
+from html import unescape
 from pathlib import Path
 import re
 from urllib.parse import unquote
@@ -78,7 +79,8 @@ def validate_cases(body, cases):
             if not isinstance(phrase, str) or not phrase.strip() or phrase not in content:
                 raise ValueError(f"{goal} 的{label}在核验章节中无法定位")
         sources = case.get("sources", [])
-        if not sources or any(not isinstance(s, str) or not s.strip() or s not in content for s in sources):
+        source_text = unescape(content)
+        if not sources or any(not isinstance(s, str) or not s.strip() or s not in source_text for s in sources):
             raise ValueError(f"{goal} 的原课时间、页码或单元格在该章节中无法定位")
         figures = {Path(unquote(path)).name for path in IMAGE.findall(content)}
         chosen = case.get("figures", [])

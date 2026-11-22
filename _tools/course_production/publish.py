@@ -20,7 +20,7 @@ WIKILINK = re.compile(r"\[\[([^\]]+)\]\]")
 LOCAL_LINK = re.compile(r"\]\(((?:\.\./|file:///)[^)]+)\)")
 LOCAL_IMAGE = re.compile(r"!\[[^\]\n]+\]\(([^)\n]+)\)")
 # Obsidian does not resolve encoded commas or at signs in local image paths.
-LOCAL_PATH_SAFE = "/+@,"
+LOCAL_PATH_SAFE = "/+@,&"
 
 
 def clock(seconds):

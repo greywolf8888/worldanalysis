@@ -28,9 +28,10 @@ async function prepareNote(vault, cases, folder, preview, rel) {
   }
   const originals = new Set();
   for (const match of body.matchAll(/\]\((\.\.\/[^)]+)\)/g)) {
-    const file = path.resolve(path.dirname(path.join(folder, rel)), decodeURIComponent(match[1]));
+    const relativeUrl = decodeURIComponent(match[1]);
+    const file = path.resolve(path.dirname(path.join(folder, rel)), relativeUrl);
     if (!file.startsWith(path.join(folder, "原始资料") + path.sep)) throw Error("Source escapes course " + file);
-    originals.add(file);
+    originals.add(path.posix.normalize(relativeUrl));
     localLinks.set(file, path.relative(folder, file));
   }
   for (const [file, relative] of localLinks) {
@@ -48,7 +49,7 @@ async function prepareNote(vault, cases, folder, preview, rel) {
       provenance.filter(match => match[1] === "配图出处").length < images.size) {
     throw Error("缺少隐藏的出处记录 " + note);
   }
-  cases.set(name + "/" + rel, {name, images:[...images], urls:originals.size,
+  cases.set(name + "/" + rel, {name, images:[...images], urls:[...originals],
     provenance:provenance.map(match => match[2].replace(/\s+/g, " ").replaceAll("&#45;", "-")),
     bodyCharacters:body.length,
     digest:createHash("sha256").update(body).digest("hex"),
@@ -186,15 +187,21 @@ async function main(){
         const appendices=${JSON.stringify(cases?.get(file).appendices || [])};
         const provenance=${JSON.stringify(cases?.get(file).provenance || [])};
         const expectedImages=${JSON.stringify(cases.get(file).images)};
+        const expectedUrls=new Set(${JSON.stringify(noteCase.urls)});
         const metadata=app.metadataCache.getFileCache(target);
         const expectedSections=(metadata?.headings||[]).filter(heading=>heading.level===2)
           .map(heading=>heading.heading.trim());
         const collectLinks=()=>{
           for(const a of view.querySelectorAll("a[href]")){
             const href=a.getAttribute("href");
-            let decoded;
-            try { decoded=decodeURIComponent(href); } catch { continue; }
-            if(decoded.startsWith("../") || decoded.includes("原始资料/")) urls.add(decoded);
+            // Obsidian can expose the decoded path, including literal percent signs.
+            if(expectedUrls.has(href)){
+              urls.add(href);
+            }else{
+              let decoded;
+              try { decoded=decodeURIComponent(href); } catch { continue; }
+              if(expectedUrls.has(decoded)) urls.add(decoded);
+            }
           }
         };
         let expanded=0, title="", formula=false, code=false, table=false, reachedBottom=false, horizontalOverflow=false;
@@ -267,7 +274,8 @@ async function main(){
         return {file:target.path,mode:leaf.view.getMode(),title,expanded,reopened:${installed},reachedBottom,
           sections:[...sections],closedAppendices:[...closedAppendices],
           images:[...seen].map(([name,size])=>({name,...size})),
-          internal, formula, code, table, rawLinks:urls.size,visibleCitations:[...visibleCitations],
+          internal, formula, code, table, rawLinks:urls.size,
+          missingRawLinks:[...expectedUrls].filter(url=>!urls.has(url)),visibleCitations:[...visibleCitations],
           horizontalOverflow:horizontalOverflow||view.scrollWidth>view.clientWidth+2,
           clientWidth:view.clientWidth, scrollWidth:view.scrollWidth,
           scrollTop:view.scrollTop,scrollHeight:view.scrollHeight,clientHeight:view.clientHeight,overflowElements};
@@ -279,7 +287,7 @@ async function main(){
     const unreadable=checks.filter(v=>v.mode!=="preview" || !v.title || v.horizontalOverflow ||
       v.internal.some(l=>!l.found) || v.images.some(i=>!i.fit) || (()=>{
         const want=cases.get(v.file);
-        return want.images.some(f=>!v.images.some(i=>i.name===f)) || v.rawLinks<want.urls ||
+        return want.images.some(f=>!v.images.some(i=>i.name===f)) || v.missingRawLinks.length>0 ||
           want.appendices.some(title=>!v.closedAppendices.includes(title)) ||
           (!v.reachedBottom||!!v.expanded||v.visibleCitations.length>0) ||
           (want.formula&&!v.formula) || (want.code&&!v.code) || (want.table&&!v.table);
@@ -289,6 +297,7 @@ async function main(){
       throw Error("Incomplete reading-view checks "+JSON.stringify(unreadable.map(v=>({
         file:v.file,reachedBottom:v.reachedBottom,sections:v.sections,closedAppendices:v.closedAppendices,
         links:v.internal.filter(x=>!x.found),images:v.images.map(x=>[x.name,x.fit]),raw:v.rawLinks,
+        missingRawLinks:v.missingRawLinks,
         formula:v.formula,code:v.code,table:v.table,visibleCitations:v.visibleCitations,
         overflow:v.horizontalOverflow,extended:v.overflowElements})))+" "+qa);
     }

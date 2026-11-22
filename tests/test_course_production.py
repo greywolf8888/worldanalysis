@@ -26,6 +26,7 @@ class CourseProductionTest(unittest.TestCase):
         with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
             from acceptance import validate_supplements
             from publish import hidden_source
+            from reader_review import validate_cases
 
         label = "[26]--图示&练习.pdf · 第 1 页"
         comment = hidden_source("段落出处", label)
@@ -33,6 +34,17 @@ class CourseProductionTest(unittest.TestCase):
         self.assertIn("[26]&#45;&#45;图示&amp;练习.pdf", comment)
         supplements = [{"anchor": "练习见附页", "sources": [label]}]
         validate_supplements(f"练习见附页。 {comment}", supplements, supplements)
+
+        body = f"## 示例练习\n\n准备图示 打开面板 填入参数 读取结果 纠正尺寸 {comment}"
+        case = {
+            "goal": "照原附页复核尺寸", "chapter": "示例练习", "sources": [label],
+            "checks": {"input": "准备图示", "operation": "打开面板", "setting": "填入参数",
+                       "result": "读取结果", "recovery": "纠正尺寸"},
+            "visual_note": "页中的尺寸和示例文字可跟做。",
+        }
+        validate_cases(body, [case])
+        with self.assertRaisesRegex(ValueError, "无法定位"):
+            validate_cases(body, [{**case, "sources": [label.replace("第 1 页", "第 2 页")]}])
 
     def test_reused_footage_requires_a_visible_target_and_current_clip_proof(self):
         with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
@@ -396,7 +408,7 @@ class CourseProductionTest(unittest.TestCase):
 
     def test_document_only_intake_preview_and_publication(self):
         guide = self.make_guide()
-        resource = self.source / "B 课堂练习.url"
+        resource = self.source / "B 课堂练习80%&参考.url"
         url = "https://course.example.invalid/practice?q=%E7%BB%83"
         resource.write_text(f"[InternetShortcut]\nURL={url}\n", encoding="utf-16")
         self.start_course()
@@ -458,6 +470,9 @@ class CourseProductionTest(unittest.TestCase):
         self.save(review_path, review)
         self.publish(expected_videos=0)
         if OBSIDIAN:
+            render_check = self.data(self.work / "阅读预览" / "obsidian-render.json")["checks"][0]
+            self.assertEqual(render_check["rawLinks"], 2)
+            self.assertEqual(render_check["missingRawLinks"], [])
             (self.root / ".obsidian").mkdir()
             target = self.package / ENTRY.parent / f"{self.package.name}.md"
             installed = json.loads(self.command(
