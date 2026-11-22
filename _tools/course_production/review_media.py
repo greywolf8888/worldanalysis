@@ -308,7 +308,9 @@ def scan_video(course, ledger, work, lesson):
         "cues_sha256":hashlib.sha256(json.dumps(metadata["cues"],ensure_ascii=False).encode("utf-8")).hexdigest(),
     }
     signature["prepare"] = metadata["prepare_signature"]
-    signature["audio_method"] = {"revision": 3, "min_s": GAP_S, "cue_padding_s": PAD_S} if audio_count else None
+    signature["audio_method"] = {
+        "revision": 3, "decode_revision": speech.AUDIO_DECODE_REVISION, "min_s": GAP_S, "cue_padding_s": PAD_S,
+    } if audio_count else None
     audio_error = metadata.get("audio_error")
     if audio_error:
         signature["audio_error"] = audio_error

@@ -14,6 +14,28 @@ CLI = Path(__file__).resolve().parents[1] / "_tools/course_production/course.py"
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "需要本地 FFmpeg")
 class CourseAudioRecoveryTest(unittest.TestCase):
+    def test_full_aac_decode_keeps_the_first_playable_samples(self):
+        from _tools.course_no_subtitles.speech import RATE, audio_windows
+
+        with TemporaryDirectory() as scratch:
+            source = Path(scratch) / "有声原件.m4a"
+            ffmpeg = ["ffmpeg", "-v", "error", "-nostdin", "-xerror"]
+            subprocess.run([*ffmpeg, "-f", "lavfi", "-i", "sine=frequency=733:sample_rate=44100:duration=1",
+                            "-c:a", "aac", str(source)], check=True, timeout=20)
+            expected = subprocess.check_output(
+                [*ffmpeg, "-i", str(source), "-map", "0:a:0", "-vn", "-ac", "1",
+                 "-ar", str(RATE), "-f", "s16le", "pipe:1"], timeout=20,
+            )
+            (start, pcm), = audio_windows(source, 0, None, "fixed")
+            self.assertEqual(start, 0)
+            self.assertEqual(pcm, expected)
+            (start, pcm), = audio_windows(source, 0, .5, "fixed")
+            self.assertEqual(start, 0)
+            self.assertEqual(pcm, expected[:RATE])
+            (start, pcm), = audio_windows(source, .25, .5, "fixed")
+            self.assertEqual(start, .25)
+            self.assertEqual(len(pcm), RATE)
+
     def test_decodable_container_with_corrupt_audio_can_resume_and_recover(self):
         with TemporaryDirectory() as scratch:
             folder = Path(scratch)

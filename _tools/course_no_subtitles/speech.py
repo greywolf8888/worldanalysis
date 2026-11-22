@@ -14,6 +14,7 @@ import numpy as np
 
 MODEL=RUNTIME/"course-method-sensevoice/model"
 RATE=16000
+AUDIO_DECODE_REVISION=2
 MODEL_SHA="c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51"
 ENGINE=None
 ENGINE_LANGUAGE=None
@@ -55,7 +56,11 @@ def cut_samples(data,mode):
 
 
 def audio_windows(path,start,length,mode,audio_track=0):
-    argv=["ffmpeg","-nostdin","-v","error","-xerror","-threads","2","-protocol_whitelist","file,pipe","-ss",str(start),"-i",str(path)]
+    argv=["ffmpeg","-nostdin","-v","error","-xerror","-threads","2","-protocol_whitelist","file,pipe"]
+    # Seeking to zero can skip the first playable AAC samples after priming.
+    if start != 0:
+        argv.extend(["-ss",str(start)])
+    argv.extend(["-i",str(path)])
     if length is not None: argv.extend(["-t",str(length)])
     argv.extend(["-map",f"0:a:{audio_track}","-vn","-ac","1","-ar",str(RATE),"-f","s16le","pipe:1"])
     proc=subprocess.Popen(argv,stdout=subprocess.PIPE,stderr=subprocess.PIPE)

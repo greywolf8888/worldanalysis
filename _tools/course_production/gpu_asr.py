@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 import wave
 
 from project import local_child, media_source, original_media_path, put, read, sha
-from _tools.course_no_subtitles.speech import RATE, RUNTIME, audio_windows
+from _tools.course_no_subtitles.speech import AUDIO_DECODE_REVISION, RATE, RUNTIME, audio_windows
 
 
 def select_device(executable, requested=None):
@@ -132,7 +132,8 @@ def refine_candidates(project, recognizer, lesson=None, ranges=None):
             continue
         scan = project.work / "媒体补查" / f"L{number:02}.json"
         path = project.work / "媒体补查" / f"L{number:02}-复识.json"
-        signature = {"scan_sha256": sha(scan), "requested": ranges or [], **recognizer.identity}
+        signature = {"scan_sha256": sha(scan), "requested": ranges or [],
+                     "audio_decode_revision": AUDIO_DECODE_REVISION, **recognizer.identity}
         identity = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
         history = path.parent / "复识历史" / f"L{number:02}" / f"{identity}.json"
         if history.is_file() and read(history).get("complete"):

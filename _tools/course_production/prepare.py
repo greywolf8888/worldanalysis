@@ -12,7 +12,8 @@ from project import ROOT, original_media_path, put, read, recovery_files, sha, w
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from _tools.course_no_subtitles.speech import (
-    AudioDecodeError, MODEL, MODEL_SHA, RATE, audio_windows, captions, load_model, read_media, transcribe,
+    AUDIO_DECODE_REVISION, AudioDecodeError, MODEL, MODEL_SHA, RATE, audio_windows, captions, load_model,
+    read_media, transcribe,
 )
 
 
@@ -143,7 +144,8 @@ def prepare_project_media(project, videos, documents, gpu=None, *, routing_unres
         if language not in {"auto", "zh", "en", "ja", "ko", "yue"}:
             raise ValueError(f"第 {number} 讲语言应为 auto、zh、en、ja、ko 或 yue")
         subtitle, candidates = subtitle_choice(item, prefs, documents)
-        signature = {"version": 2, "raw_sha256": item["sha256"], "file": item["file"],
+        signature = {"version": 2, "audio_decode_revision": AUDIO_DECODE_REVISION,
+                     "raw_sha256": item["sha256"], "file": item["file"],
                      "settings": prefs, "subtitle_sha256": subtitle["sha256"] if subtitle else None,
                      "asr": gpu.identity if gpu else MODEL_SHA}
         if "embedded" in item:
