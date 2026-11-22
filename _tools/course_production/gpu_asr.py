@@ -1,5 +1,7 @@
 """Optional local GPU transcription and independent candidate review."""
+from contextlib import closing
 import hashlib
+from itertools import islice
 import json
 from pathlib import Path
 import re
@@ -9,6 +11,10 @@ import wave
 
 from project import local_child, media_source, original_media_path, put, read, sha
 from _tools.course_no_subtitles.speech import AUDIO_DECODE_REVISION, RATE, RUNTIME, audio_windows
+
+
+GPU_BATCH_CHUNKS = 20
+GPU_STREAM_REVISION = 1
 
 
 def select_device(executable, requested=None):
@@ -32,51 +38,63 @@ class VulkanASR:
         self.device = select_device(self.executable, device)
         self.decoded_windows = []
         self.identity = {"backend": backend, "device": self.device, "runtime_sha256": sha(self.executable),
-                         "model_sha256": sha(self.model)}
+                         "model_sha256": sha(self.model), "stream_revision": GPU_STREAM_REVISION}
 
     def transcribe(self, source, duration, track, language, offset=0, *, cache=None):
         if cache is None:
             return self.transcribe_windows(source, duration, track, language, [(None, None, offset)])[0]
-        # Multiples of the recognizer's 30-second windows keep the current chunk grid.
+        # The decoder's fixed chunks are 30 seconds. Group them from one stream so
+        # independent seeks and resampler startup cannot drop samples between batches.
         rows, decoded = [], []
-        for left in range(0, int(duration) + 1, 600):
-            if left >= duration:
-                break
-            right = min(left + 600, duration)
-            path = cache / f"{left:06}.json"
-            if path.is_file():
-                part = read(path)
-            else:
-                # The first decode begins at the container start. Later seeks use that same clock.
-                request = (float(left), right - left, max(left, offset))
-                result, = self.transcribe_windows(source, duration, track, language, [request])
-                window, = self.decoded_windows
-                part = {"cues": result, "window": window}
-                put(path, part)
-            rows.extend(part["cues"])
-            decoded.append(part["window"])
+        start_sample = 0
+        with closing(audio_windows(source, 0, None, "fixed", track)) as stream:
+            while True:
+                chunks = [sample for _, sample in islice(stream, GPU_BATCH_CHUNKS)]
+                if not chunks and start_sample:
+                    break
+                start = start_sample / RATE
+                count = sum(map(len, chunks)) // 2
+                part_path = cache / f"{start_sample:012}.json"
+                part = read(part_path) if part_path.is_file() else None
+                if part is None or part["window"]["samples"] != count:
+                    request = (start, count / RATE, offset + start, chunks)
+                    result, = self._transcribe_pcm(duration, language, [request])
+                    window, = self.decoded_windows
+                    part = {"cues": result, "window": window}
+                    put(part_path, part)
+                rows.extend(part["cues"])
+                decoded.append(part["window"])
+                start_sample += count
+                if len(chunks) < GPU_BATCH_CHUNKS:
+                    break
         self.decoded_windows = decoded
         return rows
 
     def transcribe_windows(self, source, duration, track, language, windows):
         """Decode separate original time windows and load the model once for the batch."""
+        inputs = [(start or 0, length, offset,
+                   (chunk for _, chunk in audio_windows(source, start or 0, length, "fixed", track)))
+                  for start, length, offset in windows]
+        return self._transcribe_pcm(duration, language, inputs)
+
+    def _transcribe_pcm(self, duration, language, windows):
         scratch = local_child(RUNTIME, "tmp")
         scratch.mkdir(parents=True, exist_ok=True)
         self.decoded_windows = []
         with TemporaryDirectory(prefix="course-asr-", dir=scratch) as folder:
             outputs = []
             outfile_args = []
-            for index, (start, length, offset) in enumerate(windows):
+            for index, (start, length, offset, chunks) in enumerate(windows):
                 output = Path(folder) / f"transcript-{index:02}"
                 wav = output.with_suffix(".wav")
                 # Decode PCM before writing the WAV header. Source timestamps can jitter
                 # after resampling or seeking and make FFmpeg's WAV muxer reject valid samples.
                 with wave.open(str(wav), "wb") as pcm:
                     pcm.setparams((1, 2, RATE, 0, "NONE", ""))
-                    for _, chunk in audio_windows(source, start or 0, length, "fixed", track):
+                    for chunk in chunks:
                         pcm.writeframesraw(chunk)
                     samples = pcm.getnframes()
-                    self.decoded_windows.append({"requested_start": start or 0, "requested_length": length,
+                    self.decoded_windows.append({"requested_start": start, "requested_length": length,
                                                  "timeline_start": offset, "samples": samples,
                                                  "sample_rate": RATE})
                 if not samples:
@@ -88,7 +106,7 @@ class VulkanASR:
                 return [[] for _ in windows]
             backend = (["--backend", self.backend, "--strict-pipeline", "--chunk-seconds", "30",
                         "--chunk-overlap", "0"] if self.backend in {"sensevoice", "qwen3"} else ["-nf", "-mc", "0"])
-            seconds = sum(length if length is not None else duration for _, length, _ in windows)
+            seconds = sum(length if length is not None else duration for _, length, _, _ in windows)
             process = subprocess.run([str(self.executable), *backend, "--gpu-backend", "vulkan",
                                       "-dev", str(self.device["index"]),
                                       "-m", str(self.model), "-l", language, "-t", "4", "-bs", "1", "-bo", "1",

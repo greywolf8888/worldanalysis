@@ -7,6 +7,8 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
+import wave
 
 
 CLI = Path(__file__).resolve().parents[1] / "_tools/course_production/course.py"
@@ -35,6 +37,49 @@ class CourseAudioRecoveryTest(unittest.TestCase):
             (start, pcm), = audio_windows(source, .25, .5, "fixed")
             self.assertEqual(start, .25)
             self.assertEqual(len(pcm), RATE)
+
+    def test_gpu_batches_and_resume_preserve_continuous_pcm(self):
+        with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
+            from _tools.course_production import gpu_asr
+        from _tools.course_no_subtitles.speech import RATE
+
+        with TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            source = root / "长轨.m4a"
+            ffmpeg = ["ffmpeg", "-v", "error", "-nostdin", "-xerror"]
+            subprocess.run([*ffmpeg, "-f", "lavfi", "-i", "sine=frequency=733:sample_rate=44100:duration=61.2",
+                            "-c:a", "aac", str(source)], check=True, timeout=20)
+            expected = subprocess.check_output(
+                [*ffmpeg, "-i", str(source), "-map", "0:a:0", "-vn", "-ac", "1",
+                 "-ar", str(RATE), "-f", "s16le", "pipe:1"], timeout=20)
+            gpu = gpu_asr.VulkanASR.__new__(gpu_asr.VulkanASR)
+            gpu.backend = "sensevoice"
+            gpu.device = {"index": 0}
+            gpu.executable = root / "crispasr"
+            gpu.model = root / "model"
+            submitted = []
+
+            def record(command, **options):
+                with wave.open(str(Path(options["cwd"]) / "transcript-00.wav")) as recording:
+                    self.assertEqual(recording.getframerate(), RATE)
+                    submitted.append(recording.readframes(recording.getnframes()))
+                warning = b"crispasr: warning: no speech detected in 'transcript-00.wav'\n"
+                return subprocess.CompletedProcess(command, 0, b"", warning)
+
+            checkpoint = root / "缓存"
+            with patch.object(gpu_asr, "GPU_BATCH_CHUNKS", 1), patch.object(gpu_asr, "RUNTIME", root), \
+                    patch.object(gpu_asr.subprocess, "run", side_effect=record):
+                self.assertEqual(gpu.transcribe(source, 61.6, 0, "zh", .4, cache=checkpoint), [])
+                self.assertEqual(b"".join(submitted), expected)
+                self.assertEqual([w["samples"] for w in gpu.decoded_windows],
+                                 [30 * RATE, 30 * RATE, len(expected) // 2 - 60 * RATE])
+                self.assertEqual([w["timeline_start"] for w in gpu.decoded_windows], [.4, 30.4, 60.4])
+                sorted(checkpoint.glob("*.json"))[1].unlink()
+                middle = submitted[1]
+                submitted.clear()
+                self.assertEqual(gpu.transcribe(source, 61.6, 0, "zh", .4, cache=checkpoint), [])
+                self.assertEqual(submitted, [middle])
+                self.assertEqual(sum(w["samples"] for w in gpu.decoded_windows), len(expected) // 2)
 
     def test_decodable_container_with_corrupt_audio_can_resume_and_recover(self):
         with TemporaryDirectory() as scratch:
