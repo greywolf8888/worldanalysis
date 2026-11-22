@@ -1,4 +1,6 @@
 """Compile and render a single textbook with original figures and hidden provenance."""
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from html import escape
 from pathlib import Path
 import re
@@ -231,8 +233,19 @@ def compile_textbook(course, work, ledger, *, art_root, order):
     expected = {Path(info["name"]).relative_to("课件").as_posix() for info in images}
     if {unquote(raw) for raw in LOCAL_IMAGE.findall(body)} != expected:
         raise ValueError("教材配图需要使用已登记的原图标记")
+    check = partial(check_figure, course, ledger=ledger, art_root=art_root)
+    video_figures = [image for image in images if "lesson" in image]
+    if len(video_figures) > 1:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            for _ in pool.map(check, video_figures):
+                pass
+    else:
+        for image in video_figures:
+            check(image)
+    # Document figures can use native PDF bindings or the PowerPoint renderer.
     for image in images:
-        check_figure(course, image, ledger=ledger, art_root=art_root)
+        if "lesson" not in image:
+            check(image)
     return deliver, {"document_refs": sorted(cited_docs)}, images
 
 
