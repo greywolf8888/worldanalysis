@@ -221,6 +221,31 @@ class SourceCoverageTest(unittest.TestCase):
         self.assertEqual([(item["unit"], item["value"]) for item in candidates],
                          [("page:1", first), ("page:1", second), ("page:2", first)])
 
+    def test_office_links_include_word_field_targets_and_different_displayed_url(self):
+        result = {"blocks": [{"text": '课堂工具： HYPERLINK "https://example.org/Tool" https://example.org/help'}]}
+        candidates = document_candidates("D001", "工具.docx", result, {})
+        self.assertEqual([item["value"] for item in candidates], ["https://example.org/Tool", "https://example.org/help"])
+
+    def test_office_metadata_keeps_same_target_at_the_right_sheet_and_slide(self):
+        target = "https://example.org/source"
+        sheet = "xl/worksheets/sheet2.xml"
+        slide = "ppt/slides/slide3.xml"
+        result = {"metadata": {
+            "sheets": [{"sheet_name": "案例", "part": sheet,
+                        "hyperlinks": [{"attributes": {"ref": "A4"}, "target": target}]}],
+            "slides": [{"slide_number": 3, "part": slide}],
+            "external_relationships": [
+                {"type": "hyperlink", "source_part": sheet, "target": target},
+                {"type": "hyperlink", "source_part": slide, "target": target},
+                {"type": "image", "source_part": slide, "target": "https://example.org/picture.png"},
+            ],
+        }}
+        units = {item["key"]: item for item in document_units(result)}
+        candidates = document_candidates("D001", "讲义.pptx", result, units)
+        self.assertEqual([(item["unit"], item["value"]) for item in candidates],
+                         [("sheet:案例", target), ("slide:3", target)])
+        self.assertIn("A4", candidates[0]["cue"])
+
     def test_original_supplement_reference_with_external_provenance_on_same_line(self):
         source = "配套讲义.pdf · 第 2 页"
         body = f"原作者入口。 <!-- 段落出处 {source} --> <!-- 外部出处 https://example.org/author -->"

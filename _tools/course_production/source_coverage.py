@@ -48,6 +48,8 @@ STANDALONE_URL = re.compile(
     r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com\.cn|com|cn|org|net|ai|io|edu|gov)"
     r"(?::[0-9]+)?(?:[/?#][^\s<>]*)?)[ \t]*\r?$", re.IGNORECASE | re.MULTILINE,
 )
+OFFICE_WEB_LINK = re.compile(r'https?://[^\s<>"）】\]]+', re.IGNORECASE)
+OFFICE_TEXT_FORMATS = {".docx", ".docm", ".pptx", ".pptm", ".ppsx"}
 CONTACT_ID = re.compile(r"^\s*(?:是|为)?\s*[:：]?\s*([a-z0-9_][a-z0-9_.-]{4,63})", re.IGNORECASE)
 PROJECT_LINK = re.compile(
     r"(?<![A-Za-z0-9_@./-])(?P<base>(?:https?://)?(?:github\.com|gitee\.com)/)"
@@ -176,6 +178,7 @@ def contact_hint(text):
 def document_candidates(identifier, name, result, known_units):
     candidates = {}
     recorded = set()
+    suffix = Path(name).suffix.lower()
 
     def add(key, cue, value):
         comparable = re.sub(r"^https?://", "", value, flags=re.IGNORECASE)
@@ -194,7 +197,7 @@ def document_candidates(identifier, name, result, known_units):
         locator = block.get("locator", {})
         location = locator_unit(locator)
         key = location["key"] if location and location["key"] in known_units else "file"
-        explicit_link = (Path(name).suffix.lower() == ".url" and locator.get("field") == "URL")
+        explicit_link = suffix == ".url" and locator.get("field") == "URL"
         match = contact_hint(text)
         if explicit_link or match:
             start = max(0, match.start() - 24) if match else 0
@@ -219,6 +222,30 @@ def document_candidates(identifier, name, result, known_units):
                     continue
             value = contact_value(cue) or cue
             add(key, cue, value)
+        if suffix in OFFICE_TEXT_FORMATS or block.get("kind") == "formula":
+            for link in OFFICE_WEB_LINK.finditer(text):
+                value = link[0].rstrip(".,;，。；）)")
+                add(key, value, value)
+    metadata = result.get("metadata", {})
+    for link in metadata.get("hyperlinks", []):
+        target = link.get("target") or ""
+        if OFFICE_WEB_LINK.fullmatch(target):
+            add("file", f"Word 段落 {link.get('paragraph_index')}：{target}", target)
+    part_units = {item["part"]: f"slide:{item['slide_number']}" for item in metadata.get("slides", []) if item.get("part")}
+    for sheet in metadata.get("sheets", []):
+        key = f"sheet:{sheet['sheet_name']}"
+        if sheet.get("part"):
+            part_units[sheet["part"]] = key
+        for link in sheet.get("hyperlinks", []):
+            target = link.get("target") or ""
+            if OFFICE_WEB_LINK.fullmatch(target):
+                cell = link.get("attributes", {}).get("ref", "")
+                add(key, f"工作表单元格 {cell}：{target}", target)
+    for link in metadata.get("external_relationships", []):
+        target = link.get("target") or ""
+        if link.get("type") == "hyperlink" and OFFICE_WEB_LINK.fullmatch(target):
+            part = link.get("source_part", "")
+            add(part_units.get(part, "file"), f"Office 点击区域 {part}：{target}", target)
     for key, item in known_units.items():
         for link in item.get("pdf_hyperlinks", []):
             target = link["target"].strip()
