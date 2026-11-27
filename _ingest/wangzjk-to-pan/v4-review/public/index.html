@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/priority.css">
   <script defer src="/catalog-facets.js"></script>
+  <script defer src="/selection.js"></script>
   <script defer src="/app.js"></script>
   <script defer src="/production.js"></script>
   <script defer src="/priority.js"></script>
@@ -78,7 +79,11 @@
         </details>
       </div>
     </div>
-    <p id="selection" class="selection-note" role="status" hidden></p>
+    <div id="selection-tools" class="selection-tools" hidden>
+      <span id="selection" class="selection-note" role="status"></span>
+      <button id="clear-page-selection" type="button">取消本页选择</button>
+      <button id="clear-catalog-selection" type="button">清空选择</button>
+    </div>
     <div class="notice error-line" role="alert" id="error" hidden></div>
     <div id="cards" class="cards grid" aria-busy="true"></div>
     <div id="empty" class="empty" hidden>

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from datetime import date
 import re
+from threading import Lock
+from types import MappingProxyType
 from urllib.parse import parse_qs
 
 from catalog_model import Library, digest
@@ -12,8 +15,10 @@ from member_queue import DEFAULT_NON_PROJECTS, read_non_projects
 
 
 PAGE_SIZE = 48
+MAX_CACHED_SEARCHES = 8
+MAX_CACHED_ROWS = 36_000
 CURSOR = re.compile(r"[0-9a-f]{64}\.(?:rv|cv)_[0-9a-f]{64}\Z")
-PARAMETERS = {"q", "category", "subcategory", "platform", "site", "day", "after"}
+PARAMETERS = {"q", "category", "subcategory", "platform", "site", "day", "after", "selected"}
 
 
 class CalendarRequestError(ValueError):
@@ -29,6 +34,8 @@ def read_query(query: str, sites: set[str]) -> dict[str, str]:
             raise ValueError
         params = {key: value[0] for key, value in fields.items()}
         if len(params.get("q", "")) > 200 or "\x00" in params.get("q", ""):
+            raise ValueError
+        if params.get("selected", "0") not in ("0", "1"):
             raise ValueError
         category = params.get("category", "")
         category = CATEGORY_ALIASES.get(category, category)
@@ -60,12 +67,16 @@ def is_course(row: dict, exclusions: dict) -> bool:
     )
 
 
-def summary(row: dict, share_locations: dict) -> dict:
+def summary(row: dict, share_locations: dict, selected: frozenset[str]) -> dict:
+    action_pending = bool(row.get("action_pending"))
     return {
         "id": row["id"],
         **{key:row[key] for key in ("display_id","article_key","platforms","source_count","version_count",
-                                  "action_pending","version_label","classification_state","category","subcategory")
+                                  "version_label","classification_state","category","subcategory","site_id","article_id","status")
            if key in row},
+        "action_pending": action_pending,
+        "requestable": not action_pending and row.get("requestable", row.get("selectable")) is True,
+        "selected": not action_pending and row["id"] in selected,
         "title": row["title"],
         "published_at": row["published_at"] or None,
         "category_label": row["category_label"],
@@ -80,52 +91,93 @@ def fingerprint_exclusions(exclusions):
     return digest(sorted(exclusions.items()))
 
 
-def course_calendar(library: Library, query: str, *, progress=None) -> dict:
+def display_key(row):
+    return row.get("display_id", row["id"])
+
+
+class CalendarCache:
+    """Keep browsing matches per catalog. Local progress and selected views are read separately."""
+
+    def __init__(self):
+        self.lock = Lock()
+        self.generation = None
+        self.facets = None
+        self.matches = OrderedDict()
+        self.retained_rows = 0
+
+    def get(self, library, generation, criteria, eligible, selected):
+        with self.lock:
+            if generation != self.generation:
+                self.matches.clear()
+                self.retained_rows = 0
+                self.facets = (library.facets(eligible=eligible) if hasattr(library, "semantic_rows")
+                               else library.facets())
+                self.generation = generation
+            key = tuple(criteria.items())
+            selected_only = criteria["selected"] == "1"
+            if not selected_only and key in self.matches:
+                self.matches.move_to_end(key)
+                rows, positions = self.matches[key]
+                return rows, positions, self.facets
+            if hasattr(library, "semantic_rows"):
+                rows = tuple(library.match(criteria, selected, eligible=eligible))
+            else:
+                rows = tuple(row for row in library.match(criteria, selected) if eligible(row))
+            positions = MappingProxyType({display_key(row): offset for offset, row in enumerate(rows)})
+            if not selected_only and len(rows) <= MAX_CACHED_ROWS:
+                while (len(self.matches) >= MAX_CACHED_SEARCHES
+                       or self.retained_rows + len(rows) > MAX_CACHED_ROWS):
+                    _, (removed, _) = self.matches.popitem(last=False)
+                    self.retained_rows -= len(removed)
+                self.matches[key] = (rows, positions)
+                self.retained_rows += len(rows)
+            return rows, positions, self.facets
+
+
+def course_calendar(library: Library, query: str, *, progress=None, selected_ids=(), selection_revision=0) -> dict:
     sites = [{"id": site["id"], "label": site["label"]} for site in library.sites]
     params = read_query(query, {site["id"] for site in sites})
     exclusions = read_non_projects(DEFAULT_NON_PROJECTS)
     filter_values = {
         "q": params.get("q", ""),
-        "category": params.get("category", ""),
+        "category": CATEGORY_ALIASES.get(params.get("category", ""), params.get("category", "")),
         "subcategory": params.get("subcategory", ""),
         "platform": params.get("platform", ""),
         "site": params.get("site", ""),
         "to": params.get("day", ""),
+        "selected": params.get("selected", "0"),
     }
-    revision = digest([library.snapshot_id, sorted(exclusions.items()), filter_values])
+    selected = frozenset(selected_ids)
+    selection = (selection_revision, sorted(selected)) if filter_values["selected"] == "1" else None
+    generation = (library.snapshot_id, fingerprint_exclusions(exclusions))
+    revision = digest([generation, filter_values, selection])
     after = params.get("after", "")
     if after and not after.startswith(revision + "."):
         raise CalendarRequestError(409, "课程目录或筛选已更新，请重新加载。")
+
     def eligible(row):
-        return is_course(row,exclusions)
-    if hasattr(library,'semantic_rows'):
-        rows=library.match(filter_values,set(),eligible=eligible)
-        cache=getattr(library,'calendar_facets',None)
-        exclusion_key=fingerprint_exclusions(exclusions)
-        if not cache or cache[0]!=exclusion_key:
-            cache=(exclusion_key,library.facets(eligible=eligible))
-            library.calendar_facets=cache
-        facets=cache[1]
-    else:
-        rows=[row for row in library.match(filter_values,set()) if eligible(row)]
-        facets=library.facets()
+        return is_course(row, exclusions)
+
+    cache = getattr(library, "calendar_cache", None)
+    if cache is None:
+        cache = vars(library).setdefault("calendar_cache", CalendarCache())
+    rows, positions, facets = cache.get(library, generation, filter_values, eligible, selected)
     start = 0
     if after:
         resource_id = after.partition(".")[2]
-        for index, row in enumerate(rows):
-            if row.get("display_id",row["id"]) == resource_id:
-                start = index + 1
-                break
-        else:
+        position = positions.get(resource_id)
+        if position is None:
             raise CalendarRequestError(409, "课程目录已更新，请重新加载。")
+        start = position + 1
     end = min(start + PAGE_SIZE, len(rows))
     page = rows[start:end]
     pulse = progress.read() if progress is not None and page else None
     return {
-        "items": [{**summary(row, library.share_locations), **(progress.fields(row, pulse) if pulse else {})}
+        "items": [{**summary(row, library.share_locations, selected), **(progress.fields(row, pulse) if pulse else {})}
                   for row in page],
         "total": len(rows),
-        "next": revision + "." + rows[end - 1].get("display_id",rows[end - 1]["id"]) if end < len(rows) else None,
+        "next": revision + "." + display_key(rows[end - 1]) if end < len(rows) else None,
+        "snapshot_id": library.snapshot_id,
         "categories":facets["categories"], "platforms":facets["platforms"],
         "category_aliases":facets["category_aliases"], "project_total":facets["project_count"],
         "sites": sites,

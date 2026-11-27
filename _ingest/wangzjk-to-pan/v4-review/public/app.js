@@ -13,6 +13,7 @@ const amountFormat = new Intl.NumberFormat('zh-CN', {maximumFractionDigits: 2});
 const DEFAULT = {q:'', category:'', subcategory:'', platform:'', status:'', site:'', from:'', to:'', order:'newest', view:'grid', selected:'0', baidu:'0', page:1, scroll:0};
 const urlFilters = ['q','category','subcategory','platform','status','site','from','to','order','selected','baidu','page'];
 const calendarFilters = ['q','category','subcategory','platform','site'];
+const selection = window.worldanalysisSelection;
 const facetTargets = {category:$('topics'), platform:$('platforms'), subcategory:$('subcategories')};
 const resourceIdPattern = /^rv_[0-9a-f]{64}$/;
 const articleKeyPattern = /^ca_[0-9a-f]{64}$/;
@@ -30,8 +31,12 @@ let page = null;
 let renderedFilter = null;
 let renderedPageFilter = null;
 let catalogResizeTimer;
-let draft = {revision:0, ids:[], entries:[]};
+let draft = {revision:0, ids:[]};
+let draftDetails = null;
 let querySequence = 0;
+let queryController = null;
+let draftPageRequest = 0;
+let paintedFacets = null;
 let readerSequence = 0;
 let readerRow = null;
 let readerOpener = null;
@@ -41,8 +46,8 @@ let saving = false;
 let confirmedAction = null;
 let transferListPage = 1;
 
-async function api(path, body) {
-  const options = {cache:'no-store', credentials:'omit'};
+async function api(path, body, {signal} = {}) {
+  const options = {cache:'no-store', credentials:'omit', signal};
   if (body !== undefined) Object.assign(options, {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
   });
@@ -93,7 +98,7 @@ function canRequestTransfer(row) {
   return !row.action_pending && (row.requestable ?? row.selectable);
 }
 function isPicked(row) {
-  return !row.action_pending && draft.ids.includes(row.id);
+  return selection.isPicked(row);
 }
 function priorityAction(row) {
   return !row.action_pending && typeof analysisArticleAction === 'function' ? analysisArticleAction(row) : null;
@@ -202,6 +207,7 @@ function syncControls({search = true} = {}) {
   const platform = meta.platforms?.find(item => item.id === filter.platform);
   $('result-title').textContent = [topic?.label, platform?.label].filter(Boolean).join(' · ') || '全部资料';
   const params = new URLSearchParams(calendarFilters.filter(key => filter[key]).map(key => [key, filter[key]]));
+  if (filter.selected === '1') params.set('selected', '1');
   if (filter.to) params.set('day', filter.to);
   $('catalog-calendar-link').href = '/courses' + (params.size ? '?' + params : '');
 }
@@ -213,6 +219,10 @@ function applyFilter(changes) {
   void query({top:true, locationMode:'pushState'});
 }
 function paintTopics() {
+  const {category, subcategory, platform} = filter;
+  if (paintedFacets?.meta === meta && paintedFacets.category === category
+      && paintedFacets.subcategory === subcategory && paintedFacets.platform === platform) return;
+  paintedFacets = {meta, category, subcategory, platform};
   catalogFacets.render(facetTargets, meta, filter, (field, id) => {
     if (filter[field] !== id || $('q').value.trim() !== filter.q) {
       applyFilter({[field]:id});
@@ -229,9 +239,6 @@ function setChoices(id, data, empty, getLabel = row => row.label) {
     return option;
   }));
 }
-function sameDraft(value) {
-  if (value && value.revision >= draft.revision) draft = {...draft, ...value};
-}
 function setInteractionState() {
   const blocked = saving || querying || !page;
   $('cards').setAttribute('aria-busy', String(querying));
@@ -246,12 +253,26 @@ function setInteractionState() {
     $('page-numbers').querySelectorAll('button').forEach(b => { b.disabled = blocked; });
   }
   if ($('draft').open) {
-    const entries = draft.entries || [];
-    $('freeze').disabled = saving || !entries.length || entries.some(row => !canRequestTransfer(row));
+    $('freeze').disabled = saving || draftDetails?.revision !== draft.revision || !draftDetails.can_review;
     for (const control of $('draft-rows').querySelectorAll('[data-queue-action]')) {
-      control.disabled = saving || control.dataset.boundary === 'true';
+      control.disabled = saving || draftDetails?.revision !== draft.revision || control.dataset.boundary === 'true';
     }
-    $('clear-all').disabled = saving || !entries.length;
+    $('clear-all').disabled = saving || !draft.ids.length;
+  }
+  $('clear-page-selection').disabled = blocked || !page?.items.some(isPicked);
+  $('clear-catalog-selection').disabled = saving || !draft.ids.length;
+}
+function paintPick(box) {
+  const picked = selection.isPicked(box.dataset.selectionId);
+  box.checked = picked;
+  const label = picked ? '取消选择' : '选择转存';
+  box.nextElementSibling.textContent = label;
+  box.setAttribute('aria-label', label + '：' + box.dataset.title);
+  box.closest('label').hidden = !picked && box.dataset.requestable === 'false';
+  const card = box.closest('article[data-version]');
+  if (card) {
+    if (picked) card.dataset.picked = 'true';
+    else delete card.dataset.picked;
   }
 }
 function selectionControl(row, location) {
@@ -260,14 +281,15 @@ function selectionControl(row, location) {
   const label = el('label', null, 'pickline');
   const box = el('input', null, 'pick');
   box.type = 'checkbox';
-  box.checked = picked;
   box.dataset.resourcePick = catalogFacets.displayId(row);
-  box.setAttribute('aria-label', '选择 ' + row.title);
+  box.dataset.selectionId = row.id;
+  box.dataset.title = row.title;
+  box.dataset.requestable = String(Boolean(canRequestTransfer(row)));
   box.disabled = saving || querying;
   box.addEventListener('change', () => {
     const next = box.checked;
     const hadFocus = document.activeElement === box;
-    box.checked = picked;
+    paintPick(box);
     const source = next && row.article_key ? {article_key:row.article_key} : {};
     void mutate('toggle', {id:row.id, selected:next, ...source}).then(() => {
       if (!hadFocus || ![document.body, box].includes(document.activeElement)) return;
@@ -277,7 +299,8 @@ function selectionControl(row, location) {
       (replacement || (location === 'reader' ? $('reader').querySelector('[data-close]') : $('result-title'))).focus({preventScroll:true});
     });
   });
-  label.append(box, el('span', picked ? '已选' : '选择', location === 'card' ? 'card-choice-label' : ''));
+  label.append(box, el('span', '', location === 'card' ? 'card-choice-label' : ''));
+  paintPick(box);
   return label;
 }
 function cardExcerpt(row) {
@@ -395,6 +418,16 @@ function pagination() {
   }));
   if (restoreFocus) $('result-title').focus({preventScroll:true});
 }
+function renderSelection() {
+  const selectedHere = page?.items.filter(isPicked).length ?? 0;
+  const elsewhere = draft.ids.length - selectedHere;
+  $('chosen').textContent = fmt(draft.ids.length);
+  $('selection-tools').hidden = !draft.ids.length;
+  notice('selection', draft.ids.length ? '已选 ' + fmt(draft.ids.length) + ' 项' +
+    (elsewhere > 0 ? '，' + fmt(elsewhere) + ' 项不在本页' : '') : '');
+  $('clear-page-selection').hidden = !selectedHere;
+  for (const box of document.querySelectorAll('[data-resource-pick]')) paintPick(box);
+}
 function render() {
   cardsFrom(page);
   $('empty').hidden = page.total > 0;
@@ -402,9 +435,7 @@ function render() {
   if (Number.isSafeInteger(page.version_total) && page.version_total > page.total) tally.push(fmt(page.version_total) + ' 个版本');
   if (Number.isSafeInteger(page.source_total) && page.source_total > page.total) tally.push(fmt(page.source_total) + ' 篇来源');
   $('result-count').textContent = tally.join(' · ');
-  $('chosen').textContent = fmt(draft.ids.length);
-  notice('selection', draft.ids.length ? '已选 ' + fmt(draft.ids.length) + ' 项' +
-    (page.hidden_selected ? '，' + fmt(page.hidden_selected) + ' 项不在本页' : '') : '');
+  renderSelection();
   pagination();
   const counts = {page:page.page_selectable, filtered:page.eligible, site_all:page.index_selectable};
   const projects = {page:page.items.length, filtered:page.total, site_all:page.index_total ?? meta.totals.projects};
@@ -450,6 +481,9 @@ function scheduleCatalogFit() {
 }
 async function query({top = false, restore = null, focusResult = false, limit = page?.limit ?? fittedCatalogLimit(), anchor = null, locationMode = null} = {}) {
   const token = ++querySequence;
+  queryController?.abort();
+  const controller = new AbortController();
+  queryController = controller;
   const request = {...filter};
   const pageFilter = {...request, view:'list'};
   if (limit !== baseCatalogLimit) pageFilter.limit = limit;
@@ -457,10 +491,11 @@ async function query({top = false, restore = null, focusResult = false, limit = 
   notice('error');
   setInteractionState();
   try {
-    const result = await api('/api/resources?' + new URLSearchParams(pageFilter));
+    const params = new URLSearchParams({...pageFilter, draft_revision:draft.revision});
+    const result = await api('/api/resources?' + params, undefined, {signal:controller.signal});
     if (token !== querySequence) return;
     if (meta.snapshot_id !== result.snapshot_id) {
-      const next = await api('/api/meta');
+      const next = await api('/api/meta', undefined, {signal:controller.signal});
       if (token !== querySequence) return;
       if (next.snapshot_id === result.snapshot_id) {
         meta = next;
@@ -470,7 +505,7 @@ async function query({top = false, restore = null, focusResult = false, limit = 
     renderedFilter = {...request, page:result.page};
     renderedPageFilter = {...pageFilter, page:result.page};
     filter.page = result.page;
-    sameDraft(result.draft);
+    selection.adopt(result.draft);
     render();
     if (restore !== null) window.scrollTo(0, restore);
     if (anchor) {
@@ -501,7 +536,7 @@ function goPage(number) {
   filter.page = number;
   void query({top:true, focusResult:true, locationMode:'pushState'});
 }
-async function mutate(action, values = {}) {
+async function mutate(action, values = {}, revision = draft.revision) {
   if (!loaded || !page || saving || querying) return;
   const reviewWasOpen = $('draft').open;
   saving = true;
@@ -509,18 +544,20 @@ async function mutate(action, values = {}) {
   if (reviewWasOpen) notice('review');
   setInteractionState();
   try {
-    sameDraft(await api('/api/draft', {revision:draft.revision, action, snapshot_id:page.snapshot_id, ...values}));
-    if (reviewWasOpen && $('draft').open) paintDraft();
-    if ($('reader').open) paintReaderPick();
-    await query();
+    const requireSnapshot = action === 'bulk' || action === 'toggle' && values.selected;
+    const payload = requireSnapshot ? {snapshot_id:page.snapshot_id, ...values} : values;
+    await selection.mutate(action, payload, revision);
+    if (reviewWasOpen && $('draft').open) await refreshDraft();
+    if (filter.selected === '1' && action !== 'move') await query();
   } catch (error) {
-    sameDraft(error.current);
-    if (reviewWasOpen && $('draft').open) paintDraft();
-    if ($('reader').open) paintReaderPick();
-    await query();
+    if (error.status === 409) {
+      if (reviewWasOpen && $('draft').open) await refreshDraft();
+      await query();
+    }
     notice(reviewWasOpen && $('draft').open ? 'review' : 'error', selectionFailure(error));
   } finally {
     saving = false;
+    renderSelection();
     setInteractionState();
   }
 }
@@ -547,24 +584,25 @@ function paintTransferPages(total) {
   const following = queueButton('清单下一页', () => changeTransferPage(1), transferListPage === pageCount);
   holder.replaceChildren(previous,el('span','第 '+fmt(transferListPage)+' / '+fmt(pageCount)+' 页'),following);
 }
-function changeTransferPage(offset) {
+async function changeTransferPage(offset) {
   if (saving) return;
   transferListPage += offset;
-  paintDraft();
+  if (!await refreshDraft()) return;
   $('draft').querySelector('.drawer-scroll').scrollTop = 0;
   $('draft-pages').querySelector('button:not(:disabled)')?.focus({preventScroll:true});
 }
 function paintDraft() {
-  const items = draft.entries || [];
-  notice('draft-note', items.length ? fmt(items.length) + ' 项，按下方顺序排列' : '转存清单为空。');
-  $('draft-actions').hidden = !items.length;
-  $('clear-all').hidden = !items.length;
+  const {entries:items, ids} = draftDetails;
+  const total = ids.length;
+  notice('draft-note', total ? fmt(total) + ' 项，按下方顺序排列' : '转存清单为空。');
+  $('draft-actions').hidden = !total;
+  $('clear-all').hidden = !total;
   const focusedItem = document.activeElement?.closest('.draftline');
   const focusedItemId = focusedItem?.dataset.queueId;
   const focusedAction = document.activeElement?.getAttribute('aria-label');
-  paintTransferPages(items.length);
+  paintTransferPages(total);
   const offset = (transferListPage - 1) * transferPageSize;
-  const rows = items.slice(offset,offset+transferPageSize).map((row, pageIndex) => {
+  const rows = items.map((row, pageIndex) => {
     const index = offset + pageIndex;
     const li = el('li', null, 'draftline');
     li.dataset.queueId = row.id;
@@ -575,14 +613,14 @@ function paintDraft() {
     if (info.length) details.append(el('p', info.join(' · '), 'muted'));
     const controls = el('div', null, 'draft-controls');
     const first = queueButton('移到首位', () => moveTransfer(row.id,1), index === 0);
-    const second = queueButton('移到第二位', () => moveTransfer(row.id,2), index === 1 || items.length < 2);
+    const second = queueButton('移到第二位', () => moveTransfer(row.id,2), index === 1 || total < 2);
     const up = queueButton('上移', () => moveTransfer(row.id,index), index === 0);
-    const down = queueButton('下移', () => moveTransfer(row.id,index+2), index === items.length - 1);
-    const remove = queueButton('移出', () => void mutate('remove', {id:row.id}));
+    const down = queueButton('下移', () => moveTransfer(row.id,index+2), index === total - 1);
+    const remove = queueButton('取消选择', () => void mutate('remove', {id:row.id}));
     const n = el('input');
     n.type = 'number';
     n.min = '1';
-    n.max = String(items.length);
+    n.max = String(total);
     n.value = String(index + 1);
     n.setAttribute('aria-label', '指定位置：' + row.title);
     const jump = queueButton('移到此位', () => {
@@ -609,12 +647,28 @@ function paintDraft() {
 }
 async function showDraft() {
   if (!loaded || saving) return;
+  notice('review');
+  if (!await refreshDraft()) {
+    notice('error', '未能加载转存清单，请重试。');
+    return;
+  }
+  openDialog('draft');
+  setInteractionState();
+}
+async function refreshDraft() {
+  const token = ++draftPageRequest;
   try {
-    sameDraft(await api('/api/draft'));
-    notice('review');
-    openDialog('draft');
+    const value = await api('/api/draft?entry_page=' + transferListPage);
+    if (token !== draftPageRequest || value.revision < draft.revision) return false;
+    draftDetails = value;
+    transferListPage = value.entry_page;
+    selection.adopt(value);
     paintDraft();
-  } catch { notice('error', '未能加载转存清单，请重试。'); }
+    return true;
+  } catch {
+    if ($('draft').open) notice('review', '未能加载清单，请重试。');
+    return false;
+  }
 }
 function projectActions(row) {
   const entries = row.project_entries || [];
@@ -870,7 +924,7 @@ for (const b of document.querySelectorAll('[data-scope]')) {
     const count = Number(b.dataset.count);
     const projects = Number(b.dataset.projects);
     const pending = Number(b.dataset.pending);
-    confirmedAction = {action:'bulk', scope:b.dataset.scope, expected_count:count,
+    confirmedAction = {action:'bulk', revision:draft.revision, scope:b.dataset.scope, expected_count:count,
       filter:renderedPageFilter, snapshot_id:page.snapshot_id};
     $('bulk').open = false;
     const text = bulkLabels[b.dataset.scope] + '。' + fmt(projects) + ' 个项目中可选 ' + fmt(count) + ' 项资料。';
@@ -879,19 +933,28 @@ for (const b of document.querySelectorAll('[data-scope]')) {
     openDialog('confirm');
   });
 }
-$('clear-all').addEventListener('click', () => {
-  confirmedAction = {action:'clear'};
-  notice('confirm-text', '清空转存清单？');
+function confirmClearSelection() {
+  if (saving || !draft.ids.length) return;
+  confirmedAction = {action:'clear', revision:draft.revision};
+  notice('confirm-text', '清空转存清单中的 ' + fmt(draft.ids.length) + ' 项选择？');
   $('apply-bulk').textContent = '清空选择';
   openDialog('confirm');
+}
+$('clear-all').addEventListener('click', confirmClearSelection);
+$('clear-catalog-selection').addEventListener('click', confirmClearSelection);
+$('clear-page-selection').addEventListener('click', async () => {
+  const ids = page?.items.filter(isPicked).map(row => row.id);
+  if (!ids?.length) return;
+  await mutate('remove_many', {ids});
+  if ($('clear-page-selection').hidden) $('result-title').focus({preventScroll:true});
 });
 $('apply-bulk').addEventListener('click', () => {
   const command = confirmedAction;
   confirmedAction = null;
   closeDialog($('confirm'));
   if (command) {
-    const {action, ...values} = command;
-    void mutate(action, values);
+    const {action, revision, ...values} = command;
+    void mutate(action, values, revision);
   }
 });
 $('confirm').addEventListener('close', () => { if (!$('confirm').open) confirmedAction = null; });
@@ -917,6 +980,17 @@ window.addEventListener('popstate', () => {
   filter = {...(readLocationFilters() || DEFAULT), view:filter.view};
   syncControls();
   void query({top:true});
+});
+selection.subscribe(value => {
+  if (!value) return;
+  const changed = draft.revision !== value.revision;
+  draft = value;
+  if (!loaded || !page || !changed) return;
+  renderSelection();
+  setInteractionState();
+  if (saving || querying) return;
+  if ($('draft').open && draftDetails?.revision !== draft.revision) void refreshDraft();
+  if (filter.selected === '1') void query();
 });
 
 async function openLinkedView() {
@@ -954,7 +1028,7 @@ async function openLinkedView() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
-    [meta, draft] = await Promise.all([api('/api/meta'), api('/api/draft')]);
+    [meta] = await Promise.all([api('/api/meta'), selection.load()]);
     setChoices('status', meta.statuses.filter(row => resourceStates[row.id]), '全部状态', row => resourceStates[row.id]);
     setChoices('site', meta.sites, '全部来源');
     const {pageLimit, ...savedView} = prefs();

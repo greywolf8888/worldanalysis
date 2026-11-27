@@ -1,6 +1,7 @@
 """Loopback resource library, review and fixed operator jobs."""
 from __future__ import annotations
 import argparse
+from collections import OrderedDict
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -27,13 +28,19 @@ from catalog_model import SEMANTIC_DB
 
 INDEX={"/":("index.html","text/html"),"/style.css":("style.css","text/css"),"/app.js":("app.js","text/javascript"),"/catalog-facets.js":("catalog-facets.js","text/javascript"),"/production.js":("production.js","text/javascript"),
        "/priority.js":("priority.js","text/javascript"),"/priority.css":("priority.css","text/css"),
+       "/selection.js":("selection.js","text/javascript"),
        "/member-import":("member-import.html","text/html"),"/member-import.js":("member-import.js","text/javascript"),
        "/courses":("courses.html","text/html"),"/courses.css":("courses.css","text/css"),"/courses.js":("courses.js","text/javascript"),
        "/control":("control.html","text/html"),"/control.css":("control.css","text/css"),"/control.js":("control.js","text/javascript")}
 ID=re.compile(r'rv_[0-9a-f]{64}\Z')
 DEFAULT={'q':'','category':'','subcategory':'','platform':'','status':'','site':'','from':'','to':'','order':'newest','view':'grid','selected':'0','baidu':'0','page':1,'scroll':0}
 MAX_ID=5000
+DRAFT_ENTRY_LIMIT=60
+MAX_MULTI_REMOVE_BODY=(len('rv_')+64+3) * MAX_ID + 256
 CATALOG_PAGE_LIMITS=(16,20,24,28,32)
+RESOURCE_FILTERS=('q','category','subcategory','platform','status','site','from','to','order','baidu')
+RESOURCE_CACHE_SIZE=12
+RESOURCE_CACHE_ROWS=48_000
 
 class RequestError(Exception):
     def __init__(self, code, msg): self.code=code; self.msg=msg
@@ -115,12 +122,34 @@ class Draft:
         r={k:v for k,v in d.items() if k!='bindings'}
         if entries:r['entries']=[self.entry(i,d) for i in d['ids']]
         return r
+
+    def show_page(self, d, page):
+        ids = d['ids']
+        pages = max(1, (len(ids)+DRAFT_ENTRY_LIMIT-1)//DRAFT_ENTRY_LIMIT)
+        page = min(page, pages)
+        offset = (page-1)*DRAFT_ENTRY_LIMIT
+        return {**self.show(d, False), 'entry_page': page, 'entry_page_limit': DRAFT_ENTRY_LIMIT,
+                'entries': [self.entry(key,d) for key in ids[offset:offset+DRAFT_ENTRY_LIMIT]],
+                'can_review': bool(ids) and all(requestable(row := self.lib.by_id.get(key,{}))
+                    and d['bindings'].get(key)==self.bind(row) for key in ids)}
+
     def mutate(self,body):
-        allowed={'revision','action','id','selected','scope','filter','position','prefs','expected_count','snapshot_id','article_key'}
+        allowed={'revision','action','id','selected','scope','filter','position','prefs','expected_count','snapshot_id','article_key','compact','ids'}
         if type(body) is not dict or body.keys()-allowed or type(body.get('revision')) is not int:raise RequestError(400,'缺草稿版本或含未知字段')
+        if 'compact' in body and type(body['compact']) is not bool:
+            raise RequestError(400,'草稿显示方式无效')
+        action = body.get('action')
+        if action == 'remove_many':
+            removed = body.get('ids')
+            if (body.keys()-{'revision','action','ids','compact'} or not isinstance(removed,list)
+                    or not 1<=len(removed)<=MAX_ID
+                    or any(not isinstance(key,str) or not ID.fullmatch(key) for key in removed)):
+                raise RequestError(400,'请选择要取消的资料')
+        elif 'ids' in body:
+            raise RequestError(400,'无效的草稿范围')
         c=self.connect()
         try:
-            c.execute('BEGIN IMMEDIATE'); d=self.load(c); ids=d['ids']; action=body.get('action')
+            c.execute('BEGIN IMMEDIATE'); d=self.load(c); ids=d['ids']
             if body['revision']!=d['revision']:raise RequestError(409,'草稿已被另一页更新，请重读，不会自动重试')
             if 'snapshot_id' in body and body['snapshot_id']!=self.lib.snapshot_id:raise RequestError(409,'目录版本已更新，请重新核对范围')
             def append(keys):
@@ -146,6 +175,11 @@ class Draft:
                 elif k in ids:ids.remove(k); d['bindings'].pop(k,None)
             elif action=='remove':
                 if k in ids:ids.remove(k); d['bindings'].pop(k,None)
+            elif action=='remove_many':
+                discard=set(removed)
+                ids[:]=[item for item in ids if item not in discard]
+                for item in discard:
+                    d['bindings'].pop(item,None)
             elif action=='clear':ids.clear();d['bindings'].clear()
             elif action=='move':
                 n=body.get('position')
@@ -166,7 +200,7 @@ class Draft:
             if len(ids)>MAX_ID:raise RequestError(422,'草稿规模超出安全上限')
             d['revision']+=1;d['updated_at']=now()
             c.execute('INSERT OR REPLACE INTO draft(single,body) VALUES(1,?)',(compact(d).decode(),));c.commit()
-            return self.show(d)
+            return self.show(d, not body.get('compact'))
         finally:c.close()
     def freeze(self,b):
         if type(b) is not dict or set(b)!={'revision','order_mode'} or type(b['revision']) is not int or b['order_mode'] not in ('ready_ordered','strict'):
@@ -206,6 +240,37 @@ class LiveSnapshot:
             # A collector can publish between building the index and starting the server.
             self.last_attempt = None
         self.progress = None
+        self.resource_cache = OrderedDict()
+
+    def resource_matches(self, library, filters, selected):
+        selected_only = filters['selected']=='1'
+        key = tuple(filters.get(field,'') for field in RESOURCE_FILTERS)
+        with self.lock:
+            if not selected_only and self.current[0] is library and key in self.resource_cache:
+                self.resource_cache.move_to_end(key)
+                return self.resource_cache[key]
+        all_resources = getattr(library,'catalog_all',None)
+        use_all = all_resources is not None and not selected_only and all(
+            filters.get(field) == DEFAULT[field] for field in RESOURCE_FILTERS)
+        rows = all_resources if use_all else library.match(filters,selected)
+        sources, versions = set(), set()
+        count, pending = 0, 0
+        for row in rows:
+            sources.update(row.get('_matched_sources',(row.get('article_key',row['id']),)))
+            versions.update(row.get('_matched_versions',(row.get('display_id',row['id']),)))
+            count += requestable(row)
+            pending += bool(row.get('action_pending'))
+        sources.discard(None)
+        versions.discard(None)
+        result = rows, len(sources), len(versions), count, pending
+        with self.lock:
+            if not selected_only and self.current[0] is library:
+                self.resource_cache[key]=result
+                self.resource_cache.move_to_end(key)
+                while len(self.resource_cache)>1 and (len(self.resource_cache)>RESOURCE_CACHE_SIZE
+                        or sum(len(entry[0]) for entry in self.resource_cache.values())>RESOURCE_CACHE_ROWS):
+                    self.resource_cache.popitem(last=False)
+        return result
 
     def resource_progress(self, library, local):
         with self.lock:
@@ -241,6 +306,7 @@ class LiveSnapshot:
                     operations_changed=getattr(lib,'operations_snapshot_id',lib.snapshot_id)!=getattr(cur,'operations_snapshot_id',cur.snapshot_id)
                     if public_changed or lib.share_locations!=cur.share_locations:
                         self.current=(lib,Draft(draft.path,lib),LocalProjection(lib) if operations_changed else local)
+                        self.resource_cache.clear()
                     self.last_attempt=key
                     self.pending=False
             except (OSError,ValueError,TypeError,KeyError,sqlite3.Error):self.pending=True
@@ -349,13 +415,26 @@ class Handler(BaseHTTPRequestHandler):
             if p == '/api/course-calendar':
                 try:
                     progress = self.server.snapshot.resource_progress(lib, local)
-                    return self.send(200, course_calendar(lib, u.query, progress=progress))
+                    selecting = parse_qs(u.query, max_num_fields=8).get('selected') == ['1']
+                    choice = draft.read() if selecting else {'ids': (), 'revision': 0}
+                    return self.send(200, course_calendar(lib, u.query, progress=progress,
+                                     selected_ids=choice['ids'], selection_revision=choice['revision']))
                 except CalendarRequestError as error:
                     return self.send(error.status, {'error': str(error)})
+                except ValueError:
+                    return self.send(400, {'error': '课程筛选或日期无效。'})
             if p == '/api/control' and not u.query and self.server.control is not None:
                 return self.send(200, self.server.control.overview(lib, draft.read(), local, pending, analysis.read(lib, local)))
             if p=='/api/meta':return self.send(200,{**lib.meta,'catalog_page_limits':CATALOG_PAGE_LIMITS,'production_integration':'v4-dsh-cutover-20261126-004','public_checkpoint_pending_sync':pending})
-            if p=='/api/draft':return self.send(200,draft.show(draft.read()))
+            if p=='/api/draft':
+                selection = draft.read()
+                if u.query=='view=selection':
+                    return self.send(200,draft.show(selection, False))
+                if pair := re.fullmatch(r'entry_page=([1-9][0-9]{0,3})',u.query):
+                    return self.send(200,draft.show_page(selection,int(pair[1])))
+                if not u.query:
+                    return self.send(200,draft.show(selection))
+                raise RequestError(400,'清单页码无效')
             if p=='/api/analysis-priority' and not u.query:return self.send(200,analysis.read(lib,local))
             if p=='/api/local-status' and not u.query:return self.send(200,local.overview())
             if p=='/api/local-projects':
@@ -383,24 +462,25 @@ class Handler(BaseHTTPRequestHandler):
             if p=='/api/resources':
                 t=perf_counter(); raw=parse_qs(u.query,keep_blank_values=True,max_num_fields=16)
                 if any(len(v)!=1 for v in raw.values()):raise RequestError(400,'筛选参数重复')
+                requested_revision=raw.pop('draft_revision',[''])[0]
+                if requested_revision and not re.fullmatch(r'[0-9]{1,18}',requested_revision):
+                    raise RequestError(400,'清单版本无效')
                 f=filters({k:v[0] for k,v in raw.items()},lib);d=draft.read();selected=set(d['ids'])
-                rows=lib.match(f,selected); page,cur,pages,limit=select_page(rows,f)
+                rows,source_count,version_count,eligible_count,pending_count=self.server.snapshot.resource_matches(lib,f,selected)
+                page,cur,pages,limit=select_page(rows,f)
                 visible={r['id'] for r in page if not r.get('action_pending')}
                 all_rows=getattr(lib,'catalog_all',())
-                sources=set(); versions=set()
-                for row in rows:
-                    sources.update(row.get('_matched_sources',[row.get('article_key',row['id'])]))
-                    versions.update(row.get('_matched_versions',[row.get('display_id',row['id'])]))
-                sources.discard(None); versions.discard(None)
+                index_pending = (self.server.snapshot.resource_matches(lib,DEFAULT,set())[4] if all_rows else 0)
                 progress = self.server.snapshot.resource_progress(lib, local)
                 pulse = progress.read() if any(not row.get('demo') for row in page) else None
-                return self.send(200,{'items':[{**lib.summary(r),**(progress.fields(r,pulse) if pulse else {})} for r in page],'total':len(rows),'eligible':sum(requestable(r) for r in rows),
-                    'source_total':len(sources),'version_total':len(versions),
-                    'selection_pending':sum(bool(r.get('action_pending')) for r in rows),
+                return self.send(200,{'items':[{**lib.summary(r),**(progress.fields(r,pulse) if pulse else {})} for r in page],'total':len(rows),'eligible':eligible_count,
+                    'source_total':source_count,'version_total':version_count,
+                    'selection_pending':pending_count,
                     'page_selection_pending':sum(bool(r.get('action_pending')) for r in page),
-                    'index_selection_pending':sum(bool(r.get('action_pending')) for r in all_rows),'index_total':len(all_rows) if all_rows else len(lib.by_id),
+                    'index_selection_pending':index_pending,'index_total':len(all_rows) if all_rows else len(lib.by_id),
                     'page':cur,'pages':pages,'limit':limit,'index_selectable':lib.requestable_count,'page_selectable':sum(requestable(r) for r in page),'max_draft_items':MAX_ID,
-                    'draft':draft.show(d,False),'hidden_selected':len(selected-visible),'query_ms':round((perf_counter()-t)*1000,3),'snapshot_id':lib.snapshot_id})
+                    'draft':None if requested_revision==str(d['revision']) else draft.show(d,False),
+                    'hidden_selected':len(selected-visible),'query_ms':round((perf_counter()-t)*1000,3),'snapshot_id':lib.snapshot_id})
         elif method=='POST' and p=='/api/confirm':
             raise RequestError(403,'需要原桌面真人授权、冻结范围和现场复核；此页不会写确认回执')
         elif method=='POST' and p=='/api/member-share-import' and not u.query:
@@ -430,12 +510,18 @@ class Handler(BaseHTTPRequestHandler):
                     or self.headers.get('Sec-Fetch-Site','same-origin')!='same-origin' or self.headers.get('Transfer-Encoding')):raise RequestError(403,'只接受本站页面的本地草稿请求')
             try:n=int(self.headers.get('Content-Length','0'))
             except ValueError:raise RequestError(400,'请求长度无效') from None
-            if len(self.headers.get_all('Content-Length',[]))!=1 or not 1<=n<=4096:raise RequestError(413,'草稿参数过长或为空')
+            max_body = MAX_MULTI_REMOVE_BODY if p=='/api/draft' else 4096
+            if len(self.headers.get_all('Content-Length',[]))!=1 or not 1<=n<=max_body:raise RequestError(413,'草稿参数过长或为空')
             try:o=json.loads(self.rfile.read(n).decode('utf-8'))
             except (ValueError,UnicodeError):raise RequestError(400,'草稿数据不可解析') from None
+            action = o.get('action') if isinstance(o,dict) else None
+            if n>4096 and action!='remove_many':raise RequestError(413,'草稿参数过长')
+            self.compact_draft_response = p=='/api/draft' and isinstance(o,dict) and o.get('compact') is True
+            removing = p=='/api/draft' and (action in ('remove','remove_many','clear')
+                         or action=='toggle' and o.get('selected') is False)
             with self.server.snapshot.lock:
                 lib,draft,local,pending=self.server.snapshot.get()
-                if pending:raise RequestError(409,'公开快照正在重新校验，未写草稿')
+                if pending and not removing:raise RequestError(409,'公开快照正在重新校验，未写草稿')
                 if p=='/api/analysis-priority':return self.send(200,analysis.mutate(o,lib,local))
                 return self.send(200,draft.mutate(o) if p=='/api/draft' else draft.freeze(o))
         raise RequestError(404,'找不到此操作')
@@ -443,8 +529,9 @@ class Handler(BaseHTTPRequestHandler):
         try:self.route(method)
         except (RequestError,AnalysisPriorityError) as e:
             detail={'error':e.msg};
-            if e.code==409:
-                _,draft,_,_=self.server.snapshot.get();detail['draft']=draft.show(draft.read())
+            if e.code==409 and urlsplit(self.path).path in ('/api/draft','/api/review'):
+                _,draft,_,_=self.server.snapshot.get()
+                detail['draft']=draft.show(draft.read(),not getattr(self,'compact_draft_response',False))
             self.send(e.code,detail)
         except (sqlite3.Error,ValueError,OSError,TypeError):self.send(503,{'error':'本地数据读写未完成，原草稿保留。请读取当前版本，不要重复提交。'})
     def do_GET(self):self.serve('GET')

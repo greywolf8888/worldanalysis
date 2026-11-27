@@ -6,8 +6,11 @@
   <meta name="referrer" content="no-referrer">
   <title>Worldanalysis · 课程表</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/priority.css">
   <link rel="stylesheet" href="/courses.css">
   <script defer src="/catalog-facets.js"></script>
+  <script defer src="/selection.js"></script>
+  <script defer src="/priority.js"></script>
   <script defer src="/courses.js"></script>
 </head>
 <body>
@@ -21,8 +24,10 @@
     <nav class="masthead-nav" aria-label="资源库导航">
       <a href="/" id="calendar-library-link">资源库</a>
       <a href="/courses" aria-current="page">课程表</a>
+      <button id="analysis-open" type="button">分析顺序</button>
       <a href="/control">控制台</a>
     </nav>
+    <a class="calendar-draft-link" href="/?panel=transfer">转存清单 <b id="calendar-draft-count"></b></a>
   </div>
 </header>
 <main class="shell course-calendar">
@@ -51,6 +56,12 @@
   <nav class="topics category-facets" aria-label="业务分类" id="calendar-categories"></nav>
   <nav class="topics platform-facets" aria-label="适用平台" id="calendar-platforms"></nav>
   <nav class="topics subcategory-facets" aria-label="业务细分" id="calendar-subcategories" hidden></nav>
+  <div class="calendar-selection">
+    <button id="calendar-selected" class="filter-toggle" type="button" aria-pressed="false">只看已选</button>
+    <button id="calendar-remove-visible" type="button" hidden>取消已显示的选择</button>
+    <button id="calendar-clear" type="button" hidden>清空转存清单</button>
+    <p id="calendar-selection-note" role="status" hidden></p>
+  </div>
   <div class="calendar-position" id="calendar-position" hidden></div>
   <div class="calendar-days" id="calendar-list" tabindex="-1" aria-busy="true"></div>
   <div class="calendar-footer">
@@ -60,5 +71,16 @@
   </div>
   <noscript><p>启用 JavaScript 后即可按日期浏览课程。 <a href="/">返回资源库</a></p></noscript>
 </main>
+<dialog id="calendar-clear-dialog" class="modal" aria-labelledby="calendar-clear-heading" aria-describedby="calendar-clear-note">
+  <header class="drawer-top"><h2 id="calendar-clear-heading">清空转存清单</h2></header>
+  <div class="dialog-body">
+    <p id="calendar-clear-note"></p>
+    <p id="calendar-clear-error" role="alert" hidden></p>
+    <form method="dialog" class="modal-actions">
+      <button type="submit" autofocus>返回</button>
+      <button id="calendar-clear-confirm" class="primary" type="button">清空选择</button>
+    </form>
+  </div>
+</dialog>
 </body>
 </html>

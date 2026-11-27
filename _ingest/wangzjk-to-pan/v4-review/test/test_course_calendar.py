@@ -7,6 +7,7 @@ from unittest.mock import patch
 from urllib.parse import urlencode
 
 from catalog_model import Library, ORIGIN, SITE, Wangzjk, digest
+from catalog_relations import CatalogRelations
 from catalog_semantics import CatalogStore
 from course_calendar import CalendarRequestError, PAGE_SIZE, course_calendar, is_course
 
@@ -120,3 +121,87 @@ class CourseCalendar(unittest.TestCase):
             with self.assertRaises(CalendarRequestError) as stale_cursor:
                 course_calendar(original, "day=2026-01-02&" + after)
             self.assertEqual(stale_cursor.exception.status, 409)
+
+    def test_calendar_reuses_match_and_positions_but_reads_progress_again(self):
+        original = library()
+        progress = unittest.mock.Mock()
+        progress.read.side_effect = ("first", "second")
+        progress.fields.side_effect = lambda row, pulse: {"analysis_state": pulse}
+        with patch("course_calendar.read_non_projects", return_value={}), patch.object(
+                original, "match", wraps=original.match) as match:
+            first = course_calendar(original, "", progress=progress)
+            second = course_calendar(original, urlencode({"after": first["next"]}), progress=progress)
+        self.assertEqual(match.call_count, 1)
+        self.assertEqual({row["analysis_state"] for row in first["items"]}, {"first"})
+        self.assertEqual({row["analysis_state"] for row in second["items"]}, {"second"})
+        self.assertEqual(first["snapshot_id"], original.snapshot_id)
+        self.assertTrue(set(row["id"] for row in first["items"]).isdisjoint(row["id"] for row in second["items"]))
+
+    def test_calendar_cache_is_bounded_and_current_exclusions_take_effect(self):
+        original = library()
+        row = next(row for row in original.by_id.values() if row["article_id"] == "52")
+        with patch("course_calendar.MAX_CACHED_SEARCHES", 2), patch(
+                "course_calendar.read_non_projects", return_value={}) as read, patch.object(
+                    original, "match", wraps=original.match) as match:
+            first = course_calendar(original, "")
+            course_calendar(original, "q=50")
+            course_calendar(original, "q=51")
+            self.assertEqual(len(original.calendar_cache.matches), 2)
+            course_calendar(original, "")
+            self.assertEqual(match.call_count, 4)
+            read.return_value = {(SITE, "52", row["article_revision"]): "site_notice"}
+            with self.assertRaises(CalendarRequestError) as stale:
+                course_calendar(original, urlencode({"after": first["next"]}))
+            self.assertEqual(stale.exception.status, 409)
+            self.assertEqual(course_calendar(original, "")["total"], first["total"] - 1)
+
+    def test_selected_calendar_reuses_catalog_filters_and_keeps_bound_edition(self):
+        original = library()
+        with TemporaryDirectory() as temporary:
+            original.attach_catalog(CatalogStore(Path(temporary) / "catalog.sqlite3"), {})
+        rows = {row["article_id"]: row for row in original.semantic_rows.values()}
+        old, new, ambiguous = rows["1"], rows["52"], rows["2"]
+        old["analysis"] = {**old["analysis"], "edition": "第一版"}
+        new["analysis"] = {**new["analysis"], "edition": "第二版"}
+        ambiguous["action_pending"] = True
+        identity = lambda row: {field: row[field] for field in ("site_id", "article_id", "input_hash")}
+        edge = {"left": identity(old), "right": identity(new), "relation": "different_version", "same_scope": True}
+        original.relations = CatalogRelations(rows.values(), [edge])
+        picked = {old["id"], ambiguous["id"]}
+        with patch("course_calendar.read_non_projects", return_value={}):
+            visible = course_calendar(original, "q=测试资料&selected=1", selected_ids=picked, selection_revision=4)
+            single = visible["items"][0]
+            self.assertEqual([item["id"] for item in visible["items"]], [old["id"]])
+            self.assertEqual(
+                {k: single[k] for k in ("site_id", "article_id", "status", "action_pending", "requestable", "selected")},
+                {"site_id": SITE, "article_id": "1", "status": old["status"], "action_pending": False,
+                 "requestable": old["requestable"], "selected": True},
+            )
+            self.assertEqual(course_calendar(original, "selected=1&q=52", selected_ids=picked)["items"], [])
+            self.assertEqual(course_calendar(original, "")["items"][0]["id"], new["id"])
+
+    def test_selected_cursor_is_scoped_to_draft_and_ordinary_cursor_is_not(self):
+        original = library()
+        ids = set(original.by_id)
+        with patch("course_calendar.read_non_projects", return_value={}):
+            first = course_calendar(original, "selected=1", selected_ids=ids, selection_revision=1)
+            next_selected = urlencode({"selected": "1", "after": first["next"]})
+            self.assertEqual(
+                len(course_calendar(original, next_selected, selected_ids=ids, selection_revision=1)["items"]),
+                len(ids) - PAGE_SIZE,
+            )
+            with self.assertRaises(CalendarRequestError) as draft_changed:
+                course_calendar(original, next_selected, selected_ids=ids, selection_revision=2)
+            self.assertEqual(draft_changed.exception.status, 409)
+            with self.assertRaises(CalendarRequestError) as selection_changed:
+                course_calendar(original, next_selected, selected_ids=(), selection_revision=1)
+            self.assertEqual(selection_changed.exception.status, 409)
+
+            browse = course_calendar(original, "selected=0", selected_ids=ids, selection_revision=1)
+            after = urlencode({"after": browse["next"]})
+            updated = course_calendar(original, after, selected_ids=(), selection_revision=2)
+            self.assertEqual(len(updated["items"]), len(ids) - PAGE_SIZE)
+            self.assertFalse(any(item["selected"] for item in updated["items"]))
+            with self.assertRaises(CalendarRequestError) as invalid:
+                course_calendar(original, "selected=true")
+            self.assertEqual(invalid.exception.status, 400)
