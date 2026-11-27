@@ -1,2 +1,5 @@
 # Publication provenance verifies these source bytes by SHA-256.
 worldanalysis/derived_publication.py text eol=lf
+
+# Frame capture receipts verify the original browser helper bytes.
+_tools/browser-source-frame.js text eol=lf
