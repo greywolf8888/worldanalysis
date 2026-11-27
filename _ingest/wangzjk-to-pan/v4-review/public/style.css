@@ -71,7 +71,8 @@ p { margin: .45rem 0; }
 .topics { display: flex; flex-wrap: wrap; gap: 0 .38rem; min-height: 39px; align-items: end; padding-top: .25rem; border-bottom: 1px solid var(--line); }
 .platform-facets, .subcategory-facets { min-height: 34px; padding-top: 0; }
 .platform-facets { position: relative; }
-.platform-facets .platform-more { position: static; align-self: center; }
+#topics, #calendar-categories { position: relative; }
+.platform-facets .platform-more, #topics .platform-more, #calendar-categories .platform-more { position: static; align-self: center; }
 .platform-more summary { min-height: 28px; padding: .17rem .46rem; font-size: .82rem; }
 .platform-more .platform-options { inset: calc(100% + 4px) auto auto 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .13rem .3rem; width: min(23rem, 100%); padding: .34rem; }
 .platform-options button.topic { border-radius: 3px; justify-content: space-between; }
