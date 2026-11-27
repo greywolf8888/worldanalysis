@@ -32,6 +32,7 @@ import hashlib
 import importlib.metadata
 import io
 import json
+import math
 import mimetypes
 import posixpath
 import re
@@ -44,7 +45,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 PROVIDER_ID = "worldanalysis.documents.native"
-PROVIDER_VERSION = "1.0.0"
+PROVIDER_VERSION = "1.0.4"
 MAX_BLOCK_TEXT = 16000
 DEFAULT_LIMITS = {
     "max_input_bytes": 128 * 1024 * 1024,
@@ -558,6 +559,13 @@ def _text(r: _Result, fmt: str):
     data = r.source.read_bytes()
     text, encoding = _decode(data, r.options.get("encoding"))
     r.meta.update({"encoding": encoding, "source_bytes": len(data), "character_count": len(text)})
+    # Some course archives give their subtitle-writing guide an .srt suffix.
+    # A document title and subordinate headings distinguish it from cue groups,
+    # whose first line is a cue number or timestamp.
+    if (fmt == "srt" and re.match(r"\s*#[ \t]+\S", text)
+            and re.search(r"(?m)^#{2,6}[ \t]+\S", text)):
+        r.meta.update(declared_text_format=fmt, text_format="md")
+        fmt = "md"
     raw_key = r.file(text.encode("utf-8"), "native_text", "text/plain; charset=utf-8", "txt")
     loc = {"kind": "asset", "precision": "exact", "char_start": 0, "char_end": len(text)}
     if fmt in ("txt", "md", "json"):
@@ -1037,6 +1045,52 @@ def _pdf_matrix(left, right):
     return (a*g + c*h, b*g + d*h, a*i + c*j, b*i + d*j, a*k + c*l + e, b*k + d*l + f)
 
 
+def _pdf_rectangle(value):
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    if not all(isinstance(coord, (int, float)) and math.isfinite(coord) for coord in value):
+        return None
+    x1, y1, x2, y2 = map(float, value)
+    return [min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]
+
+
+def _pdf_hyperlinks(r, page, loc, annotations):
+    """Inventory URI annotations as local evidence, including those outside the page box."""
+    from pypdf.generic import DictionaryObject
+
+    if not isinstance(annotations, list):
+        return
+    links = r.meta["pdf_hyperlinks"]
+    if len(annotations) > r.limits["max_blocks"] - len(links):
+        raise _Stop("PDF annotation count exceeds max_blocks")
+    crop, media = _pdf_rectangle(page.cropbox), _pdf_rectangle(page.mediabox)
+    for reference in annotations:
+        annotation = reference.get_object()
+        if not isinstance(annotation, DictionaryObject) or annotation.get("/Subtype") != "/Link":
+            continue
+        reference_action = annotation.get("/A")
+        action = reference_action.get_object() if reference_action is not None else None
+        if not isinstance(action, DictionaryObject) or action.get("/S") != "/URI":
+            continue
+        target = action.get("/URI")
+        if target is None:
+            continue
+        target = target.get_object()
+        if not isinstance(target, str) or not target.strip() or len(target) > MAX_BLOCK_TEXT:
+            r.deferred("metadata", loc, "PDF URI target unavailable as bounded text", gap="unreadable")
+            continue
+        raw_rect = annotation.get("/Rect")
+        rect = _pdf_rectangle(raw_rect.get_object()) if raw_rect is not None else None
+        intersects = None
+        if rect and crop and media:
+            intersects = (max(rect[0], crop[0], media[0]) < min(rect[2], crop[2], media[2])
+                          and max(rect[1], crop[1], media[1]) < min(rect[3], crop[3], media[3]))
+        links.append({
+            "page_number": loc["page_number"], "target": target, "rect": rect,
+            "intersects_page_box": intersects, "loaded": False,
+        })
+
+
 def _pdf(r: _Result):
     r.dependency("pypdf")
     from pypdf import PdfReader
@@ -1052,6 +1106,7 @@ def _pdf(r: _Result):
     r.meta["pages"] = []
     r.meta["pdf_text_spans"] = []
     r.meta["pdf_image_placements"] = []
+    r.meta["pdf_hyperlinks"] = []
     if total > r.limits["max_pages"]:
         raise _Stop("PDF page count exceeds max_pages")
     root = reader.trailer.get("/Root", {})
@@ -1093,11 +1148,12 @@ def _pdf(r: _Result):
             r.meta["pdf_text_spans"].append({"page_number": page_no, "spans": spans,
                                             "coordinate_note": "Raw pypdf matrices only; glyph bbox/reading order not guaranteed, no invented bbox"})
             image_blocks = []
+            raster_has_detail = False
             op_count = 0
             inline_index = 0
             # Use source content instructions for occurrence enumeration, not unique image resources.
             def walk(stream, resources, path=(), active=(), depth=0, ctm=(1., 0., 0., 1., 0., 0.)):
-                nonlocal op_count, inline_index
+                nonlocal op_count, inline_index, raster_has_detail
                 if depth > r.limits["max_form_depth"]:
                     raise _Stop("PDF form nesting exceeds max_form_depth")
                 if stream is None:
@@ -1173,6 +1229,7 @@ def _pdf(r: _Result):
                         continue
                     image_no = page_info["image_occurrences"]
                     page_info["image_occurrences"] += 1
+                    raster_has_detail = raster_has_detail or (width, height) != (1, 1)
                     iloc = {**loc, "node_id": "pdf-page:" + str(page_no) + ":image:" + str(image_no)}
                     try:
                         image = page.images[names[0] if len(names) == 1 else list(names)]
@@ -1197,9 +1254,13 @@ def _pdf(r: _Result):
             walk(contents, resources)
             suspect_text = "\ufffd" in native or "\x00" in native
             readable_native = bool(native.strip()) and not native_failed and not suspect_text
-            need_render = bool(page_info["vector_operations"] or native_failed or suspect_text or (not readable_native and page_info["image_occurrences"]))
+            image_count = page_info["image_occurrences"]
+            # A lone source pixel adds no text to a page with a readable text layer.
+            review_raster = bool(image_count and (not readable_native or raster_has_detail or image_count > 1))
+            need_render = bool(page_info["vector_operations"] or native_failed or suspect_text or review_raster)
             page_info["render_attempted"] = need_render and callable(r.options.get("render_pdf_page"))
-            rendered = r.render_pdf_page(page_no, "vector_or_unreadable_page") if need_render else None
+            render_cause = "mixed_text_and_image" if readable_native and review_raster else "vector_or_unreadable_page"
+            rendered = r.render_pdf_page(page_no, render_cause) if need_render else None
             page_info["page_render_retained"] = bool(rendered)
             if readable_native:
                 page_info["route"] = "native_text"
@@ -1226,10 +1287,10 @@ def _pdf(r: _Result):
                 page_info["route"] = "blank_native"
                 key = r.structured({"page_number": page_no, "blank_by_native_enumeration": True}, "inventory")
                 r.block("metadata", loc, files=[key], text="No native text/image/paint operation discovered on this page")
-            if not readable_native and need_render:
+            if review_raster or (not readable_native and need_render):
                 if rendered:
-                    # Prefer one correctly composed/rotated page OCR, not the same
-                    # text once per native image and again per page rendering.
+                    # Extract labels in the visible page, including screenshots on pages with a text layer.
+                    # Keep native text and derived OCR as separate evidence.
                     r.ocr(rendered["file_key"], rendered["block_indexes"], loc)
                     page_info["ocr_source"] = "page_render"
                 else:
@@ -1239,13 +1300,14 @@ def _pdf(r: _Result):
                             r.ocr(block["file_keys"][0], [index], block["locator"])
                     if image_blocks:
                         page_info["ocr_source"] = "embedded_image"
-                    if page_info["image_occurrences"] and not callable(r.options.get("ocr")):
-                        r.gap("unprocessed", "Image-only PDF page requires OCR; engine not registered, page retained as partial", image_blocks)
+                    if review_raster and not callable(r.options.get("ocr")) and not image_blocks:
+                        r.gap("unprocessed", "PDF image text requires OCR; no raster evidence could be read", image_blocks)
             if page_info["vector_operations"]:
                 r.deferred("chart", loc,
                            "PDF vector paint operations retained in actual page render; visual meaning not interpreted" if rendered else "PDF vector paint operations discovered; appearance/layout not rendered or interpreted",
                            gap="semantic_gap" if rendered else "missing_visual", files=[rendered["file_key"]] if rendered else None)
             if page.get("/Annots"):
+                _pdf_hyperlinks(r, page, loc, page["/Annots"])
                 r.deferred("comment", loc, "PDF annotations/forms registered; not flattened/rendered or executed", gap="unprocessed")
             if len(r.data["gaps"]) == gap_start:
                 processed_pages += 1

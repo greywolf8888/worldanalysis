@@ -25,6 +25,8 @@ worldanalysis.cmd control analysis pause
 
 `analysis next`返回真实已发布版本和任务输出目录；当前授权Agent实际读取并产出结果，程序核验身份、全部块状态、引用、读取回执、报告字节和补采请求。**没有配置商业模型API时不会伪造无人值守摘要**。图像必须真实打开并留下像素/字节关联回执，不能拿路径充数。
 
+本地课程从[课程工作流](.agents/skills/course-material-archive/SKILL.md)进入。逐集逐件核对原件与正文，按原课讲次写成一篇教材。讲师观点和亲历明确注明归属，操作面向学习者。发布到原 Obsidian 项目的同名笔记，并重开同版读到文末。开发和续作见[教材制作手册](<docs/课程资料整理与 Obsidian 教材制作手册.md>)。
+
 ## 当前真实产物
 
 - [执行模型与边界](<_ledger/devpack/执行模型.md>)：对象、状态、授权、路由及未完成项。

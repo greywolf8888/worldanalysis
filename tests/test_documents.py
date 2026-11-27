@@ -55,7 +55,7 @@ def _png() -> bytes:
     return stream.getvalue()
 
 
-def _pdf(path: Path):
+def _pdf(path: Path, *, mixed_page=False):
     """Three-page synthetic PDF: digital text, repeated raster image, blank page."""
     from pypdf import PdfWriter
     from pypdf.generic import ArrayObject, DecodedStreamObject, DictionaryObject, FloatObject, NameObject, NumberObject
@@ -75,7 +75,11 @@ def _pdf(path: Path):
                   NameObject("/ColorSpace"): NameObject("/DeviceRGB"), NameObject("/BitsPerComponent"): NumberObject(8)})
     scan[NameObject("/Resources")] = DictionaryObject({NameObject("/XObject"): DictionaryObject({NameObject("/Im0"): writer._add_object(image)})})
     content = DecodedStreamObject()
-    content.set_data(b"q 60 0 0 60 20 20 cm /Im0 Do Q q 60 0 0 60 120 20 cm /Im0 Do Q")
+    commands = b"q 60 0 0 60 20 20 cm /Im0 Do Q q 60 0 0 60 120 20 cm /Im0 Do Q"
+    if mixed_page:
+        scan["/Resources"][NameObject("/Font")] = DictionaryObject({NameObject("/F1"): font_ref})
+        commands += b" BT /F1 12 Tf 20 120 Td (synthetic text over a screenshot) Tj ET"
+    content.set_data(commands)
     scan[NameObject("/Contents")] = writer._add_object(content)
     writer.add_blank_page(width=300, height=200)
     writer.add_metadata({"/Title": "synthetic mixed page fixture"})
@@ -272,6 +276,19 @@ class TextTests(DocumentTestCase):
             result, _ = self.run_extract(self.source("bad.srt", text))
             self.assertEqual(result["processing_status"], "partial")
             self.assertTrue(result["gaps"])
+
+    def test_markdown_guide_with_srt_extension_retains_prose_and_examples(self):
+        text = "# 字幕翻译指南\n\n## 保留时码\n\n保持编号和原时间轴。\n\n"
+        text += "1\n00:00:01,000 --> 00:00:03,000\n翻译示例\n\n## 检查输出\n\n只提交译文。\n"
+        result, output = self.run_extract(self.source("指南.srt", text))
+        self.assertEqual(result["processing_status"], "verified_complete")
+        self.assertEqual(result["metadata"]["declared_text_format"], "srt")
+        self.assertEqual(result["metadata"]["text_format"], "md")
+        block, = result["blocks"]
+        self.assertEqual(block["locator"]["kind"], "asset")
+        self.assertEqual(block["text"], text)
+        self.assertEqual(self.read_file(result, output, block["file_keys"][0]).decode(), text)
+        self.assertNotIn("subtitle_cues", result["metadata"])
 
     def test_missing_figure_reference_not_claimed_complete(self):
         result, _ = self.run_extract(self.source("missing.txt", "设置如下图所示。"))
@@ -680,6 +697,32 @@ class OfficeTests(DocumentTestCase):
 
 
 class PdfTests(DocumentTestCase):
+    def test_pdf_hyperlink_targets_and_cropped_annotations_stay_offline(self):
+        from pypdf import PdfWriter
+        from pypdf.annotations import Link
+        from pypdf.generic import RectangleObject
+
+        path = self.work / "hyperlinks-at-page-positions.pdf"
+        writer = PdfWriter()
+        writer.add_blank_page(300, 200).cropbox = RectangleObject((0, 50, 300, 200))
+        writer.add_blank_page(300, 200)
+        target = "https://example.org/supplement?lesson=12"
+        writer.add_annotation(0, Link(rect=(30, 70, 100, 93), url=target))
+        writer.add_annotation(0, Link(rect=(140, 180, 280, 192), url=target))
+        writer.add_annotation(0, Link(rect=(30, 12, 75, 22), url="https://example.org/cropped"))
+        writer.add_annotation(1, Link(rect=(30, 20, 90, 35), target_page_index=0))
+        writer.write(path)
+
+        result, _ = self.run_extract(path)
+        links = result["metadata"]["pdf_hyperlinks"]
+        self.assertEqual([row["target"] for row in links], [target, target, "https://example.org/cropped"])
+        self.assertEqual([row["page_number"] for row in links], [1, 1, 1])
+        self.assertEqual(links[0]["rect"], [30, 70, 100, 93])
+        self.assertEqual([row["intersects_page_box"] for row in links], [True, True, False])
+        self.assertTrue(all(not row["loaded"] for row in links))
+        self.assertFalse(result["metadata"]["external_content_loaded"])
+        self.assertFalse(result["metadata"]["content_executed"])
+
     def test_pdf_pagewise_native_scan_blank_and_repeated_occurrences(self):
         path = self.work / "synthetic-mixed.pdf"
         _pdf(path)

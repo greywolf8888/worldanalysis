@@ -17,7 +17,7 @@ FIXTURES = Path(__file__).parent / "media_fixtures"
 
 class OCRTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="ocr-test-", dir=FIXTURES)
+        self.temp = tempfile.TemporaryDirectory(prefix="ocr-test-")
         self.root = Path(self.temp.name)
         self.image = self.root / "original.png"
         Image.new("RGB", (100, 60), "white").save(self.image)
