@@ -18,8 +18,7 @@ const resourceIdPattern = /^rv_[0-9a-f]{64}$/;
 const articleKeyPattern = /^ca_[0-9a-f]{64}$/;
 const PREFS_KEY = 'wa-v4-view:existing-library';
 const resourceStates = {
-  observed:'资料范围待核对', verified:'曾转存', recycled:'已回收',
-  needs_reconcile:'转存待核对', restricted:'原文访问受限', unknown:'转存方式待核实'
+  verified:'曾转存', recycled:'已回收', restricted:'原文访问受限'
 };
 const bulkLabels = {page:'本页全选', filtered:'筛选结果全选', site_all:'全库全选'};
 const transferPageSize = 60;
@@ -88,7 +87,6 @@ function selectionFailure(error) {
   return '未能保存选择，请重试。';
 }
 function resourceState(row) {
-  if (row.action_pending) return '操作待核实';
   return resourceStates[row.status] || '';
 }
 function canRequestTransfer(row) {
@@ -166,7 +164,7 @@ function readLocationFilters() {
   if (!['newest','oldest','title'].includes(result.order)) result.order = DEFAULT.order;
   for (const key of ['selected','baidu']) if (result[key] !== '1') result[key] = '0';
   if (result.site && !meta.sites.some(item => item.id === result.site)) result.site = '';
-  if (result.status && !meta.statuses.some(item => item.id === result.status)) result.status = '';
+  if (result.status && !resourceStates[result.status]) result.status = '';
   for (const key of ['from','to']) {
     const value = result[key];
     const date = new Date(value + 'T00:00:00Z');
@@ -287,7 +285,7 @@ function selectionControl(row, location) {
   return label;
 }
 function cardExcerpt(row) {
-  const excerpt = row.excerpt?.trim();
+  const excerpt = (row.card_summary ?? row.excerpt)?.trim();
   if (!excerpt) return '';
   const title = row.title?.trim();
   const preview = title && excerpt.startsWith(title)
@@ -350,7 +348,7 @@ function card(row) {
   if (control) actions.append(control);
   const analysis = priorityAction(row);
   if (analysis) actions.append(analysis);
-  foot.append(actions);
+  if (actions.childElementCount) foot.append(actions);
   article.append(main, foot);
   return article;
 }
@@ -691,7 +689,6 @@ function renderReader(row) {
     if (analysis) actions.append(analysis);
     article.append(actions);
   }
-  if (row.relationship_pending) article.append(el('p', '来源或版本待核实', 'muted'));
   const sources = relatedSection('sources', '其他来源', row.other_sources);
   const versions = relatedSection('versions', '其他版本', row.other_versions);
   if (sources) article.append(sources);
@@ -965,7 +962,7 @@ async function openLinkedView() {
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     [meta, draft] = await Promise.all([api('/api/meta'), api('/api/draft')]);
-    setChoices('status', meta.statuses, '全部状态', row => resourceState({status:row.id}) || '待核对');
+    setChoices('status', meta.statuses.filter(row => resourceStates[row.id]), '全部状态', row => resourceStates[row.id]);
     setChoices('site', meta.sites, '全部来源');
     const {pageLimit, ...savedView} = prefs();
     const explicit = readLocationFilters();

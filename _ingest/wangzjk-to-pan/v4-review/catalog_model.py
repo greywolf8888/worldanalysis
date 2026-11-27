@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from catalog_relations import CatalogRelations
 from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, FILTER_ROLES, PLATFORMS as PLATFORM_LABELS
 from catalog_semantics import CatalogStore, article_key, relationship_input, source_input
+from catalog_topics import TOPIC_REVISION, intro_preview, project_topic
 from intro_inputs import choose_intro, intro_revision, legacy_intro, read_intros
 from share_locations import historical_share_locations, merge_share_locations, protected_owner_exports, read_protected_owner_export
 
@@ -22,10 +23,10 @@ SITE = 'wangzjk.com'
 ORIGIN = 'https://www.wangzjk.com'
 TARGET = '/apps/教育分析学习/wangzjk.com'
 CATEGORIES = {'commerce':'电商', 'ai_media':'AI 图文视频', 'growth':'运营增长',
-              'business':'商业项目', 'tools':'工具与自动化', 'unsorted':'待分类'}
+              'business':'商业项目', 'tools':'工具与自动化', 'unsorted':''}
 STATUS = {'observed':'发现入口 · 待核范围', 'verified':'历史根级验读',
           'recycled':'已回收 · 不自动重取', 'needs_reconcile':'旧提交待核 · 不重发',
-          'restricted':'原站权限受限', 'unknown':'转存方式待核实'}
+          'restricted':'原站权限受限', 'unknown':''}
 PLATFORMS = ('抖音','小红书','快手','视频号','微信','拼多多','淘宝','闲鱼','B站','TikTok','YouTube','公众号')
 FILES = ('catalog.json','journal.json','downloaded-project-markers.json','capacity-policy.json','crawl_state.JSON','automation.json')
 IMG_EXT = re.compile(r'\.(?:png|jpe?g|webp|gif)$', re.I)
@@ -316,12 +317,14 @@ class Library:
             value = self.semantic_inputs[token]
             record_state, analysis = classified.get(token,('pending',None))
             valid = analysis or {}
-            category = valid.get('category','unsorted')
+            category,subtopic = project_topic(value['title'],value['paragraphs'],value['excerpt'],valid,manual=record_state=='manual')
+            secondary = valid.get('secondary_category','')
+            secondary = secondary if secondary in TAXONOMY and secondary!=category else ''
             live_platforms = tuple(dict.fromkeys(p['id'] for p in valid.get('platforms',[]) if p['role'] in FILTER_ROLES))
             row = {**raw, 'article_key':token, 'input_hash':relationship_input(value,valid)['input_hash'], 'analysis':valid,
                    'coverage':value['coverage'],'paragraphs':value['paragraphs'],'classification_state':{'agent':'verified','manual':'manual'}.get(record_state,'pending'),
-                   'category':category,'category_label':TAXONOMY[category][0],'subcategory':valid.get('subcategory',''),
-                   'secondary_category':valid.get('secondary_category',''),
+                   'category':category,'category_label':TAXONOMY.get(category,('',()))[0],'subcategory':subtopic,
+                   'secondary_category':secondary,
                    'platforms':[{'id':p,'label':PLATFORM_LABELS[p]} for p in live_platforms],
                    'version_label':valid.get('edition') or next((d['text'] for d in valid.get('dates',[]) if d['meaning']=='version'),''),
                    'action_pending':seen[raw['id']]!=1,'relationship_pending':token in pending}
@@ -329,6 +332,7 @@ class Library:
                 row.update(requestable=False,selectable=False,blocked_reason='资料归属待核实。')
             if not row['excerpt'] and value['paragraphs']:
                 row['excerpt']=safe_text(value['paragraphs'][0],360)
+            row['card_summary']=intro_preview(value['title'],value['paragraphs'],value['excerpt'])
             row['_search']=norm(' '.join([raw['title'],raw['site_label'],raw['site_id'],row['excerpt'],
                 row['category_label'],row['subcategory'],*(p['label'] for p in row['platforms']),*raw['source_categories'],*value['paragraphs']]))
             if value['paragraphs'] and (not row['blocks'] or value['coverage']=='complete'):
@@ -347,7 +351,7 @@ class Library:
         if not hasattr(self,'relations'):
             rows=list(self.by_id.values())
             return {
-                'categories':[{'id':k,'label':v,'count':sum(r['category']==k for r in rows)} for k,v in CATEGORIES.items()],
+                'categories':[{'id':k,'label':v,'count':sum(r['category']==k for r in rows)} for k,v in CATEGORIES.items() if v],
                 'platforms':[],'category_aliases':CATEGORY_ALIASES,'project_count':len(rows)}
         valid = [r for r in self.semantic_rows.values() if eligible is None or eligible(r)]
         project_count = self.relations.count(valid)
@@ -542,7 +546,7 @@ def open_index():
     if catalog_input_stamp()!=data_stamp or store.revision()!=catalog_revision:
         raise ValueError('资料读取期间发生更新，请稍后重读')
     lib.catalog_inputs_stamp=data_stamp
-    lib.snapshot_id=digest([lib.operations_snapshot_id,catalog_revision,data_stamp[-1]])
+    lib.snapshot_id=digest([lib.operations_snapshot_id,catalog_revision,data_stamp[-1],TOPIC_REVISION])
     facets=lib.facets()
     lib.catalog_all=lib.match({},set())
     lib.requestable_count=sum(r['requestable'] for r in lib.catalog_all)

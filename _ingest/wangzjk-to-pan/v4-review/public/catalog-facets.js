@@ -12,7 +12,7 @@ const catalogFacets = (() => {
   }
 
   function normalize(values, meta) {
-    const categories = meta.categories || [];
+    const categories = (meta.categories || []).filter(item => item.label && item.id !== 'unsorted');
     const platforms = meta.platforms || [];
     const aliases = meta.category_aliases || {};
     const category = aliases[values.category] || values.category;
@@ -43,12 +43,19 @@ const catalogFacets = (() => {
     const focused = [category, platform, subcategory].some(node => node.contains(active)) ? active : null;
     const menuWasOpen = platform.querySelector('details')?.open;
     const count = meta.totals?.projects ?? meta.project_total;
-    const categories = meta.categories || [];
+    const categories = (meta.categories || []).filter(item => item.label && item.id !== 'unsorted');
     const platforms = meta.platforms || [];
     const choices = categories.find(item => item.id === selected.category)?.subcategories || [];
 
     const fill = (field, items) => items.map(item => control(item, field, selected[field], change));
-    category.replaceChildren(...fill('category', [{id: '', label: '全部业务', count}, ...categories]));
+    const categoryWasOpen = category.querySelector('details')?.open;
+    const firstTopics = categories.slice(0, 7);
+    const selectedTopic = categories.find(item => item.id === selected.category);
+    if (selectedTopic && !firstTopics.includes(selectedTopic)) firstTopics[firstTopics.length - 1] = selectedTopic;
+    const otherTopics = categories.filter(item => !firstTopics.includes(item));
+    const topicControls = fill('category', [{id: '', label: '全部业务', count}, ...firstTopics]);
+    if (otherTopics.length) topicControls.push(disclosure('更多分类', otherTopics, 'category', categoryWasOpen));
+    category.replaceChildren(...topicControls);
     subcategory.hidden = !selected.category || !choices.length;
     subcategory.replaceChildren(...(subcategory.hidden ? [] : fill('subcategory', [{id: '', label: '全部细分'}, ...choices])));
 
@@ -61,19 +68,20 @@ const catalogFacets = (() => {
     if (selectedPlatform && !promoted.includes(selectedPlatform)) promoted.push(selectedPlatform);
     const remaining = platforms.filter(item => !promoted.includes(item));
     const shown = fill('platform', [{id: '', label: '全部平台', count}, ...promoted]);
-    if (remaining.length) {
+    if (remaining.length) shown.push(disclosure('更多平台', remaining, 'platform', menuWasOpen));
+    function disclosure(label, items, field, open) {
       const menu = text('details', '', 'popover platform-more');
-      const summary = text('summary', '更多平台');
+      const summary = text('summary', label);
       const panel = text('div', '', 'popover-content platform-options');
-      menu.open = Boolean(menuWasOpen);
-      panel.append(...fill('platform', remaining));
+      menu.open = Boolean(open);
+      panel.append(...fill(field, items));
       menu.append(summary, panel);
-      shown.push(menu);
+      return menu;
     }
     platform.replaceChildren(...shown);
 
     if (focused?.matches('summary')) {
-      platform.querySelector('summary')?.focus({preventScroll: true});
+      (focused.closest('#topics, #calendar-categories') ? category : platform).querySelector('summary')?.focus({preventScroll: true});
     } else if (focused?.dataset.facet) {
       const candidates = [category, platform, subcategory].flatMap(node => [...node.querySelectorAll('button')]);
       candidates.find(button => button.dataset.facet === focused.dataset.facet &&

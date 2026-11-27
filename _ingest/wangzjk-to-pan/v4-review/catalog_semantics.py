@@ -10,22 +10,13 @@ import sqlite3
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
+from catalog_topics import CATEGORIES, CATEGORY_ALIASES, NO_TOPIC
+
 RULES = 'catalog-zh-1'
 SCHEMA = 1
 MAX_TASKS = 20
 MAX_BYTES = 512 * 1024
 MAX_TEXT = 160_000
-CATEGORIES = {
-    'commerce': ('电商与带货', ('商品经营', '店铺运营', '虚拟商品', '联盟带货')),
-    'content': ('内容创作', ('写作与小说', '图文创作', '短视频', '短剧与漫剧', '内容 IP')),
-    'growth': ('流量与营销', ('账号起号', '获客引流', '广告投放', '私域运营', '转化营销')),
-    'automation': ('AI 与自动化', ('AI 工具', '智能体', '自动化工作流')),
-    'technical': ('技术与设计', ('软件开发', '建站', '设计', '专业制作')),
-    'business': ('商业与管理', ('商业模式', '企业经营', '组织与团队')),
-    'finance': ('财商与投资', ('财商', '投资研究', '金融方法')),
-    'unsorted': ('待分类', ()),
-}
-CATEGORY_ALIASES = {'ai_media': 'content', 'tools': 'automation'}
 PLATFORMS = {
     'xiaohongshu':'小红书', 'douyin':'抖音', 'wechat_articles':'公众号', 'wechat_video':'视频号',
     'wechat':'微信', 'kuaishou':'快手', 'bilibili':'B站', 'tiktok':'TikTok', 'youtube':'YouTube',
@@ -133,9 +124,9 @@ def validate_classification(value, source):
     category = value.get('category')
     secondary = value.get('secondary_category') or ''
     field = value.get('subcategory') or ''
-    if category not in CATEGORIES or (secondary and (secondary not in CATEGORIES or secondary in {category,'unsorted'})):
+    if category not in (*CATEGORIES,NO_TOPIC) or (secondary and (secondary not in CATEGORIES or secondary in {category,'unsorted'})):
         raise ValueError('业务分类无效')
-    if field and field not in CATEGORIES[category][1]:
+    if field and field not in CATEGORIES.get(category,('',()))[1]:
         raise ValueError('细分分类无效')
     checked = evidence(value.get('evidence'), {'article':source})
     platforms = value.get('platforms', [])
