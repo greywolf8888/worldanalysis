@@ -1,6 +1,6 @@
 import unittest
 
-from catalog_topics import CATEGORIES, intro_preview, project_topic
+from catalog_topics import CATEGORIES, displayed_secondary_topic, intro_preview, project_topic
 
 
 class CatalogTopicTest(unittest.TestCase):
@@ -24,6 +24,46 @@ class CatalogTopicTest(unittest.TestCase):
     def test_real_introduction_supplies_a_topic_when_title_is_vague(self):
         self.assertEqual(project_topic('保姆级实战公开课', ('以悬赏平台接推广任务，学习领取与交付的完整流程。',),''),
                          ('services','活动推广'))
+        self.assertEqual(project_topic('某主任特训营：每节课都是经验分享', (), '课程内容：拼多多 […]'),
+                         ('commerce','店铺运营'))
+        self.assertEqual(project_topic('社媒加独立站实战课：私域网红营销教学',
+                                       ('本套课程聚焦跨境出海实操，完整覆盖社媒引流与独立站运营。',),''),
+                         ('crossborder','外贸获客'))
+
+    def test_news_requires_reporting_purpose(self):
+        cases = {
+            '2026年11月27日新闻早讯，每天60s读懂世界': 'news',
+            'FDE行业趋势峰会资料合集+7天系统大课：AI企业服务': 'business',
+            '小程序日活10W+，我做了哪些？实战经验分享': 'growth',
+            'AI提示词高阶应用15讲｜商业行业案例全落地': 'automation',
+            '用工作流自动生成每日新闻简报的脚本': 'automation',
+            '经验分享：做了几件事': '',
+        }
+        for title, category in cases.items():
+            with self.subTest(title=title):
+                self.assertEqual(project_topic(title, (), '')[0], category)
+        self.assertEqual(displayed_secondary_topic('automation',{'secondary_category':'news'}),'')
+        self.assertEqual(project_topic('AI提示词高阶应用15讲', (), '', {'category':'news'})[0],'automation')
+
+    def test_classifies_the_deliverable_instead_of_the_tool_or_examples(self):
+        cases = {
+            'WorkBuddy短视频自动化实战课：利用AI自动写文案、配音、生成字幕': ('media','短视频制作'),
+            '抖音汽车解说Skill+视频教程，汽车号内容创作': ('media','影视解说'),
+            '普通人如何从零开好淘宝店？商品上架及万相台推广技巧': ('commerce','店铺运营'),
+            '豆包AI+实体门店获客，了解同城推广': ('local_business','门店经营'),
+            '同城高效相亲匹配项目，私域沟通技巧': ('services','本地服务'),
+            'AIGC漫剧案例实战教学：从剧本到成片': ('screen','短剧与漫剧'),
+            '红果短剧电脑版+TV版本来了，同步追剧安装即用': ('software','影音工具'),
+            '高品质素材内容！全套语音音效合集，49000个文件': ('assets','音乐与音效'),
+            '短视频制作教程，附赠设计素材和封面模板': ('media','短视频制作'),
+            '剪映模板拉新项目，操作简单，人人可做': ('services','活动推广'),
+            'AI做PPT爆单，0基础月入2W，附万能PPT模板': ('services','技能接单'),
+            '哔哩哔哩最新视频下载工具，支持合集下载和字幕下载': ('software','影音工具'),
+            'Adobe Photoshop 2026 v27.11.0.26': ('software','设计工具'),
+        }
+        for title, result in cases.items():
+            with self.subTest(title=title):
+                self.assertEqual(project_topic(title, (), ''),result)
 
     def test_description_drops_heading_and_duplicate_title(self):
         title='掌握 AI 工具'

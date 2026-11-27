@@ -2,6 +2,8 @@
 
 资源库和课程表直接显示全部业务分类和平台选项，随屏宽换行。点「小红书」可查看适用项目，再选「电商与带货」看交集。平台识别使用项目标题和已保存的简介，识别实际经营、发布或推广渠道，支持一个项目对应多个平台。资料下载地址和软件兼容说明不会自动成为平台归类。内容不足的项目可在全部资料和搜索中查看。课程表按原站发布日期分组，详情可以展开其他来源及版本。
 
+主题按项目主要用途划分。课程里的案例、软件和赠品保留在原项目介绍里。独立软件、素材、门店经营和短剧制作各有对应类别。新闻简报在资源库的「新闻与行业资讯」浏览。
+
 控制台汇集公开采集、会员资料入口、转存、本地下载、正式分析、独立验收、教材保全和清理。公开采集、连接检查和流程读回会写入本机运行记录。各阶段的状态来自现有目录、交接和本地核验记录。
 
 资源库和课程表分别展示转存与分析状态。转存来自已核回执，历史回执显示为「曾转存」。正式分析跟随本地批次和实际教材，按同版验收和已收到的范围显示。只凭唯一完整项目名对应到教材时显示「已有本地分析」。缺少依据的状态留空。浏览、翻页或刷新时读取最新的本机记录。
@@ -53,6 +55,7 @@ cd _ingest/wangzjk-to-pan/v4-review
 ```powershell
 .\ops.ps1 -Action catalog -CatalogArguments @('inventory')
 .\ops.ps1 -Action catalog -CatalogArguments @('status')
+.\ops.ps1 -Action catalog -CatalogArguments @('audit-topics', '--category', 'news', '--sample', '8')
 python -X utf8 -B catalog_tasks.py export --limit 20 --output data/catalog-tasks/next.jsonl
 python -X utf8 -B catalog_tasks.py import data/catalog-tasks/next-results.jsonl
 python -X utf8 -B catalog_tasks.py resume --output data/catalog-tasks/unfinished.jsonl

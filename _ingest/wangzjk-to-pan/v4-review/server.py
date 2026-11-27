@@ -367,10 +367,10 @@ class Handler(BaseHTTPRequestHandler):
                 row=lib.exact_article(x,token) if token else lib.by_id[x]
                 if not row:
                     raise RequestError(404,'此来源资料已更新，请重新打开。')
-                detail=lib.display_detail(row) if token else row
-                detail={k:v for k,v in detail.items() if not k.startswith('_') and k not in ('input_hash','analysis','paragraphs','coverage','roots')}
                 progress = self.server.snapshot.resource_progress(lib, local)
                 source_row = lib.exact_article(x, article_key(row['site_id'], row['article_id'])) or row
+                detail = lib.display_detail(source_row)
+                detail={k:v for k,v in detail.items() if not k.startswith('_') and k not in ('input_hash','analysis','paragraphs','coverage','roots')}
                 live = progress.fields(source_row, progress.read(), include_book=True) if not row.get('demo') else {}
                 return self.send(200,{**detail,**live,
                                       'baidu_share_links':lib.baidu_links(row),'project_entries':lib.project_entries(row)})

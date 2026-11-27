@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from catalog_relations import CatalogRelations
 from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, PLATFORMS as PLATFORM_LABELS
 from catalog_semantics import CatalogStore, article_key, relationship_input, source_input
-from catalog_topics import TOPIC_REVISION, intro_preview, project_topic
+from catalog_topics import TOPIC_REVISION, displayed_secondary_topic, intro_preview, project_topic
 from catalog_platforms import PLATFORM_REVISION, project_platforms
 from intro_inputs import choose_intro, intro_revision, legacy_intro, read_intros
 from share_locations import historical_share_locations, merge_share_locations, protected_owner_exports, read_protected_owner_export
@@ -319,8 +319,7 @@ class Library:
             record_state, analysis = classified.get(token,('pending',None))
             valid = analysis or {}
             category,subtopic = project_topic(value['title'],value['paragraphs'],value['excerpt'],valid,manual=record_state=='manual')
-            secondary = valid.get('secondary_category','')
-            secondary = secondary if secondary in TAXONOMY and secondary!=category else ''
+            secondary = displayed_secondary_topic(category,valid,manual=record_state=='manual')
             live_platforms = project_platforms(value['title'],value['paragraphs'],value['excerpt'],valid,
                                                manual=record_state=='manual')
             row = {**raw, 'article_key':token, 'input_hash':relationship_input(value,valid)['input_hash'], 'analysis':valid,

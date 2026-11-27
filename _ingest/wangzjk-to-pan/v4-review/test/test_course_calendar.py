@@ -5,7 +5,7 @@ from unittest.mock import patch
 from urllib.parse import urlencode
 
 from catalog_model import Library, ORIGIN, SITE, Wangzjk
-from course_calendar import CalendarRequestError, PAGE_SIZE, course_calendar
+from course_calendar import CalendarRequestError, PAGE_SIZE, course_calendar, is_course
 
 
 def library(last_article=52):
@@ -34,6 +34,11 @@ def library(last_article=52):
 
 
 class CourseCalendar(unittest.TestCase):
+    def test_new_news_brief_stays_out_without_a_manual_exclusion(self):
+        source = [{"site_id":SITE,"article_id":"1","article_revision":"arv-test"}]
+        self.assertFalse(is_course({"category":"news","subcategory":"新闻简报","sources":source},{}))
+        self.assertTrue(is_course({"category":"commerce","subcategory":"店铺运营","sources":source},{}))
+
     def test_cursor_date_and_revision_scoped_exclusions(self):
         original = library()
         by_article = {row["article_id"]: row for row in original.by_id.values()}

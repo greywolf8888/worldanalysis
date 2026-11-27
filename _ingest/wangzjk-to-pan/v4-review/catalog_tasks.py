@@ -1,5 +1,6 @@
 """Read the local catalog and run resumable text-only Agent batches."""
 import argparse
+from collections import Counter
 import sqlite3
 import sys
 from pathlib import Path
@@ -8,6 +9,7 @@ from catalog_model import ROOT, SEMANTIC_DB, catalog_input_stamp, open_index
 from catalog_relations import candidate_pairs, article_identity
 from pipeline_control import RunStore
 from catalog_semantics import CatalogStore, MAX_TASKS, encode, parse_jsonl, relationship_input, usable
+from catalog_topics import CATEGORIES, NO_TOPIC
 
 
 def catalog_path(value):
@@ -57,6 +59,9 @@ def parser():
     commands=p.add_subparsers(dest='action',required=True)
     commands.add_parser('inventory')
     commands.add_parser('status')
+    audit=commands.add_parser('audit-topics',help='核对资源库分类计数和抽样')
+    audit.add_argument('--category', choices=[*CATEGORIES,NO_TOPIC])
+    audit.add_argument('--sample',type=int,default=0)
     export=commands.add_parser('export')
     export.add_argument('--kind',choices=['classification','relation'],default='classification')
     export.add_argument('--article',action='append',default=[])
@@ -91,6 +96,27 @@ def record_short(action, summary, *, rejected=False):
         print('目录操作已落盘，本次运行记录稍后可查。',file=sys.stderr)
 
 
+def audit_topics(library, category, sample):
+    if not 0 <= sample <= 50:
+        raise ValueError('抽样数须在 0 至 50 之间')
+    raw = tuple(library.semantic_rows.values())
+    facets = library.meta['categories']
+    for option in facets:
+        if len(library.match({'category':option['id']},set())) != option['count']:
+            raise ValueError('分类计数与实际筛选结果不一致')
+    chosen = [row for row in raw if category is None or (row['category'] or NO_TOPIC) == category
+              or row['secondary_category'] == category]
+    chosen.sort(key=lambda row:(row['published_at'],row['article_id']))
+    count = min(sample,len(chosen))
+    picked = [chosen[position * (len(chosen)-1) // max(1,count-1)] for position in range(count)]
+    return {'sources':len(raw),'projects':library.meta['totals']['projects'],
+            'primary':dict(Counter(row['category'] or NO_TOPIC for row in raw)),
+            'introduction_coverage':dict(Counter(row['coverage'] for row in raw)),
+            'categories':facets,
+            'sample':[{'site':row['site_id'],'article':row['article_id'],'title':row['title'],
+                       'category':row['category_label'],'subcategory':row['subcategory']} for row in picked]}
+
+
 def main():
     p=parser()
     try:
@@ -105,6 +131,8 @@ def main():
             status=store.inventory(inputs)
             print(encode({**status,'presentation':library.relations.stats(),
                           'legacy_shared_articles':library.article_count-len(library.by_id)}))
+        elif args.action=='audit-topics':
+            print(encode(audit_topics(library,args.category,args.sample)))
         elif args.action=='export':
             if args.kind=='classification':
                 explicit=named_inputs(library,args.article)
