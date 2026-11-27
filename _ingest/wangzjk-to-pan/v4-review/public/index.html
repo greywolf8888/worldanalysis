@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Worldanalysis · 资源库</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/priority.css">
+  <script defer src="/app.js"></script>
+  <script defer src="/production.js"></script>
+  <script defer src="/priority.js"></script>
+</head>
+<body>
+<a class="skip" href="#results">跳到资料列表</a>
+<header class="masthead">
+  <div class="shell masthead-inner">
+    <a class="brand" href="/" aria-label="Worldanalysis 资源库">
+      <span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>Worldanalysis</span>
+    </a>
+    <nav class="masthead-nav" aria-label="资源库导航">
+      <a href="/" aria-current="page">资源库</a>
+      <a href="/courses">课程表</a>
+      <a href="/control">控制台</a>
+      <button id="progress" type="button">资料来源</button>
+      <button id="local-open" type="button">处理进度</button>
+      <button id="analysis-open" type="button" aria-haspopup="dialog" aria-controls="analysis-order">分析顺序</button>
+    </nav>
+    <button id="queue" class="queue-button" type="button">转存清单 <b id="chosen">0</b></button>
+  </div>
+</header>
+<main class="shell library" id="results">
+  <div class="library-head">
+    <h1>资源库</h1>
+    <form class="search-form" id="filters" role="search">
+      <label class="sr" for="q">搜索资料</label>
+      <div class="search-box"><span class="search-icon" aria-hidden="true"></span><input id="q" type="search" name="q" maxlength="200" autocomplete="off" placeholder="搜索标题、正文或平台"></div>
+      <button class="primary" type="submit">搜索</button>
+    </form>
+  </div>
+  <nav class="topics" aria-label="业务主题" id="topics"></nav>
+  <div class="directory" aria-labelledby="result-title">
+    <div class="results-bar">
+      <div class="result-label"><h2 id="result-title" tabindex="-1">全部资料</h2><span id="result-count" role="status">加载中…</span></div>
+      <div class="results-actions">
+        <button class="filter-toggle" id="available" type="button" aria-pressed="false">有百度网盘链接</button>
+        <button class="filter-toggle" id="selected" type="button" aria-pressed="false">只看已选</button>
+        <details class="popover extra-filters" id="more-filters">
+          <summary><span class="filter-icon" aria-hidden="true"></span>筛选<span id="filter-count" class="small-count" hidden></span></summary>
+          <div class="popover-content filter-fields">
+            <label for="status">转存状态</label><select id="status" name="status"><option value="">全部状态</option></select>
+            <label for="site">内容来源</label><select id="site" name="site"><option value="">全部来源</option></select>
+            <div class="dates">
+              <div><label for="from">发布起始日</label><input name="from" id="from" type="date"></div>
+              <div><label for="to">发布截止日</label><input name="to" id="to" type="date"></div>
+            </div>
+            <div class="filter-footer"><button id="reset" type="button">清除筛选</button><button id="apply-filters" class="primary" type="button">应用筛选</button></div>
+          </div>
+        </details>
+        <label class="sr" for="order">排序</label>
+        <select id="order" class="order" name="order"><option value="newest">最新发布</option><option value="oldest">最早发布</option><option value="title">按标题</option></select>
+        <div class="view-switch" role="group" aria-label="呈现方式">
+          <button type="button" id="grid" aria-pressed="true"><span class="grid-icon" aria-hidden="true"></span>卡片</button>
+          <button type="button" id="list" aria-pressed="false"><span class="list-icon" aria-hidden="true"></span>列表</button>
+        </div>
+        <details class="popover bulk" id="bulk">
+          <summary>批量选择</summary>
+          <div class="popover-content bulk-options">
+            <button data-scope="page" type="button" disabled>本页全选</button>
+            <button data-scope="filtered" type="button" disabled>筛选结果全选</button>
+            <button data-scope="site_all" type="button" disabled>全库全选</button>
+            <p id="bulk-limit-note" class="muted" hidden></p>
+          </div>
+        </details>
+      </div>
+    </div>
+    <p id="selection" class="selection-note" role="status" hidden></p>
+    <div class="notice error-line" role="alert" id="error" hidden></div>
+    <div id="cards" class="cards grid" aria-busy="true"></div>
+    <div id="empty" class="empty" hidden>
+      <p>没有符合条件的资料。</p><button type="button" id="empty-reset">清除筛选</button>
+    </div>
+    <nav id="pagination" class="pagination" aria-label="目录分页" hidden>
+      <div id="page-controls" class="page-controls" role="group" aria-label="首页、相邻页和末页">
+        <button id="first" type="button" disabled>首页</button>
+        <button id="prev" type="button" disabled>上一页</button>
+        <button id="next" type="button" disabled>下一页</button>
+        <button id="last" type="button" disabled>末页</button>
+      </div>
+      <div id="page-numbers" class="page-numbers" role="group" aria-label="相邻页码"></div>
+      <div class="page-position">
+        <span id="page-label" role="status" aria-atomic="true"></span>
+        <form id="page-jump" class="page-jump">
+          <label for="jump-number">跳到</label>
+          <input id="jump-number" name="page" type="number" min="1" step="1" inputmode="numeric" required disabled>
+          <button id="jump-submit" type="submit" disabled>前往</button>
+        </form>
+      </div>
+    </nav>
+  </div>
+</main>
+
+<dialog id="reader" class="drawer reader" aria-labelledby="reader-title">
+  <div class="drawer-frame">
+    <header class="drawer-top reader-top">
+      <div class="reader-nav" role="group" aria-label="阅读导航"><button type="button" id="reader-prev" disabled>上篇</button><button type="button" id="reader-next" disabled>下篇</button></div>
+      <div id="reader-selection"></div>
+      <button type="button" class="close-button" aria-label="关闭详情" data-close autofocus>关闭</button>
+    </header>
+    <div class="drawer-scroll" id="reader-scroll">
+      <div class="reading">
+        <header class="article-heading"><p id="reader-meta" class="muted" hidden></p><h2 id="reader-title">资料详情</h2></header>
+        <div id="reader-body"></div>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="draft" class="drawer selection-drawer" aria-labelledby="draft-title">
+  <div class="drawer-frame">
+    <header class="drawer-top"><h2 id="draft-title">转存清单</h2><button type="button" class="close-button" data-close autofocus>关闭</button></header>
+    <div class="drawer-scroll dialog-body">
+      <div class="queue-heading"><p id="draft-note" class="muted" role="status"></p><button id="clear-all" type="button" class="quiet-button">清空选择</button></div>
+      <ol id="draft-rows" class="draft-rows"></ol>
+      <nav id="draft-pages" class="pagination" aria-label="转存清单分页" hidden></nav>
+    </div>
+    <footer class="drawer-bottom" id="draft-actions" hidden>
+      <p id="review" class="muted" role="status" hidden></p>
+      <div class="queue-actions"><label for="mode">处理顺序</label><select id="mode"><option value="ready_ordered">就绪项优先</option><option value="strict">按所选顺序</option></select><button id="freeze" type="button">保存顺序</button><button id="preconfirm-open" class="primary" type="button">核对转存</button></div>
+    </footer>
+  </div>
+</dialog>
+<dialog id="analysis-order" class="drawer analysis-drawer" aria-labelledby="analysis-title">
+  <div class="drawer-frame">
+    <header class="drawer-top"><h2 id="analysis-title">分析顺序</h2><button type="button" class="close-button" data-close autofocus>关闭</button></header>
+    <div class="drawer-scroll dialog-body" id="analysis-body"></div>
+  </div>
+</dialog>
+
+<dialog id="confirm" class="modal" aria-labelledby="confirm-title">
+  <header class="drawer-top"><h2 id="confirm-title">核对选择</h2></header>
+  <div class="dialog-body"><p id="confirm-text"></p><div class="modal-actions"><button type="button" data-close autofocus>取消</button><button id="apply-bulk" class="primary" type="button">确定</button></div></div>
+</dialog>
+
+<dialog id="overview" class="drawer compact-drawer" aria-labelledby="overview-title">
+  <div class="drawer-frame">
+    <header class="drawer-top"><h2 id="overview-title">资料来源</h2><button type="button" class="close-button" data-close autofocus>关闭</button></header>
+    <div class="drawer-scroll dialog-body" id="overview-body"></div>
+  </div>
+</dialog>
+<dialog id="local-status" class="drawer progress-drawer" aria-labelledby="local-title">
+  <div class="drawer-frame">
+    <header class="drawer-top"><h2 id="local-title">处理进度</h2><button type="button" class="close-button" id="local-close" autofocus>关闭</button></header>
+    <div class="drawer-scroll dialog-body" id="local-body"></div>
+  </div>
+</dialog>
+<dialog id="preconfirmation" class="drawer compact-drawer" aria-labelledby="preconfirmation-title">
+  <div class="drawer-frame">
+    <header class="drawer-top"><h2 id="preconfirmation-title">核对转存</h2><button type="button" class="close-button" id="preconfirm-close" autofocus>关闭</button></header>
+    <div class="drawer-scroll dialog-body" id="preconfirm-body"></div>
+  </div>
+</dialog>
+</body>
+</html>

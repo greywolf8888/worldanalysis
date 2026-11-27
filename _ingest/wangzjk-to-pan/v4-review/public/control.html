@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Worldanalysis · 控制台</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/control.css">
+  <script defer src="/control.js"></script>
+</head>
+<body>
+  <a class="skip" href="#control-main">跳到控制台</a>
+  <header class="masthead control-masthead">
+    <div class="shell masthead-inner">
+      <a class="brand" href="/" aria-label="Worldanalysis 资源库">
+        <span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>Worldanalysis</span>
+      </a>
+      <nav class="masthead-nav" aria-label="主要导航">
+        <a href="/">资源库</a>
+        <a href="/courses">课程表</a>
+        <a href="/control" aria-current="page">控制台</a>
+      </nav>
+    </div>
+  </header>
+  <main class="shell control-shell" id="control-main" tabindex="-1">
+    <div class="control-heading">
+      <div>
+        <h1>控制台</h1>
+        <p class="control-readback muted" id="control-readback" hidden></p>
+      </div>
+      <div class="control-actions">
+        <div class="control-actions" id="control-actions"></div>
+        <button id="control-refresh" type="button">刷新状态</button>
+      </div>
+    </div>
+    <p class="control-notice" id="control-feedback" role="status" hidden></p>
+    <p class="notice control-notice" id="control-error" role="alert" hidden></p>
+    <div class="control-layout" id="control-content" aria-busy="true">
+      <section class="control-panel" aria-labelledby="control-flow-title">
+        <div class="control-panel-header">
+          <h2 id="control-flow-title">运行流程</h2>
+        </div>
+        <p class="control-empty" id="control-stage-note">正在读取各环节…</p>
+        <ol class="control-stages" id="control-stages" hidden></ol>
+      </section>
+      <section class="control-panel control-history" aria-labelledby="control-history-title">
+        <div class="control-panel-header">
+          <h2 id="control-history-title">近期运行</h2>
+        </div>
+        <p class="control-empty" id="control-run-note">正在读取运行记录…</p>
+        <ol class="control-runs" id="control-runs" hidden></ol>
+      </section>
+    </div>
+    <noscript><p class="notice">启用 JavaScript 后即可查看并操作控制台。</p></noscript>
+  </main>
+</body>
+</html>
