@@ -1,0 +1,9 @@
+state/
+tests/tmp/
+__pycache__/
+*.pyc
+# Local per-user protected credentials; never commit or share.
+/state/credentials/
+/v4-review/data/
+/v4-review/evidence/
+/v4-review/test/V4-DEMO-*/

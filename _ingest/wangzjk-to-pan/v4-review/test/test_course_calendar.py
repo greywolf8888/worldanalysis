@@ -1,0 +1,70 @@
+"""The course calendar uses calendar dates and exact checked source identities."""
+
+import unittest
+from unittest.mock import patch
+from urllib.parse import urlencode
+
+from catalog_model import Library, ORIGIN, SITE, Wangzjk
+from course_calendar import CalendarRequestError, PAGE_SIZE, course_calendar
+
+
+def library(last_article=52):
+    articles = {}
+    for number in range(1, last_article + 1):
+        article_id = str(number)
+        day = "2026-01-12" if number <= 50 else "2026-01-01" if number == 51 else "2026-01-13"
+        articles[article_id] = {
+            "article_id": article_id,
+            "url": f"{ORIGIN}/{article_id}.html",
+            "published_at": day,
+            "title": f"测试资料 {article_id}",
+            "shares": [],
+            "categories": [],
+            "access_state": "public",
+        }
+    fixture = Library([Wangzjk({
+        "catalog.json": {"articles": articles},
+        "journal.json": {"operations": {}},
+        "downloaded-project-markers.json": {"entries": []},
+        "capacity-policy.json": {"minimum_free_bytes": 100_000_000_000},
+        "crawl_state.JSON": {},
+    }, {})])
+    fixture.snapshot_id = "calendar-fixture-" + str(last_article)
+    return fixture
+
+
+class CourseCalendar(unittest.TestCase):
+    def test_cursor_date_and_revision_scoped_exclusions(self):
+        original = library()
+        by_article = {row["article_id"]: row for row in original.by_id.values()}
+        exclusions = {
+            (SITE, "52", by_article["52"]["article_revision"]): "site_notice",
+            (SITE, "51", "arv_" + "0" * 64): "daily_news",
+        }
+        with patch("course_calendar.read_non_projects", return_value=exclusions):
+            original.share_locations[(SITE, "50")] = ("private test locator",)
+            first = course_calendar(original, "")
+            self.assertEqual(first["total"], 51)
+            self.assertEqual(len(first["items"]), PAGE_SIZE)
+            self.assertEqual(first["items"][0]["id"], by_article["50"]["id"])
+            self.assertTrue(first["items"][0]["has_baidu"])
+            self.assertNotIn("private test locator", str(first))
+
+            after = urlencode({"after": first["next"]})
+            second = course_calendar(original, after)
+            self.assertEqual(second["total"], 51)
+            self.assertEqual([row["id"] for row in second["items"]],
+                             [by_article[article]["id"] for article in ("2", "1", "51")])
+            self.assertIsNone(second["next"])
+            with self.assertRaises(CalendarRequestError) as updated_catalog:
+                course_calendar(library(last_article=53), after)
+            self.assertEqual(updated_catalog.exception.status, 409)
+
+            dated = course_calendar(original, "day=2026-01-02")
+            self.assertEqual([row["id"] for row in dated["items"]], [by_article["51"]["id"]])
+            with self.assertRaises(CalendarRequestError) as bad_date:
+                course_calendar(original, "day=2026-02-30")
+            self.assertEqual(bad_date.exception.status, 400)
+            with self.assertRaises(CalendarRequestError) as stale_cursor:
+                course_calendar(original, "day=2026-01-02&" + after)
+            self.assertEqual(stale_cursor.exception.status, 409)

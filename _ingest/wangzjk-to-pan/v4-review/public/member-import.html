@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>导入网盘链接 · Worldanalysis</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/member-import.js" defer></script>
+</head>
+<body>
+  <main>
+    <p><a href="/">返回资源库</a></p>
+    <h1>导入网盘链接</h1>
+    <p><label for="member-links">项目链接清单</label></p>
+    <textarea id="member-links" rows="12" spellcheck="false" autocomplete="off"></textarea>
+    <p><button class="primary" id="save-member-links" type="button">导入链接</button></p>
+    <p id="member-result" role="status"></p>
+    <section aria-labelledby="member-collection-heading">
+      <h2 id="member-collection-heading">继续采集</h2>
+      <p><label for="member-limit">本次读取数量</label> <input id="member-limit" type="number" min="1" max="128" value="72"></p>
+      <p><label><input id="member-resume" type="checkbox" checked> 从上次位置继续</label></p>
+      <p><button id="load-member-worklist" type="button">读取待采清单</button></p>
+      <p id="member-worklist-result" role="status"></p>
+      <output id="member-worklist" hidden></output>
+      <p><label for="member-evidence">本批核对结果</label></p>
+      <textarea id="member-evidence" rows="6" spellcheck="false" autocomplete="off"></textarea>
+      <p><label><input id="member-advance" type="checkbox" checked> 保存本批结束位置</label></p>
+      <p><button id="save-member-progress" type="button">保存核对结果</button></p>
+      <p id="member-progress-result" role="status"></p>
+    </section>
+  </main>
+</body>
+</html>

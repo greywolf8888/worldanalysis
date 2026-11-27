@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Worldanalysis · 课程表</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/courses.css">
+  <script defer src="/courses.js"></script>
+</head>
+<body>
+<a class="skip" href="#calendar-list">跳到课程列表</a>
+<header class="masthead">
+  <div class="shell masthead-inner">
+    <a class="brand" href="/" aria-label="Worldanalysis 资源库">
+      <span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>Worldanalysis</span>
+    </a>
+    <nav class="masthead-nav" aria-label="资源库导航">
+      <a href="/">资源库</a>
+      <a href="/courses" aria-current="page">课程表</a>
+      <a href="/control">控制台</a>
+    </nav>
+  </div>
+</header>
+<main class="shell course-calendar">
+  <div class="course-heading">
+    <h1>课程表</h1>
+    <p id="calendar-total" role="status"></p>
+  </div>
+  <div class="calendar-toolbar">
+    <form id="calendar-filters" class="calendar-filters" role="search">
+      <label class="sr" for="calendar-search">搜索课程</label>
+      <div class="search-box">
+        <span class="search-icon" aria-hidden="true"></span>
+        <input id="calendar-search" name="q" type="search" maxlength="200" autocomplete="off" placeholder="搜索课程">
+      </div>
+      <label class="sr" for="calendar-category">业务主题</label>
+      <select id="calendar-category" name="category" aria-label="业务主题"><option value="">全部主题</option></select>
+      <label class="sr" for="calendar-site">资料来源</label>
+      <select id="calendar-site" name="site" aria-label="资料来源" hidden><option value="">全部来源</option></select>
+      <button class="primary" type="submit">搜索</button>
+    </form>
+    <form id="calendar-jump" class="calendar-jump" aria-label="按发布日期浏览">
+      <label for="calendar-day">跳到日期</label>
+      <input id="calendar-day" name="day" type="date" required>
+      <button type="submit">前往</button>
+      <button id="calendar-latest" type="button" hidden>回到最新</button>
+    </form>
+  </div>
+  <div class="calendar-position" id="calendar-position" hidden></div>
+  <div class="calendar-days" id="calendar-list" tabindex="-1" aria-busy="true"></div>
+  <div class="calendar-footer">
+    <p id="calendar-status" role="status">正在加载课程…</p>
+    <button id="calendar-more" type="button" hidden>加载更多课程</button>
+    <div id="calendar-sentinel" aria-hidden="true"></div>
+  </div>
+  <noscript><p>启用 JavaScript 后即可按日期浏览课程。 <a href="/">返回资源库</a></p></noscript>
+</main>
+</body>
+</html>
