@@ -76,6 +76,11 @@ def anchor(target, library, local):
         if not valid(RESOURCE_ID, resource_id) or not all(valid(IDENTIFIER, v) for v in (site_id, article_id)):
             raise AnalysisPriorityError(400, "来源项目标识无效")
         source = article_source(library, resource_id, site_id, article_id)
+        if hasattr(library,'semantic_rows'):
+            from catalog_semantics import article_key
+            exact=library.exact_article(resource_id,article_key(site_id,article_id))
+            if exact is None or exact.get('action_pending'):
+                raise AnalysisPriorityError(422, "资料归属待核实，未加入分析顺序")
         if source is None:
             raise AnalysisPriorityError(422, "未能匹配当前来源项目，请重开该条资源")
         return {**target, "key": f"article:{site_id}:{article_id}",

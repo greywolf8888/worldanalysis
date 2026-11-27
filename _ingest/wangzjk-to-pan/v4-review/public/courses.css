@@ -72,6 +72,7 @@
 .calendar-title { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-meta { display: flex; align-items: center; gap: .7rem; padding-left: .83rem; color: var(--secondary); font-size: .75rem; white-space: nowrap; }
 .calendar-baidu { color: var(--accent-dark); }
+.calendar-relation { color: var(--accent-dark); text-underline-offset: 3px; }
 .calendar-footer {
   display: grid;
   justify-items: center;
@@ -92,7 +93,7 @@
   .calendar-row { grid-template-columns: minmax(0, 1fr); padding: .12rem .63rem .34rem; }
   .calendar-link { min-height: 34px; padding-block: .35rem .13rem; }
   .calendar-title { overflow-wrap: anywhere; white-space: normal; }
-  .calendar-meta { gap: .55rem; padding-left: 0; }
+  .calendar-meta { flex-wrap: wrap; gap: .15rem .55rem; padding-left: 0; }
 }
 @media (max-width: 420px) {
   .calendar-filters { gap: .35rem; }

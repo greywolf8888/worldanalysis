@@ -7,6 +7,7 @@
   <title>Worldanalysis · 资源库</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/priority.css">
+  <script defer src="/catalog-facets.js"></script>
   <script defer src="/app.js"></script>
   <script defer src="/production.js"></script>
   <script defer src="/priority.js"></script>
@@ -21,7 +22,7 @@
     </a>
     <nav class="masthead-nav" aria-label="资源库导航">
       <a href="/" aria-current="page">资源库</a>
-      <a href="/courses">课程表</a>
+      <a href="/courses" id="catalog-calendar-link">课程表</a>
       <a href="/control">控制台</a>
       <button id="progress" type="button">资料来源</button>
       <button id="local-open" type="button">处理进度</button>
@@ -39,7 +40,9 @@
       <button class="primary" type="submit">搜索</button>
     </form>
   </div>
-  <nav class="topics" aria-label="业务主题" id="topics"></nav>
+  <nav class="topics" aria-label="业务分类" id="topics"></nav>
+  <nav class="topics platform-facets" aria-label="适用平台" id="platforms"></nav>
+  <nav class="topics subcategory-facets" aria-label="业务细分" id="subcategories" hidden></nav>
   <div class="directory" aria-labelledby="result-title">
     <div class="results-bar">
       <div class="result-label"><h2 id="result-title" tabindex="-1">全部资料</h2><span id="result-count" role="status">加载中…</span></div>

@@ -7,6 +7,7 @@
   <title>Worldanalysis · 课程表</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/courses.css">
+  <script defer src="/catalog-facets.js"></script>
   <script defer src="/courses.js"></script>
 </head>
 <body>
@@ -18,7 +19,7 @@
       <span>Worldanalysis</span>
     </a>
     <nav class="masthead-nav" aria-label="资源库导航">
-      <a href="/">资源库</a>
+      <a href="/" id="calendar-library-link">资源库</a>
       <a href="/courses" aria-current="page">课程表</a>
       <a href="/control">控制台</a>
     </nav>
@@ -36,8 +37,6 @@
         <span class="search-icon" aria-hidden="true"></span>
         <input id="calendar-search" name="q" type="search" maxlength="200" autocomplete="off" placeholder="搜索课程">
       </div>
-      <label class="sr" for="calendar-category">业务主题</label>
-      <select id="calendar-category" name="category" aria-label="业务主题"><option value="">全部主题</option></select>
       <label class="sr" for="calendar-site">资料来源</label>
       <select id="calendar-site" name="site" aria-label="资料来源" hidden><option value="">全部来源</option></select>
       <button class="primary" type="submit">搜索</button>
@@ -49,6 +48,9 @@
       <button id="calendar-latest" type="button" hidden>回到最新</button>
     </form>
   </div>
+  <nav class="topics" aria-label="业务分类" id="calendar-categories"></nav>
+  <nav class="topics platform-facets" aria-label="适用平台" id="calendar-platforms"></nav>
+  <nav class="topics subcategory-facets" aria-label="业务细分" id="calendar-subcategories" hidden></nav>
   <div class="calendar-position" id="calendar-position" hidden></div>
   <div class="calendar-days" id="calendar-list" tabindex="-1" aria-busy="true"></div>
   <div class="calendar-footer">

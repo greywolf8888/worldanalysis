@@ -25,6 +25,7 @@ from member_queue import (
 )
 
 JOBS = {'collect': '采集公开目录', 'verify': '检查全链路', 'check_dsh': '检查 DSH 连接'}
+CATALOG_RUNS = {'catalog_export': '导出简介识别', 'catalog_import': '保存简介识别', 'catalog_resume': '恢复简介任务'}
 RUN_ID = re.compile(r'[a-f0-9]{32}\Z')
 DB_PATH = ROOT / 'data' / 'pipeline-runs.sqlite3'
 
@@ -105,13 +106,22 @@ class RunStore:
             connection.execute('''UPDATE runs SET state = ?, finished_at = ?, summary = ?
                 WHERE id = ? AND state = ?''', (state, now(), summary, key, expected))
 
+    def record_catalog(self, action, summary, *, failed=False):
+        if action not in CATALOG_RUNS or not isinstance(summary,str) or len(summary)>120:
+            raise ValueError('invalid catalog run display')
+        finished=now()
+        with self.connect() as connection:
+            connection.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?)',
+                               (uuid4().hex,action,'failed' if failed else 'complete',finished,finished,finished,summary))
+
     def recent(self):
         if not self.path.exists():
             return []
         self.recover()
         with self.connect() as connection:
-            return [{**dict(row), 'label': JOBS[row['action']]} for row in connection.execute(
-                'SELECT * FROM runs ORDER BY rowid DESC LIMIT 24') if row['action'] in JOBS]
+            labels={**JOBS,**CATALOG_RUNS}
+            return [{**dict(row), 'label': labels[row['action']]} for row in connection.execute(
+                'SELECT * FROM runs ORDER BY rowid DESC LIMIT 24') if row['action'] in labels]
 
 
 def request_local(port, path):

@@ -9,14 +9,20 @@ const filters = document.getElementById('calendar-filters');
 const jump = document.getElementById('calendar-jump');
 const datePosition = document.getElementById('calendar-position');
 const latest = document.getElementById('calendar-latest');
+const facetTargets = {
+  category: document.getElementById('calendar-categories'),
+  platform: document.getElementById('calendar-platforms'),
+  subcategory: document.getElementById('calendar-subcategories'),
+};
 const formatNumber = new Intl.NumberFormat('zh-CN');
 const formatWeekday = new Intl.DateTimeFormat('zh-CN', {weekday: 'long', timeZone: 'UTC'});
 const resourcePattern = /^rv_[0-9a-f]{64}$/;
-const cursorPattern = /^(?:[0-9a-f]{64}\.)?rv_[0-9a-f]{64}$/;
+const cursorPattern = /^[a-zA-Z0-9_.:~-]{1,256}$/;
 const dayPattern = /^\d{4}-\d{2}-\d{2}$/;
 const groups = new Map();
 const seen = new Set();
 let selections;
+let facetMeta = null;
 let cursor = '';
 let request = null;
 let needsReload = false;
@@ -38,6 +44,8 @@ function readSelections(search) {
   return {
     q: (params.get('q') || '').trim().slice(0, 200),
     category: params.get('category') || '',
+    subcategory: params.get('subcategory') || '',
+    platform: params.get('platform') || '',
     site: params.get('site') || '',
     day: dayPattern.test(day) ? day : '',
   };
@@ -53,6 +61,26 @@ function choose(values, selected, select, label) {
   select.replaceChildren(new Option(label, ''));
   for (const value of values) select.add(new Option(value.label, value.id));
   select.value = selected;
+}
+
+function paintFacets() {
+  if (!facetMeta) return;
+  catalogFacets.render(facetTargets, facetMeta, selections, (field, value) => {
+    if (selections[field] === value && filters.elements.q.value.trim() === selections.q) return;
+    const menu = facetTargets.platform.querySelector('details');
+    if (menu) menu.open = false;
+    const changes = {[field]: value, q: filters.elements.q.value.trim()};
+    if (field === 'category' && value !== selections.category) changes.subcategory = '';
+    reset({...selections, ...changes}, true);
+  });
+}
+
+function linkLibrary(values) {
+  const keys = ['q','category','subcategory','platform','site'];
+  const query = new URLSearchParams(keys.filter(key => values[key]).map(key => [key, values[key]]));
+  if (values.day) query.set('to', values.day);
+  if (!query.size) query.set('category', '');
+  document.getElementById('calendar-library-link').href = '/?' + query;
 }
 
 function dayGroup(day) {
@@ -82,21 +110,30 @@ function dayGroup(day) {
 function addCourses(items, multipleSites) {
   let firstLink = null;
   for (const course of items) {
-    if (!resourcePattern.test(course.id) || seen.has(course.id)) continue;
+    const key = catalogFacets.displayId(course);
+    if (!resourcePattern.test(course.id) || seen.has(key)) continue;
     const row = node('li', undefined, 'calendar-row');
     const title = node('a', undefined, 'calendar-link');
-    title.href = '/?resource=' + encodeURIComponent(course.id);
+    title.href = catalogFacets.detailPath(course);
     title.append(node('span', course.title || '查看课程详情', 'calendar-title'));
     const meta = node('span', undefined, 'calendar-meta');
     if (multipleSites && course.site_label) meta.append(node('span', course.site_label));
     if (course.category_label) meta.append(node('span', course.category_label));
+    const platforms = catalogFacets.labels(course, selections.platform);
+    if (platforms.length) meta.append(node('span', platforms.join('、')));
+    const relation = course.version_count > 1 ? 'versions' : course.source_count > 1 ? 'sources' : '';
+    if (relation) {
+      const show = node('a', relation === 'versions' ? '其他版本' : '其他来源', 'calendar-relation');
+      show.href = catalogFacets.detailPath(course, relation);
+      meta.append(show);
+    }
     if (course.has_baidu) meta.append(node('span', '有百度链接', 'calendar-baidu'));
     row.append(title, meta);
     const day = typeof course.published_at === 'string' && dayPattern.test(course.published_at)
       ? course.published_at : '';
     dayGroup(day).append(row);
     firstLink ||= title;
-    seen.add(course.id);
+    seen.add(key);
   }
   return firstLink;
 }
@@ -126,16 +163,22 @@ async function nextPage(manual) {
     const data = await response.json();
     if (request !== controller) return;
     if (!Array.isArray(data.items) || !Number.isSafeInteger(data.total) ||
-        data.next !== null && (!cursorPattern.test(data.next) || data.next === pageCursor)) {
+        data.next !== null && (typeof data.next !== 'string' || !cursorPattern.test(data.next) || data.next === pageCursor)) {
       throw new Error('课程目录不可读');
     }
     if (!pageCursor) {
-      choose(data.categories, selections.category, filters.elements.category, '全部主题');
+      facetMeta = data;
+      selections = catalogFacets.normalize(selections, facetMeta);
+      paintFacets();
+      linkLibrary(selections);
       choose(data.sites, selections.site, filters.elements.site, '全部来源');
       filters.elements.site.hidden = data.sites.length < 2;
     }
     firstNewLink = addCourses(data.items, data.sites.length > 1);
-    total.textContent = formatNumber.format(data.total) + ' 门课程';
+    const tally = [formatNumber.format(data.total) + ' 个项目'];
+    if (data.version_total > data.total) tally.push(formatNumber.format(data.version_total) + ' 个版本');
+    if (data.source_total > data.total) tally.push(formatNumber.format(data.source_total) + ' 篇来源');
+    total.textContent = tally.join(' · ');
     cursor = data.next;
     more.textContent = '加载更多课程';
     more.hidden = cursor === null;
@@ -170,15 +213,16 @@ function reset(values, remember = false) {
   list.replaceChildren();
   total.textContent = '';
   more.hidden = true;
-  selections = values;
+  selections = facetMeta ? catalogFacets.normalize(values, facetMeta) : values;
   filters.elements.q.value = values.q;
-  filters.elements.category.value = values.category;
   filters.elements.site.value = values.site;
   jump.elements.day.value = values.day;
   latest.hidden = !values.day;
   datePosition.hidden = !values.day;
   datePosition.textContent = values.day ? '查看 ' + values.day + ' 及之前发布的课程' : '';
-  if (remember) writeLocation(values);
+  paintFacets();
+  linkLibrary(selections);
+  if (remember) writeLocation(selections);
   void nextPage(false);
 }
 
@@ -186,7 +230,6 @@ function searchCourses() {
   reset({
     ...selections,
     q: filters.elements.q.value.trim(),
-    category: filters.elements.category.value,
     site: filters.elements.site.value,
   }, true);
 }
@@ -195,7 +238,6 @@ filters.addEventListener('submit', event => {
   event.preventDefault();
   searchCourses();
 });
-filters.elements.category.addEventListener('change', searchCourses);
 filters.elements.site.addEventListener('change', searchCourses);
 jump.addEventListener('submit', event => {
   event.preventDefault();

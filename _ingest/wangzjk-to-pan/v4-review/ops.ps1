@@ -1,9 +1,10 @@
 param(
-    [ValidateSet('start', 'status', 'collect', 'verify', 'check_dsh', 'member', 'member-review', 'member-access', 'next')]
+    [ValidateSet('start', 'status', 'collect', 'verify', 'check_dsh', 'member', 'member-review', 'member-access', 'next', 'catalog')]
     [string]$Action = 'status',
     [ValidateRange(1, 65535)]
     [int]$Port = 8767,
-    [string]$Python = $env:WORLDANALYSIS_PYTHON
+    [string]$Python = $env:WORLDANALYSIS_PYTHON,
+    [string[]]$CatalogArguments = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +13,7 @@ $project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../../..')).Path
 Push-Location -LiteralPath $PSScriptRoot
 try {
     switch ($Action) {
+        'catalog' { & $Python -X utf8 -B catalog_tasks.py @CatalogArguments }
         'start' { & $Python -X utf8 -B server.py --port $Port }
         'member' { & $Python -X utf8 -B member_queue.py --resume --limit 72 }
         'member-review' { & $Python -X utf8 -B member_queue.py --only-review --limit 72 }

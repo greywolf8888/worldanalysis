@@ -10,9 +10,14 @@ from typing import Protocol
 from unicodedata import normalize
 from urllib.parse import urlsplit
 
+from catalog_relations import CatalogRelations
+from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, FILTER_ROLES, PLATFORMS as PLATFORM_LABELS
+from catalog_semantics import CatalogStore, article_key, relationship_input, source_input
+from intro_inputs import choose_intro, intro_revision, legacy_intro, read_intros
 from share_locations import historical_share_locations, merge_share_locations, protected_owner_exports, read_protected_owner_export
 
 ROOT = Path(__file__).absolute().parent
+SEMANTIC_DB = ROOT / 'data' / 'pipeline-runs.sqlite3'
 SITE = 'wangzjk.com'
 ORIGIN = 'https://www.wangzjk.com'
 TARGET = '/apps/教育分析学习/wangzjk.com'
@@ -257,7 +262,7 @@ class Library:
                     if row.get('demo') is not True:
                         self.register_project_page(adapter, article_id, row)
                     rows.append(row)
-        self.article_count=len(rows); self.by_id={}; title_index=defaultdict(set); shares=defaultdict(set)
+        self.article_count=len(rows); self.raw_rows=rows; self.by_id={}; title_index=defaultdict(set); shares=defaultdict(set)
         for r in rows:
             key=re.sub(r'[^\w]+','',norm(r['title']))
             if key:title_index[key].add(r['id'])
@@ -285,7 +290,98 @@ class Library:
         self.requestable_count=sum(r.get('requestable',r['selectable']) for r in self.by_id.values())
 
     @staticmethod
-    def summary(r):return {k:v for k,v in r.items() if k not in {'blocks','sources','roots','operations','versions','article_detail_evidence'}}
+    def summary(r):
+        omit = {'blocks','sources','roots','operations','versions','article_detail_evidence','analysis','input_hash',
+                'coverage','other_sources','other_versions','paragraphs','excerpt_full','source_kind'}
+        return {k:v for k,v in r.items() if k not in omit and not k.startswith('_')}
+
+    def attach_catalog(self, source, store, intros):
+        self.semantic_inputs = {}
+        self.semantic_rows = {}
+        for raw in self.raw_rows:
+            site, aid = raw['site_id'], str(raw['article_id'])
+            source_article = source.articles[aid]
+            historic = legacy_intro(site, aid, source.facts.get(aid))
+            saved = choose_intro(intros.get((site, aid)), historic, source_article.get('publisher_modified'))
+            value = source_input(raw, saved, source_article)
+            self.semantic_inputs[value['article_key']] = value
+        classified, relations, self.stale_relations = store.read(self.semantic_inputs)
+        self.semantic_classified = classified
+        self.semantic_relations = relations
+        pending={article_key(ref['site_id'],ref['article_id']) for relation in relations if relation['relation']=='uncertain'
+                 for ref in (relation['left'],relation['right'])}
+        seen = Counter(r['id'] for r in self.raw_rows)
+        for raw in self.raw_rows:
+            token = article_key(raw['site_id'],raw['article_id'])
+            value = self.semantic_inputs[token]
+            record_state, analysis = classified.get(token,('pending',None))
+            valid = analysis or {}
+            category = valid.get('category','unsorted')
+            live_platforms = tuple(dict.fromkeys(p['id'] for p in valid.get('platforms',[]) if p['role'] in FILTER_ROLES))
+            row = {**raw, 'article_key':token, 'input_hash':relationship_input(value,valid)['input_hash'], 'analysis':valid,
+                   'coverage':value['coverage'],'paragraphs':value['paragraphs'],'classification_state':{'agent':'verified','manual':'manual'}.get(record_state,'pending'),
+                   'category':category,'category_label':TAXONOMY[category][0],'subcategory':valid.get('subcategory',''),
+                   'secondary_category':valid.get('secondary_category',''),
+                   'platforms':[{'id':p,'label':PLATFORM_LABELS[p]} for p in live_platforms],
+                   'version_label':valid.get('edition') or next((d['text'] for d in valid.get('dates',[]) if d['meaning']=='version'),''),
+                   'action_pending':seen[raw['id']]!=1,'relationship_pending':token in pending}
+            if row['action_pending']:
+                row.update(requestable=False,selectable=False,blocked_reason='资料归属待核实。')
+            if not row['excerpt'] and value['paragraphs']:
+                row['excerpt']=safe_text(value['paragraphs'][0],360)
+            row['_search']=norm(' '.join([raw['title'],raw['site_label'],raw['site_id'],row['excerpt'],
+                row['category_label'],row['subcategory'],*(p['label'] for p in row['platforms']),*raw['source_categories'],*value['paragraphs']]))
+            if value['paragraphs'] and (not row['blocks'] or value['coverage']=='complete'):
+                text_blocks=[{'kind':'text','text':part} for part in value['paragraphs']]
+                images=[b for b in row['blocks'] if b['kind']=='image']
+                row['blocks']=[*text_blocks,*images]
+                row['detail_state']='public_sample'
+            self.semantic_rows[token]=row
+        self.relations=CatalogRelations(self.semantic_rows.values(),relations)
+
+    def exact_article(self, resource_id, token):
+        row = getattr(self,'semantic_rows',{}).get(token)
+        return row if row and row['id']==resource_id else None
+
+    def facets(self, *, eligible=None):
+        if not hasattr(self,'relations'):
+            rows=list(self.by_id.values())
+            return {
+                'categories':[{'id':k,'label':v,'count':sum(r['category']==k for r in rows)} for k,v in CATEGORIES.items()],
+                'platforms':[],'category_aliases':CATEGORY_ALIASES,'project_count':len(rows)}
+        valid = [r for r in self.semantic_rows.values() if eligible is None or eligible(r)]
+        project_count = self.relations.count(valid)
+        category_sets=defaultdict(list)
+        platform_sets=defaultdict(list)
+        sub_sets=defaultdict(list)
+        for row in valid:
+            category_sets[row['category']].append(row)
+            secondary=row.get('secondary_category')
+            if secondary:
+                category_sets[secondary].append(row)
+            for platform in row['platforms']:
+                platform_sets[platform['id']].append(row)
+            if row['subcategory']:
+                sub_sets[(row['category'],row['subcategory'])].append(row)
+        def count(items):
+            return self.relations.count(items) if items else 0
+        categories=[]
+        for key,(label,tags) in TAXONOMY.items():
+            categories.append({'id':key,'label':label,'count':count(category_sets[key]),
+                        'subcategories':[{'id':tag,'label':tag,'count':count(sub_sets[(key,tag)])}
+                                         for tag in tags if sub_sets[(key,tag)]]})
+        return {'categories':categories,'platforms':[{'id':p,'label':label,'count':count(platform_sets[p])}
+                 for p,label in PLATFORM_LABELS.items()],
+                'category_aliases':CATEGORY_ALIASES,'project_count':project_count}
+
+    def display_detail(self,row):
+        if not hasattr(self,'relations'):
+            return row
+        projected = self.relations.details(row)
+        if isinstance(projected,dict):
+            return {**row,**projected}
+        return row
+
 
     def register_project_page(self, adapter, article_id, row):
         identity = (adapter.site_id, article_id)
@@ -314,14 +410,34 @@ class Library:
         locations = (self.share_locations.get((ref['site_id'], ref['article_id']), ()) for ref in row['sources'])
         return [link.href for link in merge_share_locations(*locations)]
 
-    def match(self,f,selected):
+    def match(self,f,selected,*,eligible=None):
         terms=norm(f.get('q','')).split(); after,before=f.get('from',''),f.get('to',''); category,status,site=(f.get(x,'') for x in ('category','status','site'))
+        if hasattr(self,'relations'):
+            category= CATEGORY_ALIASES.get(category,category)
+            subgroup, platform = f.get('subcategory',''),f.get('platform','')
+            items=[row for row in self.semantic_rows.values()
+                   if (eligible is None or eligible(row))
+                   and (not terms or all(term in row['_search'] for term in terms))
+                   and (not category or category in (row['category'],row.get('secondary_category')))
+                   and (not subgroup or row['category']==category and row['subcategory']==subgroup)
+                   and (not platform or any(p['id']==platform for p in row['platforms']))
+                   and (not status or status==row['status']) and (not site or row['site_id']==site)
+                   and (f.get('baidu')!='1' or (row['site_id'],row['article_id']) in self.share_locations)
+                   and (not after or row['published_at']>=after)
+                   and (not before or row['published_at'] and row['published_at']<=before)
+                   and (f.get('selected')!='1' or row['id'] in selected and not row['action_pending'])]
+            items=self.relations.project(items,keep_selected=selected if f.get('selected')=='1' else ())
+            return self.sort_items(items,f)
         items=[r for k,r in self.by_id.items() if (not terms or all(t in self.search[k] for t in terms))
             and (not category or category==r['category']) and (not status or status==r['status'])
             and (not site or any(s['site_id']==site for s in r['sources']))
             and (f.get('baidu')!='1' or any((s['site_id'],s['article_id']) in self.share_locations for s in r['sources']))
             and (not after or r['published_at']>=after) and (not before or r['published_at'] and r['published_at']<=before)
             and (f.get('selected')!='1' or k in selected)]
+        return self.sort_items(items,f)
+
+    @staticmethod
+    def sort_items(items,f):
         def key(r):return (r['published_at'] or '',int(r['article_id']) if str(r['article_id']).isdigit() else 0,r['id'])
         if f.get('order')=='title':return sorted(items,key=lambda r:(norm(r['title']),r['id']))
         if f.get('order')=='oldest':return sorted(items,key=lambda r:(not bool(r['published_at']),*key(r)))
@@ -339,13 +455,20 @@ def merge_codex_collection(path, articles, facts):
     for key,row in rows.items():
         if (not ART.fullmatch(key) or not isinstance(row,dict) or row.get('article_id')!=key
                 or row.get('url')!=ORIGIN+'/'+key+'.html' or not re.fullmatch(r'20\d\d-\d\d-\d\d',row.get('published_at',''))
-                or set(row)-{'article_id','url','published_at','title','publisher_modified','cover_url','public_excerpt'}):
+                or set(row)-{'article_id','url','published_at','title','publisher_modified','cover_url','public_excerpt','publisher_published','first_collected_at'}):
             raise ValueError('公开文章身份校验失败')
         record=articles.get(key)
         if record is None:
             record={'article_id':key,'url':row['url'],'published_at':row['published_at'],'title':safe_text(row.get('title'),1000),
                     'classification':{},'categories':[],'shares':[],'access_state':'unknown'}
             articles[key]=record
+        record['title']=safe_text(row.get('title'),1000) or record['title']
+        record['published_at']=row['published_at']
+        record['publisher_modified']=row.get('publisher_modified')
+        if row.get('publisher_published'):
+            record['publisher_published']=row['publisher_published']
+        if row.get('first_collected_at'):
+            record.setdefault('first_seen_at',row['first_collected_at'])
         record['cover_url']=safe_image(row.get('cover_url'))
         record['public_excerpt']=safe_text(row.get('public_excerpt'),360)
     for key,detail in details.items():
@@ -357,7 +480,23 @@ def merge_codex_collection(path, articles, facts):
     return checksum, {k:collection.get(k) for k in ('observed_at','stop_reason','publisher_total','catalog_complete','history_observed','new_this_run','details_added','read_only')}
 
 
+def catalog_input_stamp():
+    paths=(ROOT.parent/'state'/'catalog.json',ROOT/'data'/'public-details.json',
+           ROOT/'data'/'discovery-head.json',ROOT/'data'/'codex-public.json')
+    version=[]
+    for path in paths:
+        try:
+            stat=path.stat()
+            version.append((stat.st_mtime_ns,stat.st_size,stat.st_ino))
+        except FileNotFoundError:
+            version.append(None)
+    return (*version,intro_revision(SEMANTIC_DB))
+
+
 def open_index():
+    data_stamp=catalog_input_stamp()
+    store=CatalogStore(SEMANTIC_DB)
+    catalog_revision=store.revision()
     before={name:read_bound(ROOT.parent/'state'/name) for name in FILES}
     facts, ref=read_bound(ROOT/'data'/'public-details.json')
     # Compare bytes after assembling the multi-file snapshot; never publish a mixed generation.
@@ -397,12 +536,22 @@ def open_index():
         for key, links in read_protected_owner_export(path, source.articles).items():
             member_links[key] = merge_share_locations(member_links.get(key, ()), links)
     lib.share_locations = {**historical, **member_links}
+    lib.operations_snapshot_id=lib.snapshot_id
+    lib.catalog_revision=catalog_revision
+    lib.attach_catalog(source,store,read_intros(SEMANTIC_DB))
+    if catalog_input_stamp()!=data_stamp or store.revision()!=catalog_revision:
+        raise ValueError('资料读取期间发生更新，请稍后重读')
+    lib.catalog_inputs_stamp=data_stamp
+    lib.snapshot_id=digest([lib.operations_snapshot_id,catalog_revision,data_stamp[-1]])
+    facets=lib.facets()
+    lib.catalog_all=lib.match({},set())
+    lib.requestable_count=sum(r['requestable'] for r in lib.catalog_all)
     lib.minimum_free_bytes=source.floor; lib.observed_at=now(); cnt=Counter(o.get('state') for o in source.ops)
-    lib.meta={'snapshot_id':lib.snapshot_id,'totals':{'articles':lib.article_count,'versions':len(lib.by_id),'details':sum(bool(r['blocks']) for r in lib.by_id.values()),
+    lib.meta={'snapshot_id':lib.snapshot_id,'totals':{'articles':lib.article_count,'projects':facets['project_count'],'versions':len(lib.by_id),'details':sum(bool(r['blocks']) for r in lib.by_id.values()),
               'images':len({x['url'] for r in lib.by_id.values() for x in [*(y for y in r['blocks'] if y['kind']=='image'),*([r['cover']] if r['cover'] else [])]}),
               'operations':len(source.ops),'verified':cnt['saved_root_verified'],'needs_reconcile':len(source.ops)-cnt['saved_root_verified'],
               'recycled':len(source.target_markers),'selectable':lib.selectable_count,'requestable':lib.requestable_count,
-              'baidu_linked_articles':len(lib.share_locations),'baidu_unique_links':len({link.url for links in lib.share_locations.values() for link in links})},'categories':[{'id':k,'label':v,'count':sum(r['category']==k for r in lib.by_id.values())} for k,v in CATEGORIES.items()],
+              'baidu_linked_articles':len(lib.share_locations),'baidu_unique_links':len({link.url for links in lib.share_locations.values() for link in links})},'categories':facets['categories'],'platforms':facets['platforms'],'category_aliases':facets['category_aliases'],
               'statuses':[{'id':k,'label':v} for k,v in STATUS.items()],'sites':lib.sites,'minimum_free_bytes':source.floor,'execution_allowed':False,
               'observed_at':lib.observed_at,'discovery':discovery,'source_notes':facts.get('attempts',[]),'overview_note':'状态来自历史账和精确回收标记；实际容量未实时查询，本地分析与回收资格不推断。'}
     return lib

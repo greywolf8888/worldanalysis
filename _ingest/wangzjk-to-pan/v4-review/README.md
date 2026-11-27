@@ -1,6 +1,6 @@
 # Worldanalysis 本机资源库
 
-资源库按主题筛选资料，并保留转存选择与顺序。课程表按发布日期分组，向下滚动自动续载，也可按主题、来源、关键词和日期定位。点击课程名进入同一份项目详情。
+资源库第一排按业务筛选，第二排按适用平台筛选。两个条件可一起用。点「全部业务」和「小红书」可看已核实的小红书项目，再选「电商与带货」看交集。课程表按原站发布日期分组，复用相同的筛选和来源。详情可以展开其他来源及版本。
 
 控制台汇集公开采集、会员资料入口、转存、本地下载、正式分析、独立验收、教材保全和清理。公开采集、连接检查和流程读回会写入本机运行记录。各阶段的状态来自现有目录、交接和本地核验记录。
 
@@ -34,6 +34,26 @@ cd _ingest/wangzjk-to-pan/v4-review
 ```
 
 公开采集使用同一文件锁，控制台与脚本共享同一运行记录。会员资料通过用户已登录的浏览器核对并导入。选定资源后使用原有确认流程，DSH 按确认范围执行转存。下载沿用本地入口。提交分析顺序后，正式分析与独立验收各自沿用当前工作路径。清理前核对教材可独立阅读，以及原件身份和实际范围。
+
+## 简介识别与续作
+
+简介、分类、关系和人工修订保存在已有的 `data/pipeline-runs.sqlite3`。公开采集沿用现有唯一入口和 12 小时计划，先复用已经保存的正文。新文发现和旧文修改检查各自续跑。正文不足的项目可以继续浏览及搜索。
+
+在本目录用项目解释器运行下列命令。导出后，当前宿主 Agent 阅读 JSONL 里提供的完整段落范围，再提交结构化 JSONL。日常浏览只读本机结果。
+
+```powershell
+.\ops.ps1 -Action catalog -CatalogArguments @('inventory')
+.\ops.ps1 -Action catalog -CatalogArguments @('status')
+python -X utf8 -B catalog_tasks.py export --limit 20 --output data/catalog-tasks/next.jsonl
+python -X utf8 -B catalog_tasks.py import data/catalog-tasks/next-results.jsonl
+python -X utf8 -B catalog_tasks.py resume --output data/catalog-tasks/unfinished.jsonl
+python -X utf8 -B catalog_tasks.py export --kind relation --targets 20 --candidate-limit 30 --output data/catalog-tasks/relations.jsonl
+```
+
+- 每份结果行原样带回任务的 `schema`、`rules`、`task_id`、`generation`，判断写入 `result`。依据逐条使用 `title`、`paragraphs` 或 `excerpt` 中可找到的片段。关系结果要注明 `left`、`right`。字段、枚举及验证逻辑见 [catalog_semantics.py](catalog_semantics.py)。
+- `resume` 重建尚能继续的任务文件。已失效的旧任务需重新 `export`。确认要重新领取相同输入时加 `--reclaim`，之前领取的结果将被拒绝。重复导入同一结果会读回原状态。
+- 分类修正用 `catalog_tasks.py correct --article 文章号 data/catalog-tasks/correction.jsonl`。文件包含一行带原文依据的完整分类结果。关系修正用 `correct-relation --pair 文章号一,文章号二 文件`。已有关系可用 `undo 关系标识` 撤销。人工修订会保留记录，原文有变化时待重新核对。
+- 确认同版的来源可以折叠查看。存在明确版次或日期证据时才优先展示新版。选择转存或分析时仍以具体来源和现有资料身份为准。归属未能唯一确认的条目可浏览，操作待核对。
 
 ## 验证
 

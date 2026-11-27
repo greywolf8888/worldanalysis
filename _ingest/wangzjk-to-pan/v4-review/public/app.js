@@ -10,7 +10,12 @@ function el(tag, value = '', className = '') {
 const numberFormat = new Intl.NumberFormat('zh-CN');
 const fmt = value => numberFormat.format(value);
 const amountFormat = new Intl.NumberFormat('zh-CN', {maximumFractionDigits: 2});
-const DEFAULT = {q:'', category:'', status:'', site:'', from:'', to:'', order:'newest', view:'grid', selected:'0', baidu:'0', page:1, scroll:0};
+const DEFAULT = {q:'', category:'', subcategory:'', platform:'', status:'', site:'', from:'', to:'', order:'newest', view:'grid', selected:'0', baidu:'0', page:1, scroll:0};
+const urlFilters = ['q','category','subcategory','platform','status','site','from','to','order','selected','baidu','page'];
+const calendarFilters = ['q','category','subcategory','platform','site'];
+const facetTargets = {category:$('topics'), platform:$('platforms'), subcategory:$('subcategories')};
+const resourceIdPattern = /^rv_[0-9a-f]{64}$/;
+const articleKeyPattern = /^ca_[0-9a-f]{64}$/;
 const PREFS_KEY = 'wa-v4-view:existing-library';
 const resourceStates = {
   observed:'资料范围待核对', verified:'曾转存', recycled:'已回收',
@@ -83,13 +88,17 @@ function selectionFailure(error) {
   return '未能保存选择，请重试。';
 }
 function resourceState(row) {
+  if (row.action_pending) return '操作待核实';
   return resourceStates[row.status] || '';
 }
 function canRequestTransfer(row) {
-  return row.requestable ?? row.selectable;
+  return !row.action_pending && (row.requestable ?? row.selectable);
+}
+function isPicked(row) {
+  return !row.action_pending && draft.ids.includes(row.id);
 }
 function priorityAction(row) {
-  return typeof analysisArticleAction === 'function' ? analysisArticleAction(row) : null;
+  return !row.action_pending && typeof analysisArticleAction === 'function' ? analysisArticleAction(row) : null;
 }
 function imageURL(value) {
   try {
@@ -141,6 +150,43 @@ function remember() {
     localStorage.setItem(PREFS_KEY, JSON.stringify({...filter, pageLimit:page?.limit ?? baseCatalogLimit, scroll}));
   } catch {}
 }
+function readLocationFilters() {
+  const params = new URLSearchParams(location.search);
+  if (!urlFilters.some(key => params.has(key))) return null;
+  const result = {...DEFAULT};
+  for (const key of urlFilters) {
+    if (!params.has(key)) continue;
+    const value = params.get(key);
+    if (key === 'page') {
+      if (/^[1-9]\d{0,5}$/.test(value) && Number(value) <= 100000) result.page = Number(value);
+    } else if (value.length <= 200 && !value.includes('\0')) {
+      result[key] = value;
+    }
+  }
+  if (!['newest','oldest','title'].includes(result.order)) result.order = DEFAULT.order;
+  for (const key of ['selected','baidu']) if (result[key] !== '1') result[key] = '0';
+  if (result.site && !meta.sites.some(item => item.id === result.site)) result.site = '';
+  if (result.status && !meta.statuses.some(item => item.id === result.status)) result.status = '';
+  for (const key of ['from','to']) {
+    const value = result[key];
+    const date = new Date(value + 'T00:00:00Z');
+    if (value && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(date.getTime()) ||
+        date.toISOString().slice(0, 10) !== value)) result[key] = '';
+  }
+  if (result.from > result.to && result.to) result.from = result.to = '';
+  return catalogFacets.normalize(result, meta);
+}
+function writeLocationFilters(mode) {
+  const params = new URLSearchParams(location.search);
+  for (const key of ['resource','article','details','panel']) params.delete(key);
+  for (const key of urlFilters) {
+    if (filter[key] === DEFAULT[key]) params.delete(key);
+    else params.set(key, filter[key]);
+  }
+  if (!urlFilters.some(key => params.has(key))) params.set('category', '');
+  const next = location.pathname + '?' + params + location.hash;
+  if (next !== location.pathname + location.search + location.hash) history[mode](null, '', next);
+}
 function setPressed(id, pressed) {
   $(id).setAttribute('aria-pressed', String(pressed));
 }
@@ -151,36 +197,33 @@ function syncControls({search = true} = {}) {
   setPressed('list', filter.view === 'list');
   setPressed('available', filter.baidu === '1');
   setPressed('selected', filter.selected === '1');
-  for (const control of $('topics').querySelectorAll('button')) {
-    control.setAttribute('aria-pressed', String(filter.category === control.dataset.topic));
-  }
+  paintTopics();
   const extraCount = ['site','from','to','status'].filter(k => filter[k]).length;
   notice('filter-count', extraCount ? String(extraCount) : '');
   const topic = meta.categories.find(item => item.id === filter.category);
-  $('result-title').textContent = topic?.label || '全部资料';
+  const platform = meta.platforms?.find(item => item.id === filter.platform);
+  $('result-title').textContent = [topic?.label, platform?.label].filter(Boolean).join(' · ') || '全部资料';
+  const params = new URLSearchParams(calendarFilters.filter(key => filter[key]).map(key => [key, filter[key]]));
+  if (filter.to) params.set('day', filter.to);
+  $('catalog-calendar-link').href = '/courses' + (params.size ? '?' + params : '');
 }
 function applyFilter(changes) {
   if (!loaded) return;
+  if (changes.category !== undefined && changes.category !== filter.category) changes = {...changes, subcategory:''};
   filter = {...filter, q:$('q').value.trim(), ...changes, page:1};
   syncControls();
-  void query({top:true});
+  void query({top:true, locationMode:'pushState'});
 }
 function paintTopics() {
-  const all = {id:'', label:'全部', count:meta.totals.articles};
-  const active = document.activeElement;
-  const focussedTopic = $('topics').contains(active) ? active.dataset.topic : undefined;
-  const controls = [all, ...meta.categories].map(topic => {
-    const b = button('', 'topic');
-    b.dataset.topic = topic.id;
-    b.append(el('span', topic.label), el('small', fmt(topic.count)));
-    b.setAttribute('aria-pressed', String(filter.category === topic.id));
-    b.addEventListener('click', () => {
-      if (filter.category !== topic.id || $('q').value.trim() !== filter.q) applyFilter({category:topic.id});
-    });
-    return b;
+  catalogFacets.render(facetTargets, meta, filter, (field, id) => {
+    if (filter[field] !== id || $('q').value.trim() !== filter.q) {
+      if (field === 'platform') {
+        const menu = $('platforms').querySelector('details');
+        if (menu) menu.open = false;
+      }
+      applyFilter({[field]:id});
+    }
   });
-  $('topics').replaceChildren(...controls);
-  if (focussedTopic !== undefined) controls.find(b => b.dataset.topic === focussedTopic)?.focus({preventScroll:true});
 }
 function setChoices(id, data, empty, getLabel = row => row.label) {
   const select = $(id);
@@ -218,24 +261,25 @@ function setInteractionState() {
   }
 }
 function selectionControl(row, location) {
-  const picked = draft.ids.includes(row.id);
+  const picked = isPicked(row);
   if (!canRequestTransfer(row) && !picked) return null;
   const label = el('label', null, 'pickline');
   const box = el('input', null, 'pick');
   box.type = 'checkbox';
   box.checked = picked;
-  box.dataset.resourcePick = row.id;
+  box.dataset.resourcePick = catalogFacets.displayId(row);
   box.setAttribute('aria-label', '选择 ' + row.title);
   box.disabled = saving || querying;
   box.addEventListener('change', () => {
     const next = box.checked;
     const hadFocus = document.activeElement === box;
     box.checked = picked;
-    void mutate('toggle', {id:row.id, selected:next}).then(() => {
+    const source = next && row.article_key ? {article_key:row.article_key} : {};
+    void mutate('toggle', {id:row.id, selected:next, ...source}).then(() => {
       if (!hadFocus || ![document.body, box].includes(document.activeElement)) return;
       if (location === 'reader' && !$('reader').open) return;
       const region = $(location === 'reader' ? 'reader-selection' : 'cards');
-      const replacement = Array.from(region.querySelectorAll('[data-resource-pick]')).find(input => input.dataset.resourcePick === row.id);
+      const replacement = Array.from(region.querySelectorAll('[data-resource-pick]')).find(input => input.dataset.resourcePick === catalogFacets.displayId(row));
       (replacement || (location === 'reader' ? $('reader').querySelector('[data-close]') : $('result-title'))).focus({preventScroll:true});
     });
   });
@@ -253,21 +297,21 @@ function cardExcerpt(row) {
 }
 function card(row) {
   const article = el('article', null, 'card');
-  article.dataset.version = row.id;
-  if (draft.ids.includes(row.id)) article.dataset.picked = 'true';
+  article.dataset.version = catalogFacets.displayId(row);
+  if (isPicked(row)) article.dataset.picked = 'true';
   const main = el('div', null, 'card-main');
   const preview = button('', 'photo');
   const picture = image(row.cover, () => preview.remove());
   if (picture) {
     preview.setAttribute('aria-label', '查看封面与详情：' + row.title);
     preview.append(picture);
-    preview.addEventListener('click', () => void openReader(row.id, preview));
+    preview.addEventListener('click', () => void openReader(row, preview));
     main.append(preview);
   }
   const copy = el('div', null, 'card-copy');
   const header = el('h3', null);
   const title = button(row.title, 'title');
-  title.addEventListener('click', () => void openReader(row.id, title));
+  title.addEventListener('click', () => void openReader(row, title));
   header.append(title);
   copy.append(header);
   const excerpt = cardExcerpt(row);
@@ -281,15 +325,25 @@ function card(row) {
     topic.addEventListener('click', () => applyFilter({category:category.id}));
     metadata.append(topic);
   }
+  const platformLabels = catalogFacets.labels(row, filter.platform);
+  if (platformLabels.length) metadata.append(el('span', platformLabels.join('、'), 'card-platform'));
+  if (row.version_label) metadata.append(el('span', row.version_label, 'card-version'));
   const time = shortDate(row.published_at);
   if (time) {
     const date = el('time', time);
     date.dateTime = time;
+    date.title = '发布日期';
     metadata.append(date);
   }
   if (row.site_label) metadata.append(el('span', row.site_label, 'card-source'));
   foot.append(metadata);
   const actions = el('div', null, 'card-tail');
+  const relation = Number(row.version_count) > 1 ? 'versions' : Number(row.source_count) > 1 ? 'sources' : '';
+  if (relation) {
+    const c = button(relation === 'versions' ? '其他版本' : '其他来源', 'card-topic card-related');
+    c.addEventListener('click', () => void openReader(row, c, relation));
+    actions.append(c);
+  }
   const state = resourceState(row);
   if (state) actions.append(el('span', state, 'card-state'));
   const control = selectionControl(row, 'card');
@@ -305,7 +359,8 @@ function cardsFrom(result) {
   const active = focused?.closest('article[data-version]');
   const restore = active && $('cards').contains(active);
   const cardType = focused?.matches('[data-resource-pick]') ? '.pick' :
-    focused?.matches('.photo') ? '.photo' : focused?.matches('.card-topic') ? '.card-topic' : '.title';
+    focused?.matches('.photo') ? '.photo' : focused?.matches('.card-related') ? '.card-related' :
+    focused?.matches('.card-topic') ? '.card-topic' : '.title';
   const cards = result.items.map(card);
   $('cards').className = 'cards ' + renderedFilter.view;
   $('cards').dataset.fullPage = String(result.items.length === result.limit);
@@ -349,20 +404,29 @@ function pagination() {
 function render() {
   cardsFrom(page);
   $('empty').hidden = page.total > 0;
-  $('result-count').textContent = fmt(page.total) + ' 项';
+  const tally = [fmt(page.total) + ' 个项目'];
+  if (Number.isSafeInteger(page.version_total) && page.version_total > page.total) tally.push(fmt(page.version_total) + ' 个版本');
+  if (Number.isSafeInteger(page.source_total) && page.source_total > page.total) tally.push(fmt(page.source_total) + ' 篇来源');
+  $('result-count').textContent = tally.join(' · ');
   $('chosen').textContent = fmt(draft.ids.length);
   notice('selection', draft.ids.length ? '已选 ' + fmt(draft.ids.length) + ' 项' +
     (page.hidden_selected ? '，' + fmt(page.hidden_selected) + ' 项不在本页' : '') : '');
   pagination();
   const counts = {page:page.page_selectable, filtered:page.eligible, site_all:page.index_selectable};
+  const projects = {page:page.items.length, filtered:page.total, site_all:page.index_total ?? meta.totals.projects};
+  const pending = {page:page.page_selection_pending, filtered:page.selection_pending, site_all:page.index_selection_pending};
   const maxItems = Number.isSafeInteger(page.max_draft_items) && page.max_draft_items > 0 ? page.max_draft_items : 5000;
   notice('bulk-limit-note', Object.values(counts).some(count => count > maxItems) ?
     '每张清单最多 ' + fmt(maxItems) + ' 项，请缩小选择范围。' : '');
   for (const b of document.querySelectorAll('[data-scope]')) {
     const scope = b.dataset.scope;
     b.dataset.count = String(counts[scope]);
+    b.dataset.projects = String(projects[scope] ?? counts[scope]);
+    b.dataset.pending = String(pending[scope] || 0);
     b.dataset.overLimit = String(counts[scope] > maxItems);
-    b.replaceChildren(el('span', bulkLabels[scope]), el('small', fmt(counts[scope])));
+    const countsLabel = [fmt(counts[scope]) + ' 项可选'];
+    if (pending[scope]) countsLabel.push(fmt(pending[scope]) + ' 项待核实');
+    b.replaceChildren(el('span', bulkLabels[scope]), el('small', countsLabel.join(' · ')));
   }
   syncControls({search:false});
 }
@@ -390,7 +454,7 @@ function scheduleCatalogFit() {
     void query({limit, anchor});
   }, 180);
 }
-async function query({top = false, restore = null, focusResult = false, limit = page?.limit ?? fittedCatalogLimit(), anchor = null} = {}) {
+async function query({top = false, restore = null, focusResult = false, limit = page?.limit ?? fittedCatalogLimit(), anchor = null, locationMode = null} = {}) {
   const token = ++querySequence;
   const request = {...filter};
   const pageFilter = {...request, view:'list'};
@@ -406,7 +470,6 @@ async function query({top = false, restore = null, focusResult = false, limit = 
       if (token !== querySequence) return;
       if (next.snapshot_id === result.snapshot_id) {
         meta = next;
-        paintTopics();
       }
     }
     page = result;
@@ -422,6 +485,7 @@ async function query({top = false, restore = null, focusResult = false, limit = 
     }
     if (top) window.scrollTo(0, 0);
     if (focusResult) $('result-title').focus({preventScroll:true});
+    if (locationMode) writeLocationFilters(locationMode);
     remember();
     scheduleCatalogFit();
   } catch {
@@ -441,7 +505,7 @@ async function query({top = false, restore = null, focusResult = false, limit = 
 function goPage(number) {
   if (!page || querying || saving || !Number.isSafeInteger(number) || number < 1 || number > page.pages || number === page.page) return;
   filter.page = number;
-  void query({top:true, focusResult:true});
+  void query({top:true, focusResult:true, locationMode:'pushState'});
 }
 async function mutate(action, values = {}) {
   if (!loaded || !page || saving || querying) return;
@@ -591,9 +655,31 @@ function baiduActions(row) {
   const urls = (row.baidu_share_links || []).filter(url => /^https:\/\/pan\.baidu\.com\/s\/[A-Za-z0-9_-]{1,129}(?:\?pwd=[A-Za-z0-9]{4})?$/.test(url));
   return urls.map((url, i) => outsideLink(urls.length > 1 ? `百度网盘 ${i + 1}` : '打开百度网盘', url, 'article-share'));
 }
+function relatedSection(kind, label, entries) {
+  const choices = Array.isArray(entries) ? entries.filter(entry => entry && resourceIdPattern.test(entry.id) &&
+    articleKeyPattern.test(entry.article_key)) : [];
+  if (!choices.length) return null;
+  const details = el('details', null, 'article-relations');
+  details.dataset.relation = kind;
+  details.append(el('summary', label + '（' + fmt(choices.length) + '）'));
+  const list = el('ul', null);
+  for (const entry of choices) {
+    const li = el('li', null);
+    const link = button(entry.title || '查看项目', 'relation-title');
+    link.addEventListener('click', () => void openReader(entry));
+    const caption = [entry.version_label, entry.site_label, shortDate(entry.published_at)].filter(Boolean).join(' · ');
+    li.append(link);
+    if (caption) li.append(el('span', caption, 'muted'));
+    list.append(li);
+  }
+  details.append(list);
+  return details;
+}
 function renderReader(row) {
   $('reader-title').textContent = row.title;
-  notice('reader-meta', [row.site_label, shortDate(row.published_at), row.category_label, resourceState(row)].filter(Boolean).join(' · '));
+  const platforms = catalogFacets.labels(row, filter.platform);
+  notice('reader-meta', [row.site_label, shortDate(row.published_at), row.category_label,
+    platforms.join('、'), row.version_label, resourceState(row)].filter(Boolean).join(' · '));
   const article = $('reader-body');
   article.replaceChildren();
   const analysis = priorityAction(row);
@@ -605,21 +691,27 @@ function renderReader(row) {
     if (analysis) actions.append(analysis);
     article.append(actions);
   }
-  if (row.excerpt && !row.blocks.some(block => block.kind === 'text' && (block.text === row.excerpt || block.text.startsWith(row.excerpt)))) {
+  if (row.relationship_pending) article.append(el('p', '来源或版本待核实', 'muted'));
+  const sources = relatedSection('sources', '其他来源', row.other_sources);
+  const versions = relatedSection('versions', '其他版本', row.other_versions);
+  if (sources) article.append(sources);
+  if (versions) article.append(versions);
+  const blocks = row.blocks || [];
+  if (row.excerpt && !blocks.some(block => block.kind === 'text' && (block.text === row.excerpt || block.text.startsWith(row.excerpt)))) {
     article.append(el('p', row.excerpt, 'article-excerpt'));
   }
   const cover = imageURL(row.cover?.url);
-  if (cover && !row.blocks.some(block => block.kind === 'image' && imageURL(block.url) === cover)) {
+  if (cover && !blocks.some(block => block.kind === 'image' && imageURL(block.url) === cover)) {
     const figure = articleImage(row.cover);
     if (figure) article.append(figure);
   }
-  for (const block of row.blocks) {
+  for (const block of blocks) {
     if (block.kind === 'text') article.append(el('p', block.text));
     if (block.kind !== 'image') continue;
     const figure = articleImage(block);
     if (figure) article.append(figure);
   }
-  if (row.roots.length) {
+  if (!row.action_pending && row.roots?.length) {
     const section = el('section', null, 'article-section');
     const list = el('ul', null);
     for (const root of row.roots) {
@@ -629,44 +721,55 @@ function renderReader(row) {
     section.append(el('h3', '曾转存的资料'), list);
     article.append(section);
   }
-  if (typeof displayProductionDetail === 'function') displayProductionDetail(article, row);
+  if (!row.action_pending && typeof displayProductionDetail === 'function') displayProductionDetail(article, row);
 }
-function updateReaderPosition(id) {
-  const index = page?.items.findIndex(row => row.id === id) ?? -1;
+function updateReaderPosition(key) {
+  const index = page?.items.findIndex(row => catalogFacets.displayId(row) === key) ?? -1;
   $('reader-prev').disabled = index <= 0;
   $('reader-next').disabled = index < 0 || index >= page.items.length - 1;
 }
-async function openReader(id, opener) {
+async function openReader(item, opener, section = '') {
   const token = ++readerSequence;
-  const summary = page?.items.find(row => row.id === id);
-  if (opener) readerOpener = {element:opener, id};
-  readerRow = summary || {id};
+  const requested = typeof item === 'string' ? {id:item} : item;
+  const key = catalogFacets.displayId(requested);
+  const summary = page?.items.find(row => catalogFacets.displayId(row) === key);
+  if (opener) readerOpener = {element:opener, id:key};
+  readerRow = null;
   $('reader-title').textContent = summary?.title || '资料详情';
   notice('reader-meta');
   $('reader-body').replaceChildren(el('p', '加载中…', 'muted'));
   paintReaderPick();
-  updateReaderPosition(id);
+  updateReaderPosition(key);
   openDialog('reader');
   $('reader-scroll').scrollTop = 0;
   try {
-    const row = await api('/api/resource/' + encodeURIComponent(id));
+    const params = requested.article_key ? '?' + new URLSearchParams({article:requested.article_key}) : '';
+    const row = await api('/api/resource/' + encodeURIComponent(requested.id) + params);
     if (token !== readerSequence || !$('reader').open) return;
     readerRow = row;
     paintReaderPick();
     renderReader(row);
-    updateReaderPosition(id);
+    updateReaderPosition(catalogFacets.displayId(row));
+    if (['sources','versions'].includes(section)) {
+      const details = $('reader-body').querySelector('[data-relation="' + section + '"]');
+      if (details) {
+        details.open = true;
+        details.querySelector('summary').focus();
+      }
+    }
   } catch {
     if (token !== readerSequence) return;
     const retry = button('重新加载');
-    retry.addEventListener('click', () => void openReader(id));
+    retry.addEventListener('click', () => void openReader(requested, undefined, section));
     $('reader-body').replaceChildren(el('p', '未能加载资料详情。', 'notice'), retry);
   }
 }
 function neighbor(offset) {
-  const index = page?.items.findIndex(row => row.id === readerRow?.id) ?? -1;
+  if (!readerRow) return;
+  const index = page?.items.findIndex(row => catalogFacets.displayId(row) === catalogFacets.displayId(readerRow)) ?? -1;
   if (index < 0) return;
   const next = page.items[index + offset];
-  if (next) void openReader(next.id);
+  if (next) void openReader(next);
 }
 async function showOverview() {
   const target = $('overview-body');
@@ -699,7 +802,7 @@ function resetFilters() {
   $('to').setCustomValidity('');
   $('more-filters').open = false;
   syncControls();
-  void query({top:true});
+  void query({top:true, locationMode:'pushState'});
 }
 
 for (const close of document.querySelectorAll('[data-close]')) {
@@ -775,10 +878,13 @@ for (const b of document.querySelectorAll('[data-scope]')) {
   b.addEventListener('click', () => {
     if (!page || !renderedFilter || saving || querying || b.dataset.overLimit === 'true') return;
     const count = Number(b.dataset.count);
+    const projects = Number(b.dataset.projects);
+    const pending = Number(b.dataset.pending);
     confirmedAction = {action:'bulk', scope:b.dataset.scope, expected_count:count,
       filter:renderedPageFilter, snapshot_id:page.snapshot_id};
     $('bulk').open = false;
-    notice('confirm-text', bulkLabels[b.dataset.scope] + '，共 ' + fmt(count) + ' 项可选资料。');
+    const text = bulkLabels[b.dataset.scope] + '。' + fmt(projects) + ' 个项目中可选 ' + fmt(count) + ' 项资料。';
+    notice('confirm-text', text + (pending ? '另有 ' + fmt(pending) + ' 项待核实。' : ''));
     $('apply-bulk').textContent = '选中资料';
     openDialog('confirm');
   });
@@ -816,12 +922,18 @@ $('freeze').addEventListener('click', async () => {
 window.addEventListener('pagehide', remember);
 window.addEventListener('resize', scheduleCatalogFit);
 document.addEventListener('close', scheduleCatalogFit, true);
+window.addEventListener('popstate', () => {
+  if (!loaded) return;
+  filter = {...(readLocationFilters() || DEFAULT), view:filter.view};
+  syncControls();
+  void query({top:true});
+});
 
 async function openLinkedView() {
   const link = new URLSearchParams(location.search);
   const resource = link.get('resource');
-  if (resource && /^rv_[0-9a-f]{64}$/.test(resource)) {
-    await openReader(resource);
+  if (resource && resourceIdPattern.test(resource)) {
+    await openReader({id:resource, article_key:link.get('article')}, undefined, link.get('details'));
     return;
   }
   switch (link.get('panel')) {
@@ -856,15 +968,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     setChoices('status', meta.statuses, '全部状态', row => resourceState({status:row.id}) || '待核对');
     setChoices('site', meta.sites, '全部来源');
     const {pageLimit, ...savedView} = prefs();
-    filter = {...DEFAULT, ...draft.prefs, ...savedView};
+    const explicit = readLocationFilters();
+    filter = catalogFacets.normalize({...DEFAULT, ...draft.prefs, ...savedView,
+      ...(explicit ? {...explicit, view:savedView.view || draft.prefs?.view || DEFAULT.view} : {})}, meta);
     delete filter.limit;
-    if (filter.category && !meta.categories.some(row => row.id === filter.category)) filter.category = '';
-    paintTopics();
     loaded = true;
     syncControls();
     const previousLimit = Number.isSafeInteger(pageLimit) && pageLimit >= baseCatalogLimit ? pageLimit : baseCatalogLimit;
     const limit = fittedCatalogLimit();
-    if (limit !== previousLimit) filter.page = Math.floor((filter.page - 1) * previousLimit / limit) + 1;
+    if (!explicit && limit !== previousLimit) filter.page = Math.floor((filter.page - 1) * previousLimit / limit) + 1;
     await query({limit, restore:limit === previousLimit ? filter.scroll : null});
     await openLinkedView();
   } catch {

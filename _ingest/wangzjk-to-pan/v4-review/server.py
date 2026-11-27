@@ -19,14 +19,18 @@ from member_queue import MAX_LIMIT, DEFAULT_NON_PROJECTS, DEFAULT_OBSERVATIONS, 
 from share_locations import MAX_BROWSER_IMPORT_BYTES, import_browser_share_locations, protected_owner_exports
 from course_calendar import CalendarRequestError, course_calendar
 from pipeline_control import JOBS, PipelineControl, RunBusy
+from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, PLATFORMS as PLATFORM_LABELS, KEY as ARTICLE_KEY
+from catalog_semantics import CatalogStore
+from intro_inputs import intro_revision
+from catalog_model import SEMANTIC_DB
 
-INDEX={"/":("index.html","text/html"),"/style.css":("style.css","text/css"),"/app.js":("app.js","text/javascript"),"/production.js":("production.js","text/javascript"),
+INDEX={"/":("index.html","text/html"),"/style.css":("style.css","text/css"),"/app.js":("app.js","text/javascript"),"/catalog-facets.js":("catalog-facets.js","text/javascript"),"/production.js":("production.js","text/javascript"),
        "/priority.js":("priority.js","text/javascript"),"/priority.css":("priority.css","text/css"),
        "/member-import":("member-import.html","text/html"),"/member-import.js":("member-import.js","text/javascript"),
        "/courses":("courses.html","text/html"),"/courses.css":("courses.css","text/css"),"/courses.js":("courses.js","text/javascript"),
        "/control":("control.html","text/html"),"/control.css":("control.css","text/css"),"/control.js":("control.js","text/javascript")}
 ID=re.compile(r'rv_[0-9a-f]{64}\Z')
-DEFAULT={'q':'','category':'','status':'','site':'','from':'','to':'','order':'newest','view':'grid','selected':'0','baidu':'0','page':1,'scroll':0}
+DEFAULT={'q':'','category':'','subcategory':'','platform':'','status':'','site':'','from':'','to':'','order':'newest','view':'grid','selected':'0','baidu':'0','page':1,'scroll':0}
 MAX_ID=5000
 CATALOG_PAGE_LIMITS=(16,20,24,28,32)
 
@@ -37,9 +41,13 @@ class RequestError(Exception):
 def filters(a, library):
     if type(a) is not dict or a.keys()-DEFAULT.keys()-{'limit'}:raise RequestError(400,'未知筛选参数')
     f={**DEFAULT,**a}
-    for k in ('q','category','status','site','from','to','order','view','selected','baidu'):
+    for k in ('q','category','subcategory','platform','status','site','from','to','order','view','selected','baidu'):
         if not isinstance(f[k],str) or len(f[k])>250 or '\x00' in f[k]:raise RequestError(400,'筛选参数无效')
-    if (f['category'] and f['category'] not in CATEGORIES or f['status'] and f['status'] not in STATUS
+    category= CATEGORY_ALIASES.get(f['category'],f['category'])
+    if (category and category not in TAXONOMY
+            or f['subcategory'] and (not category or f['subcategory'] not in TAXONOMY.get(category,('',()))[1])
+            or f['platform'] and f['platform'] not in PLATFORM_LABELS
+            or f['status'] and f['status'] not in STATUS
             or f['site'] and f['site'] not in {x['id'] for x in library.sites}
             or f['order'] not in ('title','oldest','newest') or f['view'] not in ('grid','list')
             or f['selected'] not in ('0','1') or f['baidu'] not in ('0','1')):
@@ -68,7 +76,7 @@ def select_page(rows,f):
 
 
 def requestable(row):
-    return row.get('requestable',row.get('selectable')) is True
+    return not row.get('action_pending') and row.get('requestable',row.get('selectable')) is True
 
 
 class Draft:
@@ -107,7 +115,7 @@ class Draft:
         if entries:r['entries']=[self.entry(i,d) for i in d['ids']]
         return r
     def mutate(self,body):
-        allowed={'revision','action','id','selected','scope','filter','position','prefs','expected_count','snapshot_id'}
+        allowed={'revision','action','id','selected','scope','filter','position','prefs','expected_count','snapshot_id','article_key'}
         if type(body) is not dict or body.keys()-allowed or type(body.get('revision')) is not int:raise RequestError(400,'缺草稿版本或含未知字段')
         c=self.connect()
         try:
@@ -125,7 +133,15 @@ class Draft:
             if action in ('toggle','remove','move') and (not isinstance(k,str) or not ID.fullmatch(k)):raise RequestError(400,'无效的资料版本 ID')
             if action=='toggle':
                 if type(body.get('selected')) is not bool:raise RequestError(400,'需要明确勾选状态')
-                if body['selected']: append([k])
+                if body['selected']:
+                    token=body.get('article_key')
+                    if token is not None:
+                        row=self.lib.exact_article(k,token) if isinstance(token,str) and ARTICLE_KEY.fullmatch(token) else None
+                        if not row or not requestable(row):
+                            raise RequestError(422,'当前资料归属待核实，未加入清单。')
+                    elif hasattr(self.lib,'semantic_rows') and len(self.lib.by_id.get(k,{}).get('sources',[]))!=1:
+                        raise RequestError(422,'请选择明确的来源资料。')
+                    append([k])
                 elif k in ids:ids.remove(k); d['bindings'].pop(k,None)
             elif action=='remove':
                 if k in ids:ids.remove(k); d['bindings'].pop(k,None)
@@ -160,7 +176,7 @@ class Draft:
             if b['revision']!=d['revision']:raise RequestError(409,'草稿版本改变，未冻结')
             if not d['ids']:raise RequestError(422,'没有已勾选资料')
             if any(not requestable(self.entry(k,d)) for k in d['ids']):raise RequestError(409,'有过期或不可选资料，未保存顺序')
-            key=digest([self.lib.snapshot_id,d['revision'],d['ids'],d['bindings'],b['order_mode']]); old=c.execute('SELECT body FROM review WHERE identity=?',(key,)).fetchone()
+            key=digest([getattr(self.lib,'operations_snapshot_id',self.lib.snapshot_id),d['revision'],d['ids'],d['bindings'],b['order_mode']]); old=c.execute('SELECT body FROM review WHERE identity=?',(key,)).fetchone()
             if old:return json.loads(old[0])
             items=[]
             for n,k in enumerate(d['ids'],1):
@@ -178,7 +194,8 @@ class Draft:
 
 class LiveSnapshot:
     """Accept an atomic local public checkpoint on demand; no polling thread or I/O to any website."""
-    def __init__(self, library, draft, local, watch=None):
+    def __init__(self, library, draft, local, watch=None, catalog_db=None):
+        self.catalog_db=catalog_db
         self.watch=(watch,) if isinstance(watch,Path) else tuple(watch or ());self.lock=RLock();self.current=(library,draft,local)
         self.last_attempt=self.version() if self.watch else None;self.pending=False
 
@@ -192,6 +209,8 @@ class LiveSnapshot:
             except FileNotFoundError:
                 if position==0:raise
                 versions.append(None)
+        if self.catalog_db is not None:
+            versions.append((CatalogStore(self.catalog_db).revision(),intro_revision(self.catalog_db)))
         return tuple(versions)
 
     def get(self):
@@ -205,12 +224,12 @@ class LiveSnapshot:
                     lib=open_index()
                     if self.version()!=key:raise ValueError('checkpoint moved')
                     public_changed=lib.snapshot_id!=cur.snapshot_id
+                    operations_changed=getattr(lib,'operations_snapshot_id',lib.snapshot_id)!=getattr(cur,'operations_snapshot_id',cur.snapshot_id)
                     if public_changed or lib.share_locations!=cur.share_locations:
-                        # The local projection uses the public rows and historical provenance, not share locators.
-                        self.current=(lib,Draft(draft.path,lib),LocalProjection(lib) if public_changed else local)
+                        self.current=(lib,Draft(draft.path,lib),LocalProjection(lib) if operations_changed else local)
                     self.last_attempt=key
                     self.pending=False
-            except (OSError,ValueError,TypeError,KeyError):self.pending=True
+            except (OSError,ValueError,TypeError,KeyError,sqlite3.Error):self.pending=True
             return (*self.current,self.pending)
 
 
@@ -332,15 +351,34 @@ class Handler(BaseHTTPRequestHandler):
             if p=='/api/cleanup-readiness' and not u.query:return self.send(200,local.cleanup_preparation())
             if p=='/api/discovery-readiness' and not u.query:return self.send(200,{**local.discovery(),'public_checkpoint_pending_sync':pending})
             if p.startswith('/api/resource/') and ID.fullmatch(x:=p[len('/api/resource/'):]) and x in lib.by_id:
-                row = lib.by_id[x]
-                return self.send(200,{**row,'local_projection':local.detail(row),'baidu_share_links':lib.baidu_links(row),
-                                      'project_entries':lib.project_entries(row)})
+                query=parse_qs(u.query,keep_blank_values=True,max_num_fields=1)
+                if query and (set(query)!={'article'} or len(query['article'])!=1 or not ARTICLE_KEY.fullmatch(query['article'][0])):
+                    raise RequestError(400,'来源资料标识无效')
+                token=query['article'][0] if query else None
+                row=lib.exact_article(x,token) if token else lib.by_id[x]
+                if not row:
+                    raise RequestError(404,'此来源资料已更新，请重新打开。')
+                detail=lib.display_detail(row) if token else row
+                detail={k:v for k,v in detail.items() if not k.startswith('_') and k not in ('input_hash','analysis','paragraphs','coverage')}
+                return self.send(200,{**detail,'local_projection':None if row.get('action_pending') else local.detail(row),
+                                      'baidu_share_links':lib.baidu_links(row),'project_entries':lib.project_entries(row)})
             if p=='/api/resources':
                 t=perf_counter(); raw=parse_qs(u.query,keep_blank_values=True,max_num_fields=16)
                 if any(len(v)!=1 for v in raw.values()):raise RequestError(400,'筛选参数重复')
                 f=filters({k:v[0] for k,v in raw.items()},lib);d=draft.read();selected=set(d['ids'])
-                rows=lib.match(f,selected); page,cur,pages,limit=select_page(rows,f); visible={r['id'] for r in page}
+                rows=lib.match(f,selected); page,cur,pages,limit=select_page(rows,f)
+                visible={r['id'] for r in page if not r.get('action_pending')}
+                all_rows=getattr(lib,'catalog_all',())
+                sources=set(); versions=set()
+                for row in rows:
+                    sources.update(row.get('_matched_sources',[row.get('article_key',row['id'])]))
+                    versions.update(row.get('_matched_versions',[row.get('display_id',row['id'])]))
+                sources.discard(None); versions.discard(None)
                 return self.send(200,{'items':[lib.summary(r) for r in page],'total':len(rows),'eligible':sum(requestable(r) for r in rows),
+                    'source_total':len(sources),'version_total':len(versions),
+                    'selection_pending':sum(bool(r.get('action_pending')) for r in rows),
+                    'page_selection_pending':sum(bool(r.get('action_pending')) for r in page),
+                    'index_selection_pending':sum(bool(r.get('action_pending')) for r in all_rows),'index_total':len(all_rows) if all_rows else len(lib.by_id),
                     'page':cur,'pages':pages,'limit':limit,'index_selectable':lib.requestable_count,'page_selectable':sum(requestable(r) for r in page),'max_draft_items':MAX_ID,
                     'draft':draft.show(d,False),'hidden_selected':len(selected-visible),'query_ms':round((perf_counter()-t)*1000,3),'snapshot_id':lib.snapshot_id})
         elif method=='POST' and p=='/api/confirm':
@@ -393,17 +431,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):self.serve('POST')
 
 
-def make_server(library,db_path,port,*,local=None,watch=None,enable_control=False):
+def make_server(library,db_path,port,*,local=None,watch=None,enable_control=False,catalog_db=None):
     draft=Draft(db_path,library); state=local if local is not None else LocalProjection(library)
     http=ThreadingHTTPServer(('127.0.0.1',port),Handler)
-    http.snapshot=LiveSnapshot(library,draft,state,watch);http.authority='127.0.0.1:'+str(http.server_port)
+    http.snapshot=LiveSnapshot(library,draft,state,watch,catalog_db);http.authority='127.0.0.1:'+str(http.server_port)
     http.control = PipelineControl(http.server_port) if enable_control else None
     return http
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description='Worldanalysis local resource library');p.add_argument('--port',type=int,default=8767)
     args=p.parse_args(); lib=open_index()
-    with make_server(lib,ROOT/'data'/'draft.sqlite3',args.port,watch=(ROOT/'data'/'discovery-head.json',ROOT/'data'/'codex-public.json'),enable_control=True) as h:
+    with make_server(lib,ROOT/'data'/'draft.sqlite3',args.port,watch=(ROOT/'data'/'discovery-head.json',ROOT/'data'/'codex-public.json',ROOT/'data'/'public-details.json',ROOT.parent/'state'/'catalog.json'),enable_control=True,catalog_db=SEMANTIC_DB) as h:
         print('Worldanalysis: http://'+h.authority+'/',flush=True)
         try:h.serve_forever()
         except KeyboardInterrupt:pass
