@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 from catalog_model import CATEGORIES, STATUS, ROOT, compact, digest, now, open_index
 
 from production_bridge import LocalProjection
+from catalog_progress import CatalogProgress
 from confirm_gate import readiness
 from analysis_priority import AnalysisPriority, AnalysisPriorityError
 from member_queue import MAX_LIMIT, DEFAULT_NON_PROJECTS, DEFAULT_OBSERVATIONS, build_worklist, read_backfill, read_non_projects, read_observations
@@ -20,7 +21,7 @@ from share_locations import MAX_BROWSER_IMPORT_BYTES, import_browser_share_locat
 from course_calendar import CalendarRequestError, course_calendar
 from pipeline_control import JOBS, PipelineControl, RunBusy
 from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, PLATFORMS as PLATFORM_LABELS, KEY as ARTICLE_KEY
-from catalog_semantics import CatalogStore
+from catalog_semantics import CatalogStore, article_key
 from intro_inputs import intro_revision
 from catalog_model import SEMANTIC_DB
 
@@ -198,6 +199,13 @@ class LiveSnapshot:
         self.catalog_db=catalog_db
         self.watch=(watch,) if isinstance(watch,Path) else tuple(watch or ());self.lock=RLock();self.current=(library,draft,local)
         self.last_attempt=self.version() if self.watch else None;self.pending=False
+        self.progress = None
+
+    def resource_progress(self, library, local):
+        with self.lock:
+            if self.progress is None or self.progress.library is not library:
+                self.progress = CatalogProgress(library, local)
+            return self.progress
 
     def version(self):
         versions = []
@@ -334,7 +342,8 @@ class Handler(BaseHTTPRequestHandler):
         if method=='GET':
             if p == '/api/course-calendar':
                 try:
-                    return self.send(200, course_calendar(lib, u.query))
+                    progress = self.server.snapshot.resource_progress(lib, local)
+                    return self.send(200, course_calendar(lib, u.query, progress=progress))
                 except CalendarRequestError as error:
                     return self.send(error.status, {'error': str(error)})
             if p == '/api/control' and not u.query and self.server.control is not None:
@@ -359,8 +368,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not row:
                     raise RequestError(404,'此来源资料已更新，请重新打开。')
                 detail=lib.display_detail(row) if token else row
-                detail={k:v for k,v in detail.items() if not k.startswith('_') and k not in ('input_hash','analysis','paragraphs','coverage')}
-                return self.send(200,{**detail,'local_projection':None if row.get('action_pending') else local.detail(row),
+                detail={k:v for k,v in detail.items() if not k.startswith('_') and k not in ('input_hash','analysis','paragraphs','coverage','roots')}
+                progress = self.server.snapshot.resource_progress(lib, local)
+                source_row = lib.exact_article(x, article_key(row['site_id'], row['article_id'])) or row
+                live = progress.fields(source_row, progress.read(), include_book=True) if not row.get('demo') else {}
+                return self.send(200,{**detail,**live,
                                       'baidu_share_links':lib.baidu_links(row),'project_entries':lib.project_entries(row)})
             if p=='/api/resources':
                 t=perf_counter(); raw=parse_qs(u.query,keep_blank_values=True,max_num_fields=16)
@@ -374,7 +386,9 @@ class Handler(BaseHTTPRequestHandler):
                     sources.update(row.get('_matched_sources',[row.get('article_key',row['id'])]))
                     versions.update(row.get('_matched_versions',[row.get('display_id',row['id'])]))
                 sources.discard(None); versions.discard(None)
-                return self.send(200,{'items':[lib.summary(r) for r in page],'total':len(rows),'eligible':sum(requestable(r) for r in rows),
+                progress = self.server.snapshot.resource_progress(lib, local)
+                pulse = progress.read() if any(not row.get('demo') for row in page) else None
+                return self.send(200,{'items':[{**lib.summary(r),**(progress.fields(r,pulse) if pulse else {})} for r in page],'total':len(rows),'eligible':sum(requestable(r) for r in rows),
                     'source_total':len(sources),'version_total':len(versions),
                     'selection_pending':sum(bool(r.get('action_pending')) for r in rows),
                     'page_selection_pending':sum(bool(r.get('action_pending')) for r in page),
@@ -441,7 +455,9 @@ def make_server(library,db_path,port,*,local=None,watch=None,enable_control=Fals
 if __name__=='__main__':
     p=argparse.ArgumentParser(description='Worldanalysis local resource library');p.add_argument('--port',type=int,default=8767)
     args=p.parse_args(); lib=open_index()
-    with make_server(lib,ROOT/'data'/'draft.sqlite3',args.port,watch=(ROOT/'data'/'discovery-head.json',ROOT/'data'/'codex-public.json',ROOT/'data'/'public-details.json',ROOT.parent/'state'/'catalog.json'),enable_control=True,catalog_db=SEMANTIC_DB) as h:
+    watch = (*(ROOT/'data'/name for name in ('discovery-head.json', 'codex-public.json', 'public-details.json')),
+             *(ROOT.parent/'state'/name for name in ('catalog.json', 'journal.json', 'downloaded-project-markers.json')))
+    with make_server(lib,ROOT/'data'/'draft.sqlite3',args.port,watch=watch,enable_control=True,catalog_db=SEMANTIC_DB) as h:
         print('Worldanalysis: http://'+h.authority+'/',flush=True)
         try:h.serve_forever()
         except KeyboardInterrupt:pass

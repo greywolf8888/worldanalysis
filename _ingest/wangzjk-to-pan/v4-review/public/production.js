@@ -179,10 +179,5 @@ async function preconfirmPanel(){
   box.append(order,checks);
  }catch{if(k===reviewSeq&&$('preconfirmation').open)box.replaceChildren(el('p','未能加载转存信息，请重试。','status-note notice'));}
 }
-function displayProductionDetail(container,row){
- const local=row.local_projection?.linked_project;
- if(!local)return;
- const detail=progressSection('本地处理进度');detail.append(projectState(local,false));container.append(detail);
-}
 $('local-open').addEventListener('click',()=>void localPanel());$('local-close').addEventListener('click',()=>closeDialog($('local-status')));
 $('preconfirm-open').addEventListener('click',()=>void preconfirmPanel());$('preconfirm-close').addEventListener('click',()=>closeDialog($('preconfirmation')));

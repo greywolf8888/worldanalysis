@@ -217,6 +217,7 @@ dialog::backdrop { background: #1d211948; }
 .article-heading h2 { margin: .22rem 0 0; font-size: clamp(1.3rem, 3vw, 1.77rem); line-height: 1.42; letter-spacing: -.032em; }
 .reading p { margin: .67rem 0; line-height: 1.75; white-space: pre-wrap; }
 .reading .article-heading p { margin: 0; line-height: 1.45; }
+.reading .article-heading .reader-state { margin-top: .34rem; font-size: .86rem; color: var(--secondary); }
 .article-actions { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .7rem; }
 .article-share { display: inline-flex; align-items: center; min-height: 2.35rem; padding: .3rem .55rem; }
 #member-links { width: min(100%, 52rem); }
@@ -224,10 +225,8 @@ dialog::backdrop { background: #1d211948; }
 .reading figure { margin: .85rem 0; }
 .reading img { display: block; max-width: 100%; max-height: 76vh; object-fit: contain; border-radius: var(--radius); }
 .reading figcaption { color: var(--secondary); font-size: .77rem; margin-top: .25rem; }
-.article-section, .detail-section { margin-top: .85rem; padding-top: .65rem; border-top: 1px solid var(--line); }
-.article-section h3, .reading h3 { margin: 0; font-size: .98rem; }
-.article-section ul { margin: .5rem 0; padding-left: 1.2rem; }
-.article-section li { margin-bottom: .25rem; }
+.detail-section { margin-top: .85rem; padding-top: .65rem; border-top: 1px solid var(--line); }
+.reading h3 { margin: 0; font-size: .98rem; }
 .modal { margin: auto; width: min(395px, calc(100% - 1.2rem)); max-width: 100%; border-radius: var(--radius); }
 .modal-actions { justify-content: end; margin-top: .75rem; }
 .drawer-bottom { flex-shrink: 0; border-top: 1px solid var(--line); padding: .55rem clamp(.72rem, 2.6vw, 1.2rem); background: var(--surface); }

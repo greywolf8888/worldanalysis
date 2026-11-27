@@ -78,7 +78,7 @@ def fingerprint_exclusions(exclusions):
     return digest(sorted(exclusions.items()))
 
 
-def course_calendar(library: Library, query: str) -> dict:
+def course_calendar(library: Library, query: str, *, progress=None) -> dict:
     sites = [{"id": site["id"], "label": site["label"]} for site in library.sites]
     params = read_query(query, {site["id"] for site in sites})
     exclusions = read_non_projects(DEFAULT_NON_PROJECTS)
@@ -117,8 +117,11 @@ def course_calendar(library: Library, query: str) -> dict:
         else:
             raise CalendarRequestError(409, "课程目录已更新，请重新加载。")
     end = min(start + PAGE_SIZE, len(rows))
+    page = rows[start:end]
+    pulse = progress.read() if progress is not None and page else None
     return {
-        "items": [summary(row, library.share_locations) for row in rows[start:end]],
+        "items": [{**summary(row, library.share_locations), **(progress.fields(row, pulse) if pulse else {})}
+                  for row in page],
         "total": len(rows),
         "next": revision + "." + rows[end - 1].get("display_id",rows[end - 1]["id"]) if end < len(rows) else None,
         "categories":facets["categories"], "platforms":facets["platforms"],

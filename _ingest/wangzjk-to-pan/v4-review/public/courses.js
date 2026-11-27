@@ -126,6 +126,8 @@ function addCourses(items, multipleSites) {
       meta.append(show);
     }
     if (course.has_baidu) meta.append(node('span', '有百度链接', 'calendar-baidu'));
+    const state = catalogFacets.statusText(course);
+    if (state) meta.append(node('span', state, 'calendar-state'));
     row.append(title, meta);
     const day = typeof course.published_at === 'string' && dayPattern.test(course.published_at)
       ? course.published_at : '';

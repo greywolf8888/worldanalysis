@@ -2,6 +2,23 @@
 
 const catalogFacets = (() => {
   const number = new Intl.NumberFormat('zh-CN');
+  const transferLabels = new Map(Object.entries({
+    transferred: '已转存',
+    transferred_previously: '曾转存',
+    recycled: '已回收',
+  }));
+  const analysisLabels = new Map(Object.entries({
+    queued: '待分析',
+    in_progress: '分析中',
+    awaiting_originals: '待原件',
+    same_source_reuse: '同源复用',
+    archive_only: '留档',
+    completed: '已分析',
+    completed_received_scope: '已分析实收资料',
+    local_result_available: '已有本地分析',
+    awaiting_acceptance: '待验收',
+    awaiting_re_review: '待复验',
+  }));
 
   function text(tag, value, className) {
     const element = document.createElement(tag);
@@ -77,5 +94,17 @@ const catalogFacets = (() => {
     return [...new Set(ordered.map(item => item.label))].slice(0, maximum);
   }
 
-  return {normalize, render, displayId, detailPath, labels};
+  function statusText(row) {
+    const legacyTransfer = row.status === 'verified' ? '曾转存' : row.status === 'recycled' ? '已回收' : '';
+    const transfer = Object.hasOwn(row, 'transfer_state') ? transferLabels.get(row.transfer_state) : legacyTransfer;
+    const access = row.status === 'restricted' ? '原文访问受限' : '';
+    let analysis = analysisLabels.get(row.analysis_state);
+    if (['completed', 'completed_received_scope'].includes(row.analysis_state) &&
+        ['核心待补', '配套待补'].includes(row.analysis_scope)) {
+      analysis = `已分析（${row.analysis_scope}）`;
+    }
+    return [transfer, analysis, access].filter(Boolean).join(' · ');
+  }
+
+  return {normalize, render, displayId, detailPath, labels, statusText};
 })();

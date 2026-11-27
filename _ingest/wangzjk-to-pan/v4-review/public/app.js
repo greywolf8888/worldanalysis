@@ -87,7 +87,7 @@ function selectionFailure(error) {
   return '未能保存选择，请重试。';
 }
 function resourceState(row) {
-  return resourceStates[row.status] || '';
+  return catalogFacets.statusText(row);
 }
 function canRequestTransfer(row) {
   return !row.action_pending && (row.requestable ?? row.selectable);
@@ -570,7 +570,7 @@ function paintDraft() {
     li.dataset.queueId = row.id;
     const details = el('div', null, 'draft-copy');
     details.append(el('strong', row.title));
-    const info = [row.category_label, row.site_label, resourceState(row), showSize(row.range_total_bytes) || '资料大小待核实',
+    const info = [row.category_label, row.site_label, resourceState(row), showSize(row.range_total_bytes),
       row.stale ? '资料已更新，请重新选择' : ''].filter(Boolean);
     if (info.length) details.append(el('p', info.join(' · '), 'muted'));
     const controls = el('div', null, 'draft-controls');
@@ -673,14 +673,21 @@ function renderReader(row) {
   $('reader-title').textContent = row.title;
   const platforms = catalogFacets.labels(row, filter.platform, Infinity);
   notice('reader-meta', [row.site_label, shortDate(row.published_at), row.category_label,
-    platforms.join('、'), row.version_label, resourceState(row)].filter(Boolean).join(' · '));
+    platforms.join('、'), row.version_label].filter(Boolean).join(' · '));
+  notice('reader-state', resourceState(row));
   const article = $('reader-body');
   article.replaceChildren();
   const analysis = priorityAction(row);
+  const textbookHref = row.textbook_href;
+  const textbookLink = row.action_pending ? null : textbook({obsidian_href:textbookHref});
   const shareLinks = baiduActions(row);
   const projectLinks = projectActions(row);
-  if (analysis || shareLinks.length || projectLinks.length) {
+  if (analysis || textbookLink || shareLinks.length || projectLinks.length) {
     const actions = el('div', null, 'article-actions');
+    if (textbookLink) {
+      textbookLink.classList.add('article-share');
+      actions.append(textbookLink);
+    }
     actions.append(...shareLinks, ...projectLinks);
     if (analysis) actions.append(analysis);
     article.append(actions);
@@ -704,17 +711,6 @@ function renderReader(row) {
     const figure = articleImage(block);
     if (figure) article.append(figure);
   }
-  if (!row.action_pending && row.roots?.length) {
-    const section = el('section', null, 'article-section');
-    const list = el('ul', null);
-    for (const root of row.roots) {
-      const details = root.is_dir ? '文件夹' : showSize(root.bytes);
-      list.append(el('li', [root.name, details].filter(Boolean).join(' · ')));
-    }
-    section.append(el('h3', '曾转存的资料'), list);
-    article.append(section);
-  }
-  if (!row.action_pending && typeof displayProductionDetail === 'function') displayProductionDetail(article, row);
 }
 function updateReaderPosition(key) {
   const index = page?.items.findIndex(row => catalogFacets.displayId(row) === key) ?? -1;
@@ -730,6 +726,7 @@ async function openReader(item, opener, section = '') {
   readerRow = null;
   $('reader-title').textContent = summary?.title || '资料详情';
   notice('reader-meta');
+  notice('reader-state');
   $('reader-body').replaceChildren(el('p', '加载中…', 'muted'));
   paintReaderPick();
   updateReaderPosition(key);
