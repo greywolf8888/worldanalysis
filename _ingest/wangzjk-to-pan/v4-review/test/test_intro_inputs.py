@@ -30,6 +30,36 @@ def projection(payload):
 
 
 class IntroInputTests(unittest.TestCase):
+    def test_targeted_collection_keeps_article_scope_and_text_counts(self):
+        stamp='2026-11-26T14:15:00'
+        rows = {
+            '12': wordpress_post('12', stamp, '<p>这是可读的原始课程介绍。</p>'),
+            '18': wordpress_post('18', stamp, '<img src="/unused.png">'),
+            '23': wordpress_post('23', stamp),
+        }
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            path = Path(directory) / 'codex-public.json'
+            state = collector.load(path)
+            state['articles'] = {key: collector.normalize(row) for key,row in rows.items()}
+            collector.publish(state, path)
+            with patch.object(collector,'WordPress') as client:
+                client.return_value.get.return_value = [rows['18'],rows['12']], {'X-WP-Total':'2'}, 'rest','test'
+                out=collector.collect(path, 0, 20, ('12','18'), only_seed=True)
+                self.assertEqual(client.return_value.get.call_count,1)
+                self.assertEqual(client.return_value.get.call_args.kwargs['include'],'12,18')
+            found=intro_inputs.read_intros(path.parent/'pipeline-runs.sqlite3')
+            self.assertEqual(found[(collector.SITE,'18')]['coverage'],'image_only')
+            self.assertNotIn((collector.SITE,'23'),found)
+            self.assertEqual(out['introductions_saved'],1)
+
+    def test_public_batch_rejects_unexpected_members_before_applying(self):
+        stamp='2026-11-26T14:15:00'
+        with patch.object(collector,'WordPress') as client:
+            client.return_value.get.return_value = [wordpress_post('99', stamp)], {'X-WP-Total':'1'}, 'rest','test'
+            with self.assertRaises(collector.PublicReadError) as error:
+                list(collector.selected_details(client.return_value, ('12','18')))
+            self.assertEqual(error.exception.reason,'publisher_detail_collection_mismatch')
+
     def test_visible_body_survives_restricted_download_and_long_detail_is_retained(self):
         long_text = '摘要之外的课程内容。' * 1800
         payload = wordpress_post('459', '2026-11-27T08:00:00', f'''

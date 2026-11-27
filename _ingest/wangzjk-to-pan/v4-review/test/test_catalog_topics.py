@@ -30,6 +30,18 @@ class CatalogTopicTest(unittest.TestCase):
                                        ('本套课程聚焦跨境出海实操，完整覆盖社媒引流与独立站运营。',),''),
                          ('crossborder','外贸获客'))
 
+    def test_public_text_distinguishes_tasks_from_project_pitch(self):
+        title='全程托管，零门槛小白可做'
+        self.assertEqual(project_topic(title, (), ''), ('',''))
+        self.assertEqual(project_topic(title, ('提交酒店截图任务，审核之后领取佣金。',), '',
+                                       source_checked=True), ('services','技能接单'))
+        self.assertEqual(project_topic(title, ('长期收益，手机版操作。',), '', source_checked=True),
+                         ('reference','项目线索'))
+        self.assertEqual(project_topic('付费文章：几件我遇到的事', ('有些话写给以前的朋友。',), '',
+                                       source_checked=True), ('reference','经验与阅读'))
+        self.assertEqual(project_topic('游戏交易市场自动掘金', (), '', source_checked=True),
+                         ('gaming','游戏运营'))
+
     def test_news_requires_reporting_purpose(self):
         cases = {
             '2026年11月27日新闻早讯，每天60s读懂世界': 'news',

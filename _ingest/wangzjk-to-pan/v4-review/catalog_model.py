@@ -318,7 +318,9 @@ class Library:
             value = self.semantic_inputs[token]
             record_state, analysis = classified.get(token,('pending',None))
             valid = analysis or {}
-            category,subtopic = project_topic(value['title'],value['paragraphs'],value['excerpt'],valid,manual=record_state=='manual')
+            category,subtopic = project_topic(value['title'],value['paragraphs'],value['excerpt'],valid,
+                                              manual=record_state=='manual',
+                                              source_checked=value['coverage'] in {'complete','partial','image_only'})
             secondary = displayed_secondary_topic(category,valid,manual=record_state=='manual')
             live_platforms = project_platforms(value['title'],value['paragraphs'],value['excerpt'],valid,
                                                manual=record_state=='manual')

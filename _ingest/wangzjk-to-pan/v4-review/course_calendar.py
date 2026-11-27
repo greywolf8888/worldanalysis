@@ -51,7 +51,7 @@ def read_query(query: str, sites: set[str]) -> dict[str, str]:
 
 
 def is_course(row: dict, exclusions: dict) -> bool:
-    if (row.get('category'), row.get('subcategory')) == ('news', '新闻简报'):
+    if (row.get('category'), row.get('subcategory')) in {('news', '新闻简报'), ('reference','站点说明')}:
         return False
     sources = row["sources"]
     return bool(sources) and row.get("demo") is not True and any(

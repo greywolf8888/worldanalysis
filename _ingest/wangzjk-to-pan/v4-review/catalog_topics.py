@@ -1,9 +1,10 @@
 """Browse topics derived from the scope of the projects in the library."""
 import re
 from unicodedata import normalize
+from catalog_topic_refinement import reference_topic, refined_topic
 
 
-TOPIC_REVISION = 'project-topics-3.0'
+TOPIC_REVISION = 'project-topics-3.1'
 CATEGORIES = {
     'commerce': ('电商与带货', ('商品经营', '店铺运营', '虚拟商品', '联盟带货', '本地团购')),
     'crossborder': ('跨境电商与外贸', ('跨境店铺', '海外带货', '外贸获客')),
@@ -19,11 +20,12 @@ CATEGORIES = {
     'office': ('办公与效率', ('表格与文档', '汇报与演示', '笔记与知识管理')),
     'software': ('软件与数字工具', ('系统与文件', '影音工具', '应用软件', '办公工具', '设计工具')),
     'services': ('副业与接单', ('技能接单', '活动推广', '本地服务', '综合副业')),
-    'gaming': ('游戏与运营', ('游戏开发', '游戏推广', '游戏运营')),
+    'gaming': ('游戏与运营', ('游戏开发', '游戏推广', '游戏运营', '游戏资料')),
     'business': ('商业经营与管理', ('商业模式', '企业经营', '组织与团队')),
     'life': ('职场成长与生活', ('职场技能', '个人成长', '生活技能', '学习与兴趣')),
     'finance': ('财经与投资', ('财商', '投资研究', '金融方法')),
     'news': ('新闻与行业资讯', ('新闻简报', '行业观察', '经验案例')),
+    'reference': ('综合参考', ('项目线索', '经验与阅读', '课程与资料', '操作方法', '站点说明')),
 }
 # These fields remain valid in old results, but have no reader-facing facet.
 NO_TOPIC = 'unsorted'
@@ -91,6 +93,7 @@ _PURPOSE_RULES = (
     ('commerce','店铺运营',13,r'(?:开好|开个|开一家|从零开)\s*(?:淘宝|拼多多|抖音)店|(?:淘宝|淘天|拼多多).{0,8}(?:开店|店铺运营|起店|特训营)|抖店小店|无限活动流.{0,4}(?:迭代|课程)|电商开店工作台'),
     ('commerce','虚拟商品',13,r'(?:淘宝|拼多多|闲鱼|小红书|多多).{0,8}虚拟(?:项目|资料|产品|电商|类目)|(?:卖|售卖|销售).{0,5}(?:虚拟资料|考研资料|性格测试报告)|(?:性格测试|mbti|考研)资料.{0,8}(?:虚拟|售卖|成交)'),
     ('media','短视频制作',13,r'(?:短视频|ai视频)(?:自动化|制作|拍摄|剪辑|生产|创作)(?:实战|课程|教程|sop|全流程|课)?|广告剧情片|数字人(?:实操课|制作教学|口播制作)'),
+    ('media','短视频制作',13,r'(?:百家号|视频号|头条)视频.{0,5}(?:搬砖|分成|广告收益|发布变现)'),
     ('media','影视解说',13,r'(?:汽车|影视|电影|纪录片|人物志|动漫|体育)解说'),
     ('media','录音与配音',11,r'配音教程|有声书配音|播客制作|古风.{0,8}(?:mv|翻唱)|音乐(?:创作|制作)'),
     ('automation','智能体',14,r'(?:workbuddy|openclaw|扣子|coze|dify|智能体)\s*(?:ai\s*)?(?:系统课|系统应用|(?:智能体)?高阶玩法|技能(?:创建|搭建)|自动化实战课)|飞书自动化实战课|^自动化实战课|ai技能.{0,6}skill'),
@@ -112,6 +115,7 @@ _TITLE_NOISE = re.compile(r'(?:无需|不用|不需要|不必|免去)(?:再)?(?:
 _TAGS = re.compile(r'^(?:课程内容|课程|项目|内容|软件|公开)?(?:介绍|简介)(?:[:：\s]|$)')
 _EDITION_PREFIX = re.compile(r'^\s*(?:(?:\(\d{4,7}期\)|【(?:无水印|原创双语字幕|独家)】)\s*)+')
 _ENTRY_FORMAT = re.compile(r'^(?:(?:某|微信)?公众号)?(?:付费文章|课程介绍|项目简介)\s*[:：]\s*')
+_INVISIBLE_FORMAT = re.compile(r'[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]')
 _LEAD_END = re.compile(r'[:|;。!?,，；：—]|\s-\s')
 _TRAINING = re.compile(r'大课|课程|系统课|必修课|线下课|操盘课|教程|教学|特训营|训练营|实训(?:课|营)?|\d{1,3}\s*(?:讲|节课)|手把手|教你|从零.{0,7}(?:学|入门)|新手.{0,4}(?:上手|做)|实战(?:课|方法|经验|进阶)|(?:直播|操作).{0,10}拆解|玩法|实操')
 _NEWS_BRIEF = re.compile(r'新闻(?:早讯|早报|晚报|简报|快讯)|每日(?:早报|晚报|快讯)|60\s*(?:秒|s)\s*读懂世界|(?:国际|热点)新闻简报',re.I)
@@ -148,7 +152,8 @@ _FROM_LEGACY = {
 
 
 def title_text(title):
-    return _ENTRY_FORMAT.sub('', _EDITION_PREFIX.sub('', normalize('NFKC', title))).strip()
+    text = _INVISIBLE_FORMAT.sub('',normalize('NFKC', title))
+    return _ENTRY_FORMAT.sub('', _EDITION_PREFIX.sub('', text)).strip()
 
 
 def introduction_text(title, paragraphs, excerpt):
@@ -218,7 +223,7 @@ def intro_preview(title, paragraphs, excerpt, limit=410):
     return ' '.join(parts)[:limit]
 
 
-def project_topic(title, paragraphs, excerpt, reviewed=None, *, manual=False):
+def project_topic(title, paragraphs, excerpt, reviewed=None, *, manual=False, source_checked=False):
     reviewed=reviewed or {}
     previous=reviewed.get('category','')
     previous_sub=reviewed.get('subcategory','')
@@ -264,7 +269,14 @@ def project_topic(title, paragraphs, excerpt, reviewed=None, *, manual=False):
             return previous, previous_sub
         if category not in _FROM_LEGACY.get(previous,()) or weight<8:
             return previous, previous_sub
-    return (category, sub) if weight >= 7 else ('','')
+    if weight >= 7 and sub != '综合副业':
+        return category, sub
+    refined = refined_topic(text, intro)
+    if refined[0]:
+        return refined
+    if weight >= 7:
+        return category, sub
+    return reference_topic(_INVISIBLE_FORMAT.sub('',normalize('NFKC',title)),intro) if source_checked else ('','')
 
 
 def displayed_secondary_topic(category, reviewed, *, manual=False):

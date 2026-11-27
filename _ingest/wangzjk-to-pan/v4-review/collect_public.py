@@ -5,6 +5,7 @@ import argparse
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+from itertools import batched
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,8 @@ MAX_DETAIL_BYTES = 24 * 1024 * 1024
 MAX_DETAIL_ITEMS = 400
 MODIFIED_OVERLAP = timedelta(minutes=20)
 MAX_MODIFIED_PAGES = 3
+TARGET_DETAIL_PAGE_SIZE = 60
+MAX_TARGET_DETAILS = 12_000
 DELAY = 2.65
 POST_FIELDS = 'id,link,date,modified,status,title,excerpt,featured_media,_links,_embedded'
 DETAIL_FIELDS = 'id,link,date,modified,status,title,content,excerpt,featured_media'
@@ -219,9 +222,9 @@ def collector_lock(path):
         yield
 
 
-def detail_candidates(state, attempts, legacy, clock, seed=()):
+def detail_candidates(state, attempts, legacy, clock, seed=(), *, only_seed=False):
     articles = state['articles']
-    order = sorted(articles, key=lambda key:(
+    order = () if only_seed else sorted(articles, key=lambda key:(
         articles[key].get('publisher_modified') or articles[key].get('publisher_published') or articles[key]['published_at'],
         articles[key]['published_at'], int(key)), reverse=True)
     for key in dict.fromkeys([*seed, *order]):
@@ -266,6 +269,46 @@ def capture_projection(payload, key, timestamp, source, checksum):
                        include_intro=True)
     except (ValueError,etree.LxmlError):
         return {'state':'unavailable','observed_at':timestamp}
+
+
+def selected_details(client, keys):
+    """Read a bounded collection of requested public articles through normal pagination."""
+    if len(keys) == 1:
+        key, = keys
+        try:
+            payload, _, source, checksum = client.get('/'+key, _fields=DETAIL_FIELDS)
+        except PublicReadError as exc:
+            if exc.status in (404, 410):
+                yield key, None, None, None
+                return
+            raise
+        yield key, payload, source, checksum
+        return
+    try:
+        rows, headers, source, checksum = client.get(
+            include=','.join(keys), per_page=len(keys), orderby='include',
+            status='publish', _fields=DETAIL_FIELDS)
+    except PublicReadError as exc:
+        if exc.reason != 'publisher_response_too_large':
+            raise
+        middle = len(keys) // 2
+        yield from selected_details(client, keys[:middle])
+        yield from selected_details(client, keys[middle:])
+        return
+    if not isinstance(rows, list) or headers.get('X-WP-Total') != str(len(rows)):
+        raise PublicReadError('publisher_detail_collection_unverified')
+    mapped = {}
+    requested = set(keys)
+    for row in rows:
+        key = str(row.get('id')) if isinstance(row, dict) else ''
+        if key not in requested or key in mapped:
+            raise PublicReadError('publisher_detail_collection_mismatch')
+        mapped[key] = row
+    for key in keys:
+        if key in mapped:
+            yield key, mapped[key], source, checksum
+        else:
+            yield from selected_details(client, (key,))
 
 
 def modified_discovery(client, state, timestamp, start, upper, page_limit):
@@ -316,7 +359,7 @@ def modified_discovery(client, state, timestamp, start, upper, page_limit):
     return changed
 
 
-def collect(path, max_pages, max_details, seed, *, intro_db=None):
+def collect(path, max_pages, max_details, seed, *, intro_db=None, only_seed=False):
     state = load(path)
     if state['official_site_hold']:
         return {'state':'publisher_access_restricted','resumable':True}
@@ -404,38 +447,34 @@ def collect(path, max_pages, max_details, seed, *, intro_db=None):
         legacy = existing_details(path, state)
         attempts = read_attempts(intro_db, SITE)
         display_bytes = sum(len(compact(detail)) + 40 for detail in state['details'].values())
-        for _, key in zip(range(max_details), detail_candidates(state, attempts, legacy, clock, changed)):
+        def accept_detail(key, payload, source, checksum):
+            nonlocal details_added, introductions_saved, intro_failures, display_bytes
             modified = state['articles'][key].get('publisher_modified')
-            try:
-                payload, _, source, checksum = client.get('/'+key,_fields=DETAIL_FIELDS)
-            except PublicReadError as exc:
-                if exc.status in (404, 410):
-                    record_attempt(intro_db, SITE, key, modified, timestamp, 'source_missing')
-                    continue
-                if exc.reason == 'publisher_http_error' or exc.reason in {
-                    'publisher_response_too_large', 'publisher_response_not_readable'
-                }:
-                    record_attempt(intro_db, SITE, key, modified, timestamp, 'failed')
-                    intro_failures += 1
-                    continue
-                raise
+            if payload is None:
+                record_attempt(intro_db, SITE, key, modified, timestamp, 'source_missing')
+                return
             parsed = capture_projection(payload, key, timestamp, source, checksum)
             intro = parsed.pop('introduction', None)
             if intro is None:
                 result = 'restricted' if parsed['state'] == 'restricted' else 'failed'
                 record_attempt(intro_db, SITE, key, modified, timestamp, result)
                 intro_failures += result == 'failed'
-                continue
+                return
             metadata = normalize(payload)
             current = metadata.get('publisher_modified') if metadata else None
             if (not metadata or current != intro['publisher_modified']
                     or (modified and (not current or current < modified))):
                 record_attempt(intro_db, SITE, key, modified, timestamp, 'failed')
                 intro_failures += 1
-                continue
+                return
             merge_article(state['articles'], metadata, timestamp, preserve_cover=True)
+            if not intro['clean_text'] and intro['coverage'] != 'image_only':
+                result = 'restricted' if parsed['state'] == 'restricted' else 'failed'
+                record_attempt(intro_db, SITE, key, current, timestamp, result)
+                intro_failures += result == 'failed'
+                return
             record_attempt(intro_db, SITE, key, current, timestamp, 'saved', intro)
-            introductions_saved += 1
+            introductions_saved += bool(intro['clean_text'])
             if parsed['state'] == 'public_sample':
                 parsed['collector'] = 'codex'
                 previous = state['details'].get(key)
@@ -444,6 +483,28 @@ def collect(path, max_pages, max_details, seed, *, intro_db=None):
                     state['details'][key] = parsed
                     display_bytes += delta
                     details_added += int(previous is None)
+        chosen = (key for _, key in zip(
+            range(max_details), detail_candidates(state, attempts, legacy, clock, changed, only_seed=only_seed)))
+        if only_seed:
+            for number, group in enumerate(batched(chosen,TARGET_DETAIL_PAGE_SIZE),1):
+                for args in selected_details(client, group):
+                    accept_detail(*args)
+                if number % 6 == 0:
+                    status()
+        else:
+            for key in chosen:
+                try:
+                    for args in selected_details(client,(key,)):
+                        accept_detail(*args)
+                except PublicReadError as exc:
+                    if exc.reason == 'publisher_http_error' or exc.reason in {
+                        'publisher_response_too_large', 'publisher_response_not_readable'
+                    }:
+                        modified = state['articles'][key].get('publisher_modified')
+                        record_attempt(intro_db, SITE, key, modified, timestamp, 'failed')
+                        intro_failures += 1
+                    else:
+                        raise
         return status()
     except PublicReadError as exc:
         state['official_site_hold'] = exc.reason == 'official_publisher_gate'
@@ -456,11 +517,22 @@ def main():
     parser.add_argument('--pages', type=int, default=12)
     parser.add_argument('--details', type=int, default=4)
     parser.add_argument('--seed-detail', action='append', default=[])
+    parser.add_argument('--detail-list',type=Path,help='仅补采项目内清单指定的来源文章，一行一个文章号')
     args = parser.parse_args()
-    if not 0 <= args.pages <= 160 or not 0 <= args.details <= 20 or not all(ART.fullmatch(value) for value in args.seed_detail):
+    maximum = MAX_TARGET_DETAILS if args.detail_list else 20
+    if not 0 <= args.pages <= 160 or not 0 <= args.details <= maximum or not all(ART.fullmatch(value) for value in args.seed_detail):
         parser.error('batch out of bounds')
+    seeds = args.seed_detail
+    if args.detail_list:
+        path = args.detail_list.absolute()
+        if (args.pages or seeds or path.resolve() != path or not path.is_relative_to(ROOT.parents[2])
+                or not path.is_file() or path.stat().st_size > MAX_TARGET_DETAILS * 20):
+            parser.error('targeted collection needs a local article list and --pages 0')
+        seeds = [line.strip() for line in path.read_text(encoding='utf-8-sig').splitlines() if line.strip()]
+        if not seeds or len(seeds) > MAX_TARGET_DETAILS or any(not ART.fullmatch(value) for value in seeds):
+            parser.error('invalid article list')
     with collector_lock(STATE):
-        result = collect(STATE,args.pages,args.details,args.seed_detail)
+        result = collect(STATE,args.pages,args.details,seeds,only_seed=bool(args.detail_list))
     print(json.dumps(result,ensure_ascii=True))
     return 0 if result['state']=='updated' else 2
 

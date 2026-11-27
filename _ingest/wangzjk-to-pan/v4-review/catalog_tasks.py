@@ -5,10 +5,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from catalog_model import ROOT, SEMANTIC_DB, catalog_input_stamp, open_index
+from catalog_model import ROOT, SEMANTIC_DB, SITE, catalog_input_stamp, open_index
 from catalog_relations import candidate_pairs, article_identity
 from pipeline_control import RunStore
-from catalog_semantics import CatalogStore, MAX_TASKS, encode, parse_jsonl, relationship_input, usable
+from catalog_semantics import CatalogStore, MAX_TASKS, atomic_jsonl, encode, parse_jsonl, relationship_input, usable
 from catalog_topics import CATEGORIES, NO_TOPIC
 
 
@@ -62,6 +62,7 @@ def parser():
     audit=commands.add_parser('audit-topics',help='核对资源库分类计数和抽样')
     audit.add_argument('--category', choices=[*CATEGORIES,NO_TOPIC])
     audit.add_argument('--sample',type=int,default=0)
+    audit.add_argument('--queue-output',type=catalog_path,help='导出待补原站正文的文章号')
     export=commands.add_parser('export')
     export.add_argument('--kind',choices=['classification','relation'],default='classification')
     export.add_argument('--article',action='append',default=[])
@@ -132,7 +133,16 @@ def main():
             print(encode({**status,'presentation':library.relations.stats(),
                           'legacy_shared_articles':library.article_count-len(library.by_id)}))
         elif args.action=='audit-topics':
-            print(encode(audit_topics(library,args.category,args.sample)))
+            report=audit_topics(library,args.category,args.sample)
+            if args.queue_output:
+                if args.category not in (None,NO_TOPIC):
+                    raise ValueError('原站补采清单仅适用于缺少分类的资料')
+                pending=[row for row in library.semantic_rows.values() if row['site_id']==SITE
+                         and not row['category'] and row['coverage']!='complete']
+                pending.sort(key=lambda row:(len(row['excerpt']),row['article_id']))
+                atomic_jsonl(args.queue_output,(int(row['article_id']) for row in pending))
+                report['queued_for_public_read']=len(pending)
+            print(encode(report))
         elif args.action=='export':
             if args.kind=='classification':
                 explicit=named_inputs(library,args.article)
