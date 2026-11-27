@@ -543,7 +543,20 @@ class Store:
             wanted_jobs = {job["job_id"] for _,job,_ in prepared}
             # Exact multi-input set reuse: never rerun OCR/render just because
             # nonsemantic elapsed/usage metadata would differ on another run.
-            for previous in self.connection.execute("SELECT bundle_id FROM publications WHERE project_id=? AND state='published' ORDER BY revision DESC",(project_id,)).fetchall():
+            # Project only identity sets in SQLite, not unrelated full Bundle graphs.
+            # Keep asset keys as pairs: colon-joined IDs can collide.
+            for previous in self.connection.execute("""
+                SELECT bundle_id,
+                  (SELECT json_group_array(DISTINCT json_array(
+                    json_extract(value,'$.asset_id'),json_extract(value,'$.asset_revision')))
+                   FROM json_each(publications.bundle_json,'$.assets')) AS asset_keys,
+                  (SELECT json_group_array(DISTINCT json_extract(value,'$.job_id'))
+                   FROM json_each(publications.bundle_json,'$.artifacts')) AS job_ids
+                FROM publications WHERE project_id=? AND state='published' ORDER BY revision DESC
+                """,(project_id,)).fetchall():
+                if {tuple(a) for a in json.loads(previous["asset_keys"])} != wanted_assets or set(json.loads(previous["job_ids"])) != wanted_jobs:
+                    continue
+                # A matching projection is only a prefilter; retain full verification.
                 candidate = self.get_bundle(project_id,previous["bundle_id"])
                 if {asset_key(a) for a in candidate["assets"]} == wanted_assets and {a["job_id"] for a in candidate["artifacts"]} == wanted_jobs:
                     return candidate

@@ -1,4 +1,5 @@
 """Validate the editor's source review and publish the approved reading copy."""
+from datetime import datetime, timezone
 import hashlib
 from html import unescape
 import json
@@ -7,10 +8,13 @@ import re
 from urllib.parse import unquote
 
 from embedded_media import DIRECTORY as EMBEDDED_MEDIA_DIR
+from independent_facts import load_independent_receipt, validate_independent_receipt
 from project import ENTRY, RECOVERY_DIR, copy_file, local_child, put, read, recovery_files, sha, write
 from reader_review import IMAGE, ITEMS, chapters, markdown_segments, snapshot, validate_cases
 from publish import timecode
-from source_coverage import NON_TEACHING, build_source_manifest, coverage_review_template, fingerprint as source_scope_digest
+from scope_review import (DECLARATION, SCHEMA as SCOPE_REVIEW_SCHEMA, SCOPE_FIELDS, document_teaching_candidates,
+                          publication_scope, validate_scope_review)
+from source_coverage import CLAIMS_VERSION, NON_TEACHING, build_source_manifest, coverage_review_template, fingerprint as source_scope_digest
 from source_coverage import validate_source_coverage
 from transcript import timeline_paths, update_timeline, validate_proof
 
@@ -45,7 +49,7 @@ def source_ranges(section, display_number):
             if int(number) == display_number and right and timecode(left) < timecode(right)]
 
 
-def prepare_review(project, body, ordered, receipt):
+def prepare_review(project, body, ordered, receipt, *, scope_declaration=None):
     sections = chapters(body)
     if not sections:
         raise ValueError("教材需要二级标题，以便定位原课和跟做案例")
@@ -114,9 +118,19 @@ def prepare_review(project, body, ordered, receipt):
         if name in evidence and evidence[name] != digest:
             raise ValueError(f"生成来源复核清单时证据已变动 {name}")
     evidence.update(coverage_evidence)
+    declared = {}
+    if scope_declaration is not None:
+        if evidence_from(project.work / DECLARATION) != scope_declaration:
+            raise ValueError("范围验收声明在预览期间已变更，请重新预览")
+        declared = {"scope_review_schema": SCOPE_REVIEW_SCHEMA,
+                    **{field: scope_declaration[field] for field in ("scope_status", "scope_gaps", "scope_teaching")},
+                    "scope_resolutions": scope_declaration.get("scope_resolutions", []),
+                    "scope_prior": previous_scope_context(project, body, evidence_from),
+                    "scope_document_candidates": document_teaching_candidates(project)}
     return {
         "schema": 2, "snapshot": {**snapshot(project.preview, body), "evidence": evidence,
                                   "source_scope_sha256": source_scope_digest(source_scope)},
+        **declared,
         "source_scope": source_scope,
         "source_coverage": coverage_review_template(source_scope, body),
         "episodes": episodes,
@@ -382,6 +396,13 @@ def validate_review(body, figures, review, template):
         if review.get("source_scope") != template["source_scope"]:
             raise ValueError("验收记录的来源范围与当前原件清单不一致，请从预览模板更新")
         validate_source_coverage(body, template["source_scope"], review)
+    validate_scope_against_template(body, review, template)
+
+
+def validate_scope_against_template(body, review, template):
+    if any(field not in template or field not in review or review[field] != template[field] for field in SCOPE_FIELDS):
+        raise ValueError(f"范围验收与当前已收到原件及预览不一致，请填写 {DECLARATION} 后重新预览")
+    validate_scope_review(body, review)
 
 
 def check_render(render, digest):
@@ -406,6 +427,30 @@ def publication_receipt(project):
     return record
 
 
+def previous_scope_context(project, body, evidence_from):
+    """Preserve the last signed known gaps, including deterministic same-edition retry."""
+    if not project.entry.is_file():
+        return None
+    record = publication_receipt(project)
+    prior = publication_scope(record)
+    previous_sha = sha(project.entry)
+    if hashlib.sha256(record["body"].encode("utf-8")).hexdigest() != previous_sha:
+        raise ValueError("上次出版正文和签收回执不一致，不能据此改变已知缺件")
+    if previous_sha == hashlib.sha256(body.encode("utf-8")).hexdigest():
+        previous = record["review"].get("scope_prior")
+    elif prior["scope_gaps"]:
+        previous = {"publication_sha256": previous_sha, "gaps": prior["scope_gaps"]}
+    else:
+        previous = None
+    if previous:
+        signed = evidence_from(local_child(project.ledger, f"publications/{previous['publication_sha256']}.json"))
+        if (signed["outputs"].get(ENTRY.as_posix()) != previous["publication_sha256"]
+                or hashlib.sha256(signed["body"].encode("utf-8")).hexdigest() != previous["publication_sha256"]
+                or publication_scope(signed)["scope_gaps"] != previous["gaps"]):
+            raise ValueError("上次已签收的缺件范围回执不一致")
+    return previous
+
+
 def verify_publication(project, *, raw_verified=False):
     from media_inventory import verify_course_media
 
@@ -428,22 +473,35 @@ def verify_publication(project, *, raw_verified=False):
             or snapshot(project.folder, entry.read_text(encoding="utf-8"))["images"] != inputs["images"]):
         raise ValueError("原件、配图或正文和已审核版本不一致")
     for relative, fingerprint in inputs["evidence"].items():
-        if relative.startswith((f"work/{RECOVERY_DIR}/", f"work/{EMBEDDED_MEDIA_DIR}/")):
+        if relative.startswith((f"work/{RECOVERY_DIR}/", f"work/{EMBEDDED_MEDIA_DIR}/", "ledger/publications/")):
             if sha(local_child(project.state, relative)) != fingerprint:
-                raise ValueError(f"验收使用的媒体资料已变动 {relative}")
+                raise ValueError(f"验收使用的媒体资料或上次范围回执已变动 {relative}")
+    edition_scope = publication_scope(record)
     if review.get("schema") == 2:
         scope = review.get("source_scope")
         if (not scope or inputs.get("source_scope_sha256") != source_scope_digest(scope)
                 or scope.get("intake_sha256") != inputs["evidence"]["ledger/intake.json"]):
             raise ValueError("已发布版本的来源覆盖清单与验收回执不一致")
-        validate_source_coverage(record["body"], scope, review)
+        # Historical receipts may be checked against their original, hash-bound note.
+        # Preview/review never uses this compatibility path for a new publication.
+        validate_source_coverage(record["body"], scope, review, allow_legacy=True)
+        if edition_scope["scope_status"] is not None:
+            validate_scope_review(record["body"], review)
+        elif review["source_coverage"].get("claims_version") == CLAIMS_VERSION:
+            validate_independent_receipt(record["body"], review, review.get("independent_fact_review"))
     check_render(record["obsidian"], digest)
     return record
 
 
 def commit(project, body, figures, review, render):
-    if review.get("schema") != 2 or not review.get("source_scope") or not review.get("source_coverage"):
+    coverage = review.get("source_coverage")
+    if (review.get("schema") != 2 or not review.get("source_scope") or not isinstance(coverage, dict)
+            or coverage.get("claims_version") != CLAIMS_VERSION):
         raise ValueError("新发布版本需要当前来源覆盖复核")
+    validate_source_coverage(body, review["source_scope"], review)
+    validate_scope_review(body, review)
+    if load_independent_receipt(body, review) != review.get("independent_fact_review"):
+        raise ValueError("发布前独立事实核验回执已变更，请重新读取测试 agent 的验收结果")
     digest = sha(project.preview / ENTRY)
     check_render(render, digest)
     if project.entry.exists():
@@ -458,7 +516,16 @@ def commit(project, body, figures, review, render):
     for relative, image_sha in files.items():
         copy_file(local_child(project.preview, relative), local_child(project.folder, relative), image_sha)
     record = {"schema": 1, "body": body, "outputs": {ENTRY.as_posix(): digest, **files},
+              "scope_status": review["scope_status"], "scope_gaps": review["scope_gaps"],
+              "scope_resolutions": review["scope_resolutions"],
               "review": review, "obsidian": render}
-    put(local_child(project.ledger, f"publications/{digest}.json"), record)
+    receipt = local_child(project.ledger, f"publications/{digest}.json")
+    if receipt.is_file():
+        previous = read(receipt)
+        if previous.get("analysis_completed_at"):
+            record["analysis_completed_at"] = previous["analysis_completed_at"]
+    else:
+        record["analysis_completed_at"] = datetime.now(timezone.utc).isoformat()
+    put(receipt, record)
     # Replacing the note is the commit point. Earlier notes keep their images and receipts.
     write(project.entry, body)

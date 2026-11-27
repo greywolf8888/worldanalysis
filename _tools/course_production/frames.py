@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from itertools import groupby
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 from pathlib import Path, PurePosixPath
@@ -14,6 +15,39 @@ from prepare import stamp
 from project import local_child, media_source, put, read, sha
 import av
 from PIL import Image, ImageChops, ImageDraw
+
+
+NEARBY_MAX_GAP = .5
+NEARBY_MAX_SPAN = 2.0
+NEARBY_MAX_REQUESTS = 8
+NEARBY_RGB_BUDGET = 64 * 1024 * 1024
+
+
+def nearby_requests(items, time_of):
+    """Bound the number and time span of frames retained for one exact decode."""
+    def emit(group):
+        # A fresh anchor probe costs as much as an independent seek on short pairs.
+        if len(group) == 2 and time_of(group[0]) != time_of(group[1]):
+            for item in group:
+                yield [item]
+        else:
+            yield group
+
+    group = []
+    for item in items:
+        when = time_of(item)
+        try:
+            nearby = (group and len(group) < NEARBY_MAX_REQUESTS and math.isfinite(when)
+                      and 0 <= when - time_of(group[-1]) <= NEARBY_MAX_GAP
+                      and when - time_of(group[0]) <= NEARBY_MAX_SPAN)
+        except (TypeError, ValueError):
+            nearby = False
+        if group and not nearby:
+            yield from emit(group)
+            group = []
+        group.append(item)
+    if group:
+        yield from emit(group)
 
 
 def get_native_frame(path, seconds, origin=0):
@@ -35,15 +69,113 @@ def get_native_frame(path, seconds, origin=0):
     raise ValueError(f"原片在该时间后没有画面 {path.name} {seconds}")
 
 
-def orig(path, number, seconds, *, ledger):
+def seek_anchor(path, seconds, origin):
+    # A fresh probe mirrors the independent seek. The exact first video packet must agree
+    # before pictures can reuse that decoder, including around GOP boundaries and VFR.
+    with av.open(str(path), options={"protocol_whitelist": "file,pipe"}) as container:
+        video = container.streams.video[0]
+        container.seek(int((seconds + origin) / video.time_base), stream=video, backward=True)
+        packet = next(container.demux(video), None)
+        if (packet is not None and packet.is_keyframe and packet.pos is not None
+                and packet.pos >= 0 and packet.size > 0 and (packet.pts is not None or packet.dts is not None)):
+            return packet.pos, packet.pts, packet.dts, packet.size
+    return None
+
+
+def decode_shared_anchor(path, times, origin):
+    """Select exactly the same presentation frame (including the last-frame tail rule)."""
+    results = []
+    with av.open(str(path), options={"protocol_whitelist": "file,pipe"}) as container:
+        video = container.streams.video[0]
+        if len(times) * video.width * video.height * 3 > NEARBY_RGB_BUDGET:
+            return None
+        container.seek(int((times[0] + origin) / video.time_base), stream=video, backward=True)
+        last = None
+        for frame in container.decode(video):
+            if frame.time is None:
+                continue
+            last = frame
+            pts = frame.time - origin
+            while len(results) < len(times) and pts >= times[len(results)] - 1e-6:
+                results.append((frame.to_image(), round(pts, 6)))
+            if len(results) == len(times):
+                return results
+        if last is not None:
+            pts = last.time - origin
+            present_until = pts + float((last.duration or 0) * last.time_base)
+            while len(results) < len(times) and times[len(results)] < present_until + 1e-6:
+                results.append((last.to_image(), round(pts, 6)))
+    return results if len(results) == len(times) else None
+
+
+def get_native_frames(path, times, origin=0):
+    """Reuse exact native pixels only when fresh independent seeks identify the same packet."""
+    path = Path(path)
+    def file_identity():
+        info = path.stat()
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+    for group in nearby_requests(times, lambda when: when):
+        if len(group) == 1:
+            yield get_native_frame(path, group[0], origin)
+            continue
+        identity = file_identity()
+        if all(when == group[0] for when in group):
+            image, pts = get_native_frame(path, group[0], origin)
+            if file_identity() != identity:
+                raise ValueError(f"批量取图期间原片发生变化 {path.name}")
+            for _ in group:
+                yield image.copy(), pts
+            continue
+        try:
+            anchors = [(seek_anchor(path, when, origin), when) for when in group]
+        except (av.error.FFmpegError, OSError, ValueError, TypeError, OverflowError, IndexError):
+            anchors = [(None, when) for when in group]
+        for anchor, selected in groupby(anchors, key=lambda row: row[0]):
+            requested = [when for _, when in selected]
+            frames = None
+            if anchor is not None and len(requested) > 1:
+                try:
+                    frames = decode_shared_anchor(path, requested, origin)
+                except (av.error.FFmpegError, OSError, ValueError, TypeError, OverflowError, IndexError):
+                    pass
+            if file_identity() != identity:
+                raise ValueError(f"批量取图期间原片发生变化 {path.name}")
+            if frames is None:
+                for when in requested:
+                    yield get_native_frame(path, when, origin)
+            else:
+                yield from frames
+
+
+def orig_many(path, number, times, *, ledger):
     doc = read(ledger / f"{number:02}.json")
     if doc.get("kind") == "audio":
         raise ValueError(f"第 {number} 讲是独立音频，没有原视频帧")
     src = media_source(path / "原始资料", ledger.parent / "work", doc)
-    if not 0 <= seconds < doc["duration_s"]:
+    times = list(times)
+    if any(not 0 <= seconds < doc["duration_s"] for seconds in times):
         raise ValueError(f"取图时间超出第 {number} 讲")
-    img, pts = get_native_frame(src, seconds, doc.get("timeline_origin_s", 0))
-    return doc["source"], img, pts
+    for img, pts in get_native_frames(src, times, doc.get("timeline_origin_s", 0)):
+        yield doc["source"], img, pts
+
+
+def orig(path, number, seconds, *, ledger):
+    return next(orig_many(path, number, [seconds], ledger=ledger))
+
+
+def native_picks(path, entries, ledger):
+    def lesson(entry):
+        return None if "diagram" in entry or "document" in entry else entry["lesson"]
+
+    for number, rows in groupby(entries, key=lesson):
+        group = list(rows)
+        if number is None:
+            for row in group:
+                yield row, None
+        else:
+            for row, frame in zip(group, orig_many(path, number, [row["time"] for row in group], ledger=ledger)):
+                yield row, frame
 
 
 def slide_picture(filename,page):
@@ -218,7 +350,7 @@ def keep(path, entries, append=False, *, ledger, output_root):
     rows=read(manifest) if append and manifest.is_file() else []
     known={entry["name"]:entry for entry in rows}
     staged=[]
-    for entry in entries:
+    for entry, native in native_picks(path, entries, ledger):
         stem=entry["name"]
         if Path(stem).name!=stem or not stem.strip() or stem in (".", "..") or re.search(r'[\\/:*?"<>|\[\]{}]', stem):
             raise ValueError("图片名需要是普通文件名，且能作为 Markdown 图片标题")
@@ -242,7 +374,7 @@ def keep(path, entries, append=False, *, ledger, output_root):
                 locator["full_slide"] = True
         else:
             lesson=entry["lesson"]
-            src,img,pts=orig(path,lesson,entry["time"],ledger=ledger)
+            src,img,pts=native
             locator={"lesson":lesson,"pts":pts}
         box=entry.get("crop",[0,0,*img.size])
         x,y,right,bottom=box

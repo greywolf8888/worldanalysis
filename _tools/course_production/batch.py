@@ -1,5 +1,6 @@
 """Run the single-course workflow against a durable, ordered batch of source folders."""
 from collections import Counter
+from contextlib import nullcontext
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -15,7 +16,13 @@ PENDING = "待处理"
 ACTIVE = "处理中"
 DEFERRED = "待补原件"
 COMPLETE = "已验收"
+SUPPLEMENT_PENDING = "已验收（配套待补）"
+CORE_PENDING = "已分析（核心待补）"
+REUSED = "同源复用"
+ARCHIVED = "留档"
 HISTORICAL = "历史验收待复验"
+PUBLISHED = {COMPLETE, SUPPLEMENT_PENDING, CORE_PENDING}
+SCOPE_STATE = {"完整验收": COMPLETE, "配套待补": SUPPLEMENT_PENDING, "核心待补": CORE_PENDING}
 LEGACY_QUEUE = "原件队列.json"
 LEGACY_CURRENT = "当前续作.json"
 
@@ -156,7 +163,8 @@ def find_duplicates(queue, row, identity):
     matches = []
     sizes = size_key(row)
     for other in queue["projects"]:
-        if other["id"] == row["id"] or size_key(other) != sizes:
+        if (other["id"] == row["id"] or other.get("same_source_primary") == row["sequence"]
+                or size_key(other) != sizes):
             continue
         try:
             _, _, current = identify(queue, other)
@@ -218,6 +226,7 @@ def verify_identity(project, source, originals, row):
 
 def current_delivery(queue, project, folder, legacy_sha256=None):
     from acceptance import verify_publication
+    from scope_review import publication_scope
     from vault_delivery import delivery, delivery_status
 
     publication = verify_publication(project, raw_verified=True)
@@ -236,16 +245,56 @@ def current_delivery(queue, project, folder, legacy_sha256=None):
             or observed.get("visible_citations") is not False):
         raise ValueError(f"日常库当前版本缺同入口重开记录 {expected}")
     verified = delivery_status(project, publication, required=True)
-    return {key: verified[key] for key in ("entry", "uri", "sha256", "method")}
+    result = {key: verified[key] for key in ("entry", "uri", "sha256", "method")}
+    scope = publication_scope(publication)
+    if scope["scope_status"] is None:
+        if state["sha256"] != legacy_sha256:
+            raise ValueError("新验收版次缺明确范围签收状态，须按当前流程复核")
+        result["legacy_scope_unclassified"] = True
+        return result
+    if scope["scope_status"] not in SCOPE_STATE:
+        raise ValueError("发布回执中存在未支持的验收范围状态")
+    return {**result, **scope}
+
+
+def eligible_pending(row):
+    return (row["status"] == PENDING and not row.get("same_source_primary")
+            and (not row.get("arrival_at") or bool(row.get("ready_at"))))
+
+
+def review_priority(row):
+    review = row.get("re_review") or {}
+    return review.get("priority_rank") if review.get("state") == "待复审" else None
 
 
 def next_row(queue):
     rows = queue["projects"]
-    return next((row for row in rows if row["status"] == ACTIVE), None) or min(
-        (row for row in rows if row["status"] == PENDING), key=lambda row: natural(row["name"]), default=None)
+    active = next((row for row in rows if row["status"] == ACTIVE), None)
+    if active is not None:
+        return active
+    pending = [row for row in rows if eligible_pending(row)]
+    priority = [row for row in pending if review_priority(row) is not None]
+    if priority:
+        return min(priority, key=review_priority)
+    arrivals = [row for row in pending if row.get("arrival_at")]
+    if arrivals:
+        newest = max(row["arrival_at"] for row in arrivals)
+        return min((row for row in arrivals if row["arrival_at"] == newest),
+                   key=lambda row: natural(row["name"]))
+    return min(pending, key=lambda row: natural(row["name"]), default=None)
 
 
-def require_turn(queue, row):
+def require_turn(queue, row, user_order_reason=None):
+    if user_order_reason is not None:
+        if not user_order_reason.strip():
+            raise ValueError("指定顺序须提供用户明确要求的具体依据")
+        active = next((item for item in queue["projects"] if item["status"] == ACTIVE
+                       and item["id"] != row["id"]), None)
+        if active:
+            raise ValueError(f"第 {active['sequence']} 项仍在处理，不可按用户指定顺序提前领取")
+        if row["status"] != ACTIVE and not eligible_pending(row):
+            raise ValueError(f"第 {row['sequence']} 项尚未就绪或不是待处理项目")
+        return
     current = next_row(queue)
     if current is None or current["id"] != row["id"]:
         suffix = f"。当前应处理第 {current['sequence']} 项" if current else ""
@@ -255,7 +304,11 @@ def require_turn(queue, row):
 def preserve(row):
     prior = {k: row[k] for k in ("status", "reason", "package", "course_folder", "source_sha256",
                                "content_sha256", "publication", "package_ready", "last_changed",
-                               "supplemented_origin", "supplemented_sha256", "supplement_reason") if k in row}
+                               "supplemented_origin", "supplemented_sha256", "supplement_reason",
+                               "user_order_reason", "user_order_at", "scope_status", "scope_gaps", "scope_resolutions",
+                               "re_review", "reuse_target", "same_source_primary", "archive_evidence",
+                               "alias_recheck", "requires_alias_resolution", "alias_previous_publication_sha256",
+                               "disposition_evidence") if k in row}
     row.setdefault("history", []).append({**prior, "metadata_sha256": digest(row["metadata"])})
 
 
@@ -267,8 +320,46 @@ def change(row, status, **fields):
     row.update(status=status, last_changed=timestamp(), **fields)
 
 
-def claim(queue, row, package, folder=None, separate=None):
-    require_turn(queue, row)
+def close_re_review(row, outcome):
+    if row.get("re_review", {}).get("state") in ("待复审", "后续补件待复审"):
+        return {"re_review": {**row["re_review"], "state": outcome, "reviewed_at": timestamp()}}
+    return {}
+
+
+def synchronize_aliases(queue, row):
+    """A confirmed same-source dependent shares its primary edition, never writes a second note."""
+    for alias in queue["projects"]:
+        if alias.get("same_source_primary") != row["sequence"]:
+            continue
+        if alias.get("requires_alias_resolution"):
+            continue
+        if row["status"] not in PUBLISHED:
+            if alias.get("re_review", {}).get("state") == "关联待复审":
+                change(alias, DEFERRED, re_review={**alias["re_review"], "state": "共同待补",
+                                                    "reviewed_at": timestamp()})
+            continue
+        try:
+            _, _, identity = identify(queue, alias)
+        except (OSError, ValueError) as error:
+            alias["alias_recheck"] = str(error)
+            alias["requires_alias_resolution"] = True
+            alias["alias_previous_publication_sha256"] = (alias.get("publication") or {}).get("sha256")
+            continue
+        publication = row["publication"]
+        review = alias.get("re_review", {})
+        fields = {"re_review": {**review, "state": "同源已复审", "reviewed_at": timestamp()}} if (
+            review.get("state") == "关联待复审") else {}
+        alias.pop("alias_recheck", None)
+        change(alias, REUSED, **identity, publication=publication,
+               reuse_target={"sequence": row["sequence"], "entry": publication["entry"],
+                             "sha256": publication["sha256"]},
+               scope_status=publication.get("scope_status"), scope_gaps=publication.get("scope_gaps", []),
+               scope_resolutions=publication.get("scope_resolutions", []),
+               reason="已核同源，沿主项目既有正式同版入口复用", **fields)
+
+
+def claim(queue, row, package, folder=None, separate=None, *, user_order_reason=None):
+    require_turn(queue, row, user_order_reason)
     package = safe_path(package)
     folder = check_course_folder(folder or row.get("course_folder") or package.name)
     check_target(queue, row, package, folder)
@@ -282,8 +373,15 @@ def claim(queue, row, package, folder=None, separate=None):
         project = CourseProject.open(package)
         with project.locked():
             verify_identity(project, source, originals, row)
+    order = {}
+    if user_order_reason is not None:
+        reason = user_order_reason.strip()
+        order["user_order_reason"] = reason
+        order["user_order_at"] = (row.get("user_order_at", timestamp())
+                                  if row["status"] == ACTIVE and row.get("user_order_reason") == reason
+                                  else timestamp())
     change(row, ACTIVE, package=str(package), package_ready=ready, course_folder=folder, **identity,
-           duplicates=duplicates, duplicate_decision=decision, reason=None)
+           duplicates=duplicates, duplicate_decision=decision, reason=None, **order)
 
 
 def supplement(queue, row, package, reason):
@@ -329,36 +427,50 @@ def defer(queue, row, reason):
         raise ValueError("请登记缺少的原件或具体阻塞")
     if row["status"] != DEFERRED:
         require_turn(queue, row)
-    change(row, DEFERRED, reason=reason)
+    publication = row.get("publication") or {}
+    previous_scope = publication.get("scope_status")
+    state = (SCOPE_STATE.get(previous_scope, COMPLETE)
+             if publication.get("sha256") and current_note_matches(publication) else DEFERRED)
+    change(row, state, reason=reason, **close_re_review(row, "仍待原件"))
+    synchronize_aliases(queue, row)
 
 
 def reopen(queue, row, accept_changes=None):
+    if row.get("same_source_primary"):
+        raise ValueError(f"本项目是第 {row['same_source_primary']} 项的确认同源来件，请用 alias-review 核实新变化")
     if row["status"] == ACTIVE:
         raise ValueError("项目正在处理。请接续已有课程包，或记录具体阻塞后回到队列")
+    if row.get("re_review", {}).get("state") == "仍待原件" and not accept_changes:
+        raise ValueError("本项已完成一次性复审，请登记新到原件、授权或版本证据后再开启")
     current = metadata(source_path(queue, row))
     if not current:
         raise ValueError("待补项目仍没有原件")
     if current != row["metadata"] and not accept_changes:
         raise ValueError("原件范围有变化。请核实新增、移除或替换的证据后登记原因")
-    if row["status"] in (COMPLETE, HISTORICAL) and not accept_changes:
+    if row["status"] in PUBLISHED | {HISTORICAL, REUSED, ARCHIVED} and not accept_changes:
         raise ValueError("项目已有验收。如需重做，请登记调整原因")
     if accept_changes is not None:
         if not accept_changes.strip():
             raise ValueError("请登记同一项目新增、移除或更换原件的依据")
         if row["status"] != PENDING or current != row["metadata"] or row.get("reason") != accept_changes:
             preserve(row)
+            if row["status"] == REUSED:
+                for key in ("publication", "reuse_target", "scope_status", "scope_gaps", "scope_resolutions"):
+                    row.pop(key, None)
             for key in ("source_sha256", "content_sha256", "package", "package_ready", "duplicates", "duplicate_decision",
-                        "publication", "supplemented_origin", "supplemented_sha256", "supplemented_confirmed",
+                        "supplemented_origin", "supplemented_sha256", "supplemented_confirmed",
                         "supplement_reason"):
                 row.pop(key, None)
             row.update(status=PENDING, metadata=current, reason=accept_changes, last_changed=timestamp())
+            if row.get("re_review", {}).get("state") in ("仍待原件", "同源已复审"):
+                row["re_review"] = {**row["re_review"], "state": "后续补件待复审", "priority_rank": None}
         return
     if row["status"] == DEFERRED:
         change(row, PENDING, reason=None)
 
 
 def finish(queue, row, package):
-    if row["status"] not in (ACTIVE, COMPLETE, HISTORICAL):
+    if row["status"] not in PUBLISHED | {ACTIVE, HISTORICAL}:
         raise ValueError("请先领取该项目并完成课程制作")
     package = safe_path(package)
     folder = row["course_folder"]
@@ -370,12 +482,164 @@ def finish(queue, row, package):
     project = CourseProject.open(package)
     with project.locked():
         snapshot = verify_identity(project, source, originals, row)
-        legacy = row.get("publication", {}).get("sha256") if row.get("legacy_record") else None
+        legacy = (row.get("publication") or {}).get("sha256")
         publication = current_delivery(queue, project, folder, legacy)
+        require_gap_disposition(row, publication)
         check_current_metadata(queue, row)
         if row.get("supplemented_origin"):
             identity["supplemented_sha256"] = source_fingerprint(snapshot)
-        change(row, COMPLETE, **identity, package_ready=True, publication=publication, duplicates=duplicates, reason=None)
+        scope = publication.get("scope_status")
+        state = SCOPE_STATE[scope] if scope is not None else COMPLETE
+        scope_fields = ({"scope_status": scope, "scope_gaps": publication["scope_gaps"],
+                         "scope_resolutions": publication.get("scope_resolutions", [])}
+                        if scope is not None else {})
+        change(row, state, **identity, package_ready=True, publication=publication, duplicates=duplicates,
+               reason=None, **scope_fields, **close_re_review(row, state))
+        synchronize_aliases(queue, row)
+
+
+def require_gap_disposition(row, publication):
+    if not publication.get("scope_status"):
+        return  # Existing same-version legacy sign-off only; current_delivery enforces this.
+    gaps = publication["scope_gaps"]
+    resolutions = publication.get("scope_resolutions", [])
+    old = row.get("scope_gaps") or (row.get("publication") or {}).get("scope_gaps", [])
+    known_old_gap = bool(old or row.get("source_gap") or
+                         row.get("re_review", {}).get("gaps_before_review"))
+    if known_old_gap and publication["scope_status"] == "完整验收" and not resolutions:
+        raise ValueError("旧项目已登记缺件，改为完整验收须有同版独立复核过的旧缺件处置证据")
+    carried = {item["item"].strip().casefold() for item in [*gaps, *resolutions]}
+    missing = [item["item"] for item in old if item["item"].strip().casefold() not in carried]
+    if missing:
+        raise ValueError("上一版缺件既未继续登记也未独立核实处置：" + "、".join(missing))
+
+
+def disposition_proof(row, identity, evidence, kind):
+    evidence = safe_path(evidence)
+    proof = read(evidence)
+    if (proof.get("schema") != 1 or proof.get("kind") != kind or proof.get("source_id") != row["id"]
+            or proof.get("source_sha256") != identity["source_sha256"]
+            or not isinstance(proof.get("basis"), str) or not proof["basis"].strip()):
+        raise ValueError("处置证据未绑定本项目现有原件身份、结论和核查依据")
+    return proof, {"path": str(evidence), "sha256": sha(evidence)}
+
+
+def reuse(queue, row, related, evidence, reason, *, canonical_package=None):
+    require_turn(queue, row)
+    _, _, identity = identify(queue, row)
+    proof, receipt = disposition_proof(row, identity, evidence, "same_source")
+    if not reason.strip():
+        raise ValueError("同源复用须记录具体核对依据")
+    link = {}
+    target_fields = {"sequence": related}
+    if related is not None:
+        target = row_at(queue, related)
+        if target is row or target["status"] not in PUBLISHED or not target.get("publication"):
+            raise ValueError("同源复用须对应独立的已有正式签收主项目")
+        _, _, target_identity = identify(queue, target)
+        if (proof.get("canonical_id") != target["id"]
+                or proof.get("canonical_source_sha256") != target_identity["source_sha256"]):
+            raise ValueError("同源证据须核到主项目当前原件及明确的复用结论")
+        package = CourseProject.open(safe_path(target["package"]))
+        with package.locked():
+            publication = current_delivery(queue, package, target["course_folder"],
+                                           (target.get("publication") or {}).get("sha256"))
+        link["same_source_primary"] = related
+    else:
+        from vault_delivery import delivery
+        package_path = safe_path(canonical_package)
+        if row.get("package") and Path(row["package"]) == package_path:
+            raise ValueError("同源外部主包须为独立已有签收课程")
+        package = CourseProject.open(package_path)
+        with package.locked():
+            originals = package.validate_raw()
+            state = delivery(package)
+            if (not state or Path(proof.get("canonical_package", "")) != package_path
+                    or proof.get("canonical_source_sha256") != source_fingerprint(originals)
+                    or proof.get("canonical_publication_sha256") != state["sha256"]):
+                raise ValueError("历史主包同源证据与当前原件/同版正式签收不同")
+            publication = current_delivery(queue, package, state["folder"], state["sha256"])
+        target_fields["package"] = str(package_path)
+    change(row, REUSED, **identity, **link,
+           publication=publication, scope_status=publication.get("scope_status"),
+           scope_gaps=publication.get("scope_gaps", []), scope_resolutions=publication.get("scope_resolutions", []),
+           reuse_target={**target_fields, "entry": publication["entry"], "sha256": publication["sha256"]},
+           reason=reason.strip(), disposition_evidence=receipt, **close_re_review(row, REUSED))
+
+
+def archive(queue, row, evidence, reason):
+    require_turn(queue, row)
+    _, _, identity = identify(queue, row)
+    _, receipt = disposition_proof(row, identity, evidence, "archive")
+    if not reason.strip():
+        raise ValueError("请记录留档而非课程交付的具体依据")
+    change(row, ARCHIVED, **identity, reason=reason.strip(), archive_evidence=receipt,
+           **close_re_review(row, ARCHIVED))
+
+
+def alias_review(queue, row, resolution, evidence, reason):
+    primary_sequence = row.get("same_source_primary")
+    if not primary_sequence or row["status"] == ACTIVE:
+        raise ValueError("只有已确认同源的非在办附属项目可核实关联变化")
+    primary = row_at(queue, primary_sequence)
+    current = metadata(source_path(queue, row))
+    if not current or not reason.strip():
+        raise ValueError("同源变更复核须保留实际原件及具体依据")
+    _, _, identity = identify(queue, {**row, "metadata": current, "source_sha256": None})
+    changed = (current != row["metadata"] or identity["source_sha256"] != row.get("source_sha256"))
+    if not changed and not row.get("requires_alias_resolution"):
+        raise ValueError("附属来件未发现原件变化，仍沿既有同源主项目复用")
+    proof, receipt = disposition_proof(row, identity, evidence, "alias_review")
+    canonical_sha = primary.get("source_sha256")
+    if not canonical_sha:
+        _, _, primary_identity = identify(queue, primary)
+        canonical_sha = primary_identity["source_sha256"]
+    if (proof.get("resolution") != resolution or proof.get("canonical_id") != primary["id"]
+            or proof.get("canonical_source_sha256") != canonical_sha):
+        raise ValueError("关联复核证据未绑定既有同源主项目、当前原件和处置结论")
+    preserve(row)
+    fields = {"metadata": current, **identity, "disposition_evidence": receipt,
+              "reason": reason.strip(), "last_changed": timestamp()}
+    if resolution == "separate":
+        for key in ("same_source_primary", "reuse_target", "publication", "scope_status", "scope_gaps",
+                    "scope_resolutions", "package", "package_ready", "course_folder", "duplicates",
+                    "duplicate_decision", "supplemented_origin", "supplemented_sha256",
+                    "supplemented_confirmed", "supplement_reason"):
+            row.pop(key, None)
+        if row.get("re_review"):
+            fields["re_review"] = {**row["re_review"], "state": "后续补件待复审", "priority_rank": None}
+        row.update(status=PENDING, **fields)
+        row.pop("alias_recheck", None)
+        row.pop("requires_alias_resolution", None)
+        row.pop("alias_previous_publication_sha256", None)
+    elif resolution == "pending":
+        previous_sha = ((row.get("publication") or {}).get("sha256")
+                        or (primary.get("publication") or {}).get("sha256"))
+        row.setdefault("alias_previous_publication_sha256", previous_sha)
+        row.update(status=DEFERRED, alias_recheck=reason.strip(), requires_alias_resolution=True, **fields)
+    else:
+        publication = primary.get("publication") or {}
+        if (primary["status"] not in PUBLISHED or proof.get("canonical_publication_sha256") != publication.get("sha256")
+                or not current_note_matches(publication)):
+            raise ValueError("主项目须先完成包括补件的同版签收，才能恢复附属复用")
+        prior_sha = row.get("alias_previous_publication_sha256") or (row.get("publication") or {}).get("sha256")
+        if (prior_sha and prior_sha == publication.get("sha256")
+                and proof.get("new_material_classification") != "无新增实质教学"):
+            raise ValueError("附属原件已变化而主稿仍为旧版，须补件签收或核实没有新增实质教学")
+        package = CourseProject.open(safe_path(primary["package"]))
+        with package.locked():
+            verified = current_delivery(queue, package, primary["course_folder"], publication.get("sha256"))
+        if verified["sha256"] != publication["sha256"]:
+            raise ValueError("主项目新的同版签收尚未登记")
+        row.update(status=REUSED, publication=verified,
+                   reuse_target={"sequence": primary_sequence, "entry": verified["entry"], "sha256": verified["sha256"]},
+                   scope_status=verified.get("scope_status"), scope_gaps=verified.get("scope_gaps", []),
+                   scope_resolutions=verified.get("scope_resolutions", []), **fields)
+        if row.get("re_review", {}).get("state") in ("关联待复审", "共同待补"):
+            row["re_review"] = {**row["re_review"], "state": "同源已复审", "reviewed_at": timestamp()}
+        row.pop("alias_recheck", None)
+        row.pop("requires_alias_resolution", None)
+        row.pop("alias_previous_publication_sha256", None)
 
 
 def legacy_snapshot(queue, directory):
@@ -509,6 +773,9 @@ def import_legacy(queue, directory, *, verify, supplemented=(), defer_history=Fa
 
 
 def refresh(queue):
+    if queue.get("dispatch_registry"):
+        from batch_dispatch import refresh_queue
+        return refresh_queue(queue)
     source = Path(queue["source"])
     projects = queue["projects"]
     registered = {row["name"] for row in projects}
@@ -542,7 +809,11 @@ def status(queue, *, scan=False):
     if scan:
         source = Path(queue["source"])
         registered = {row["name"] for row in rows}
-        present = {path.name for path in source.iterdir()} if source.is_dir() else set()
+        if queue.get("dispatch_registry"):
+            from batch_dispatch import candidates
+            present = {path.name for path in candidates(source, queue.get("dispatch_layout"), registered)}
+        else:
+            present = {path.name for path in source.iterdir()} if source.is_dir() else set()
         result["new"] = sorted(present - registered - set(queue["unassigned"]), key=natural)
         drift = []
         for row in rows:
@@ -579,6 +850,23 @@ def open_queue(path):
     if queue.get("schema") != SCHEMA or not queue.get("projects"):
         raise ValueError(f"不是受支持的本地课程批次清单 {path}")
     return queue
+
+
+def registry_bound(queue, manifest):
+    registry = queue.get("dispatch_registry")
+    return (not registry or any(Path(binding["manifest"]) == manifest
+                                for binding in read(Path(registry))["bindings"].values()))
+
+
+def refresh_registered_catalog(queue, manifest):
+    vault = Path(queue["vault"]) if queue.get("vault") else None
+    if not vault or not (vault / ".obsidian").is_dir() or not registry_bound(queue, manifest):
+        return
+    from vault_catalog import refresh_catalog
+    try:
+        refresh_catalog(vault, manifests=(manifest,))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"批次状态已登记，日常总览刷新失败：{error}") from error
 
 
 def initialize(args):
@@ -622,7 +910,22 @@ def add_arguments(commands):
                       help="核实当前续作原件，历史验收项目保留回执和版次，稍后逐项复验")
     sub.add_parser("status", help="查看项目进度和原件范围变化").add_argument("manifest", type=Path)
     sub.add_parser("refresh", help="登记新增项目并保留原有项目编号").add_argument("manifest", type=Path)
-    for name in ("claim", "defer", "reopen", "finish", "supplement"):
+    migrate = sub.add_parser("audit-migrate", help="按已核完整审计分开旧待补、复用、留档并一次性恢复复审")
+    migrate.add_argument("manifest", type=Path)
+    migrate.add_argument("audit", type=Path)
+    migrate.add_argument("--priority", nargs="+", type=int, default=[],
+                         help="用户明确指定的一次性待复审顺位（同源附属沿主项目）")
+    migrate.add_argument("--apply", action="store_true", help="实际写批次清单；默认只读计划")
+    dispatch = sub.add_parser("dispatch", help="按分类盘点原件并选择当前唯一生产项目")
+    dispatch.add_argument("root", type=Path, help="分析目标下载地址总目录")
+    dispatch.add_argument("--registry", type=Path, required=True, help="分类清单绑定索引")
+    dispatch.add_argument("--legacy-manifest", type=Path, action="append", default=[],
+                          help="接入既有正式批次清单，可多次提供")
+    dispatch.add_argument("--refresh", action="store_true",
+                          help="明确登记并复扫，默认仅只读盘点")
+    dispatch.add_argument("--settle-seconds", type=int, default=30,
+                          help="新增原件至少两次盘点相符且经过的秒数（不能证明课程齐全）")
+    for name in ("claim", "defer", "reopen", "finish", "supplement", "reuse", "archive", "alias-review"):
         action = sub.add_parser(name)
         action.add_argument("manifest", type=Path)
         action.add_argument("sequence", type=int)
@@ -631,18 +934,35 @@ def add_arguments(commands):
         if name == "claim":
             action.add_argument("--course-folder")
             action.add_argument("--separate", metavar="REASON")
+            action.add_argument("--user-order-reason", metavar="DIRECTIVE",
+                                help="仅在用户明确指定本项目顺序时记录其具体要求；不抢占在办项目、不跳过就绪检查")
         if name == "defer":
             action.add_argument("reason")
         if name == "supplement":
             action.add_argument("--reason", required=True, help="同一课程新增原件的核对依据")
         if name == "reopen":
             action.add_argument("--accept-changes", metavar="REASON")
+        if name in ("reuse", "archive", "alias-review"):
+            action.add_argument("--evidence", type=Path, required=True, help="已核原件身份及处置结论的证据 JSON")
+            action.add_argument("--reason", required=True)
+        if name == "reuse":
+            target = action.add_mutually_exclusive_group(required=True)
+            target.add_argument("--related", type=int, help="已签收的同源主项目顺位")
+            target.add_argument("--canonical-package", type=Path,
+                                help="本批之外真实已有签收、日常入口已核的同源课程包")
+        if name == "alias-review":
+            action.add_argument("--resolution", choices=("pending", "reuse", "separate"), required=True,
+                                help="主项目待补、已补件同源复用，或有证据的独立新版本")
 
 
 def run(args):
     try:
         action = args.batch_action
-        if action == "plan":
+        if action == "dispatch":
+            from batch_dispatch import dispatch
+            result = dispatch(args.root, args.registry, args.legacy_manifest,
+                              refresh=args.refresh, settle_seconds=args.settle_seconds)
+        elif action == "plan":
             queue = scan_batch(args.source, args.vault)
             if args.legacy_directory:
                 import_legacy(queue, args.legacy_directory, verify=False)
@@ -653,26 +973,70 @@ def run(args):
             path = safe_path(args.manifest)
             if action == "status":
                 result = status(open_queue(path), scan=True)
-            else:
-                with file_lock(path.with_suffix(path.suffix + ".lock")):
+            elif action == "audit-migrate":
+                from batch_review import migrate
+                if not args.apply:
+                    result = migrate(open_queue(path), path, args.audit, args.priority)
+                else:
                     queue = open_queue(path)
+                    registry = queue.get("dispatch_registry")
+                    # A cloned manifest can carry the original dispatch path. Do not
+                    # use the real registry lock for a clone outside its binding.
+                    bound = registry and registry_bound(queue, path)
+                    guard = file_lock(Path(registry).with_suffix(Path(registry).suffix + ".lock")) if bound else nullcontext()
+                    with guard, file_lock(path.with_suffix(path.suffix + ".lock")):
+                        queue = open_queue(path)
+                        result = migrate(queue, path, args.audit, args.priority, apply=True)
+                        if result["applied"]:
+                            put(path, queue)
+                    if result["applied"]:
+                        refresh_registered_catalog(queue, path)
+            else:
+                # Global dispatch and a claim share the same lock order.
+                registry = open_queue(path).get("dispatch_registry") if action in ("claim", "reuse", "archive") else None
+                guard = file_lock(Path(registry).with_suffix(Path(registry).suffix + ".lock")) if registry else nullcontext()
+                with guard, file_lock(path.with_suffix(path.suffix + ".lock")):
+                    queue = open_queue(path)
+                    before = digest(queue)
+                    if action in ("claim", "reuse", "archive") and queue.get("dispatch_registry") != registry:
+                        raise ValueError("批次全局调度绑定已变，请再次领取")
                     if action == "refresh":
                         refresh(queue)
                         result = status(queue, scan=True)
                     else:
                         row = row_at(queue, args.sequence)
                         if action == "claim":
-                            claim(queue, row, args.package, args.course_folder, args.separate)
+                            if registry:
+                                from batch_dispatch import require_global_turn
+                                require_global_turn(Path(registry), path, row, args.user_order_reason)
+                            claim(queue, row, args.package, args.course_folder, args.separate,
+                                  user_order_reason=args.user_order_reason)
                         elif action == "defer":
                             defer(queue, row, args.reason)
                         elif action == "reopen":
                             reopen(queue, row, args.accept_changes)
                         elif action == "supplement":
                             supplement(queue, row, args.package, args.reason)
+                        elif action in ("reuse", "archive"):
+                            if registry:
+                                from batch_dispatch import require_global_turn
+                                require_global_turn(Path(registry), path, row)
+                            if action == "reuse":
+                                reuse(queue, row, args.related, args.evidence, args.reason,
+                                      canonical_package=args.canonical_package)
+                            else:
+                                archive(queue, row, args.evidence, args.reason)
+                        elif action == "alias-review":
+                            alias_review(queue, row, args.resolution, args.evidence, args.reason)
                         else:
                             finish(queue, row, args.package)
                         result = describe_row(queue, row)
-                    put(path, queue)
+                    changed = digest(queue) != before
+                    if changed:
+                        put(path, queue)
+                if changed and action in ("claim", "supplement", "finish", "defer", "reuse", "archive",
+                                          "reopen", "alias-review", "refresh"):
+                    refresh_registered_catalog(queue, path)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (OSError, ValueError, KeyError) as error:

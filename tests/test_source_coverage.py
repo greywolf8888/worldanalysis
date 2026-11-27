@@ -1,5 +1,6 @@
 """Reject source omissions and unsupported references without rendering a vault."""
 
+from copy import deepcopy
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -87,6 +88,83 @@ class SourceCoverageTest(unittest.TestCase):
         self.assertEqual(self.scope["videos"][0]["candidates"][0]["value"], "teacher_2026")
         self.assertIn("work/pdf.json", self.evidence)
         validate_source_coverage(self.body, self.scope, self.review)
+
+    def test_stale_facts_after_120_characters_are_blocked(self):
+        filler = "对照原始画面并说明实际操作的条件。" * 9
+        prose = filler + "快捷键 Ctrl+D，尺寸 1664×928，比例 60%，资料 https://example.org/doc/73785。"
+        body = self.body.replace(START, START.replace(" <!--", prose + " <!--"))
+        self.set_claims(body)
+        claim = self.review["source_coverage"]["claims"][0]
+        claim["fact_checks"] = [{"anchor": prose, "origin": "原件", "source": claim["sources"][0],
+                                  "note": "逐项对照本测试原件中的操作、设置和链接值"}]
+        validate_source_coverage(body, self.scope, self.review)
+        for original, changed in (("Ctrl+D", "Ctrl+X"), ("1664×928", "1664×982"),
+                                  ("60%", "65%"), ("73785", "73786")):
+            with self.subTest(value=original):
+                with self.assertRaisesRegex(ValueError, "每段正文实际反查结论 P0001"):
+                    validate_source_coverage(body.replace(original, changed), self.scope, self.review)
+
+    def test_regenerated_template_still_requires_the_actual_fact_review(self):
+        first = START.replace("。 <!--", "，原值 60%。 <!--")
+        body = self.body.replace(START, first)
+        self.set_claims(body)
+        claim = self.review["source_coverage"]["claims"][0]
+        with self.assertRaisesRegex(ValueError, "关键值缺少对应事实核对.*60%"):
+            validate_source_coverage(body, self.scope, self.review)
+        claim["fact_checks"] = [{"anchor": "原值 60%", "origin": "原件", "source": claim["sources"][0],
+                                 "note": "本测试的原始说明给出百分比 60%"}]
+        validate_source_coverage(body, self.scope, self.review)
+        claim["fact_checks"][0]["source"] = "第 1 讲 03:00–04:00"
+        with self.assertRaisesRegex(ValueError, "原件关键事实需绑定本段已核出处"):
+            validate_source_coverage(body, self.scope, self.review)
+
+    def test_mixed_claims_need_separate_local_and_external_evidence(self):
+        url = "https://example.org/authoritative/defaults"
+        first = START.replace("。 <!--", "，讲师说 Ctrl+B。外部核验：默认键位 Ctrl+D。 <!--")
+        body = self.body.replace(START, first + f" <!-- 外部出处 {url} -->")
+        self.set_claims(body)
+        claim = self.review["source_coverage"]["claims"][0]
+        with self.assertRaisesRegex(ValueError, "外部事实须标注外部出处及真实归属"):
+            validate_source_coverage(body, self.scope, self.review)
+        claim["outcome"] = "外部核验"
+        with self.assertRaisesRegex(ValueError, "正文反查须标明"):
+            validate_source_coverage(body, self.scope, self.review)
+        claim["outcome"] = "混合来源"
+        claim["fact_checks"] = [
+            {"anchor": "讲师说 Ctrl+B", "origin": "原件", "source": claim["sources"][0],
+             "note": "本测试原课口述 Ctrl+B"},
+            {"anchor": "默认键位 Ctrl+D", "origin": "外部", "source": url,
+             "note": "本测试外部原页列出 Ctrl+D"}]
+        validate_source_coverage(body, self.scope, self.review)
+        claim["fact_checks"][1]["origin"] = "原件"
+        claim["fact_checks"][1]["source"] = claim["sources"][0]
+        with self.assertRaisesRegex(ValueError, "混合或外部事实须分别绑定"):
+            validate_source_coverage(body, self.scope, self.review)
+
+    def test_pure_external_claim_must_reference_its_actual_external_source_marker(self):
+        url = "https://example.org/official/version"
+        statement = "另行核实：公开版本资料地址 " + url + "。"
+        body = self.body + "\n\n" + statement + f" <!-- 外部出处 {url} -->"
+        self.set_claims(body)
+        claim = self.review["source_coverage"]["claims"][-1]
+        claim["outcome"] = "外部核验"
+        claim["fact_checks"] = [{"anchor": statement, "origin": "外部", "source": url,
+                                 "note": "核对测试外部出版页及完整原网址"}]
+        validate_source_coverage(body, self.scope, self.review)
+        claim["fact_checks"][0]["source"] = "https://example.org/official/other"
+        with self.assertRaisesRegex(ValueError, "外部关键事实需绑定本段外部出处"):
+            validate_source_coverage(body, self.scope, self.review)
+
+    def test_legacy_coverage_is_only_accepted_by_hash_bound_receipt_reader(self):
+        legacy = deepcopy(self.review)
+        coverage = legacy["source_coverage"]
+        coverage.pop("claims_version")
+        for claim in coverage["claims"]:
+            for field in ("paragraph_sha256", "external_sources", "critical_values", "fact_checks"):
+                claim.pop(field)
+        with self.assertRaisesRegex(ValueError, "新稿需使用完整正文指纹"):
+            validate_source_coverage(self.body, self.scope, legacy)
+        validate_source_coverage(self.body, self.scope, legacy, allow_legacy=True)
 
     def test_pdf_links_are_reviewed_with_their_original_pages(self):
         links = [

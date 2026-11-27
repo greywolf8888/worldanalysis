@@ -5,11 +5,13 @@ from itertools import islice
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 from tempfile import TemporaryDirectory
 import wave
 
 from project import local_child, media_source, original_media_path, put, read, sha
+from asr_exact_cache import digest as exact_digest, pcm_digest, read_record, valid_part, write_record
 from _tools.course_no_subtitles.speech import AUDIO_DECODE_REVISION, RATE, RUNTIME, audio_windows
 
 
@@ -40,12 +42,26 @@ class VulkanASR:
         self.identity = {"backend": backend, "device": self.device, "runtime_sha256": sha(self.executable),
                          "model_sha256": sha(self.model), "stream_revision": GPU_STREAM_REVISION}
 
-    def transcribe(self, source, duration, track, language, offset=0, *, cache=None):
+    def transcribe(self, source, duration, track, language, offset=0, *, cache=None, shared_context=None,
+                   use_shared_cache=True):
         if cache is None:
             return self.transcribe_windows(source, duration, track, language, [(None, None, offset)])[0]
         # The decoder's fixed chunks are 30 seconds. Group them from one stream so
         # independent seeks and resampler startup cannot drop samples between batches.
         rows, decoded = [], []
+        self.shared_cache_stats = {"project_checkpoints": 0, "shared_hits": 0, "fresh_groups": 0,
+                                   "shared_write_failures": 0}
+        shared = None
+        if shared_context is not None:
+            if sha(Path(source)) != shared_context["audio_sha256"]:
+                raise ValueError("共享 ASR 取材前音源指纹发生变化")
+            if not hasattr(self, "_decoder_sha256"):
+                executable = shutil.which("ffmpeg")
+                if not executable:
+                    raise ValueError("共享 ASR 取材需要已定位的 FFmpeg")
+                self._decoder_sha256 = sha(Path(executable))
+            if use_shared_cache:
+                shared = local_child(RUNTIME, "cache/course-asr-exact")
         start_sample = 0
         with closing(audio_windows(source, 0, None, "fixed", track)) as stream:
             while True:
@@ -55,13 +71,49 @@ class VulkanASR:
                 start = start_sample / RATE
                 count = sum(map(len, chunks)) // 2
                 part_path = cache / f"{start_sample:012}.json"
-                part = read(part_path) if part_path.is_file() else None
-                if part is None or part["window"]["samples"] != count:
+                window = {"requested_start": start, "requested_length": count / RATE,
+                          "timeline_start": offset + start, "samples": count, "sample_rate": RATE}
+                key = shared_path = None
+                if shared_context is not None:
+                    key = {"input": shared_context, "recognizer": self.identity,
+                           "decoder_sha256": self._decoder_sha256, "audio_decode_revision": AUDIO_DECODE_REVISION,
+                           "fixed_seconds": 30, "group_chunks": GPU_BATCH_CHUNKS, "track": track,
+                           "language": language, "duration": duration, "offset": offset,
+                           "window": window, "pcm_sha256": pcm_digest(chunks)}
+                    key_sha = exact_digest(key)
+                    if shared is not None:
+                        shared_path = local_child(shared, f"{key_sha[:2]}/{key_sha}.json")
+                part = read_record(part_path, key, duration) if key is not None else None
+                if part is None:
+                    try:
+                        previous = read(part_path)
+                    except (OSError, ValueError):
+                        previous = None
+                    # Legacy local checkpoints were scoped to this project's source/settings key.
+                    # They may complete that same project, but never populate the global cache.
+                    if valid_part(previous, window, duration):
+                        part = previous
+                if part is not None:
+                    self.shared_cache_stats["project_checkpoints"] += 1
+                elif shared_path is not None and (cached := read_record(shared_path, key, duration)) is not None:
+                    part = cached
+                    write_record(part_path, key, part, duration)
+                    self.shared_cache_stats["shared_hits"] += 1
+                else:
                     request = (start, count / RATE, offset + start, chunks)
                     result, = self._transcribe_pcm(duration, language, [request])
-                    window, = self.decoded_windows
-                    part = {"cues": result, "window": window}
-                    put(part_path, part)
+                    observed, = self.decoded_windows
+                    part = {"cues": result, "window": observed}
+                    if key is not None and valid_part(part, window, duration):
+                        write_record(part_path, key, part, duration)
+                        if shared_path is not None:
+                            try:
+                                write_record(shared_path, key, part, duration)
+                            except OSError:
+                                self.shared_cache_stats["shared_write_failures"] += 1
+                    else:
+                        put(part_path, part)
+                    self.shared_cache_stats["fresh_groups"] += 1
                 rows.extend(part["cues"])
                 decoded.append(part["window"])
                 start_sample += count

@@ -58,6 +58,18 @@ PROJECT_LINK = re.compile(
 )
 COMMENTS = re.compile(r"<!--([\s\S]*?)-->")
 PARAGRAPH_SOURCE = re.compile(r"<!-- 段落出处 ([^\n]+?) -->")
+EXTERNAL_SOURCE = re.compile(r"<!-- 外部出处 ([^\n]+?) -->")
+SCOPE_START = "<!-- Worldanalysis:scope-review:start -->"
+SCOPE_END = "<!-- Worldanalysis:scope-review:end -->"
+SCOPE_BLOCK = re.compile(re.escape(SCOPE_START) + r"[\s\S]*?" + re.escape(SCOPE_END))
+CLAIMS_VERSION = 3
+CRITICAL_VALUE = re.compile(
+    r"(?P<url>https?://[^\s<>\]\[）】。,，;；)]+)"
+    r"|(?P<shortcut>\b(?:Ctrl|Control|Cmd|Command|Alt|Option|Shift|Meta)(?:\s*\+\s*[A-Za-z0-9]+)+\b)"
+    r"|(?P<dimension>\d+(?:\.\d+)?\s*[×xX]\s*\d+(?:\.\d+)?)"
+    r"|(?P<percentage>\d+(?:\.\d+)?\s*[%％])",
+    re.IGNORECASE,
+)
 VIDEO_LABEL = re.compile(r"第 (\d+) 讲 ([0-9:.]+)(?:–([0-9:.]+))?(?=$| · )")
 PAGE_LABEL = re.compile(r"(?:第\s*)?(\d+)\s*(?:(?:[–—~～-]|至|到)\s*(\d+)\s*)?(?:页|張|张|张幻灯片)")
 PICTURE_LABEL = re.compile(r"第\s*(\d+)\s*(?:幅|张)\s*内嵌原图")
@@ -361,8 +373,9 @@ def build_source_manifest(project):
     return scope, evidence
 
 
-def claim_blocks(body):
-    for is_code, part in markdown_segments(COLLAPSED.sub("", body)):
+def claim_details(body):
+    # The scope summary is independently reviewed against its own structured manifest.
+    for is_code, part in markdown_segments(COLLAPSED.sub("", SCOPE_BLOCK.sub("", body))):
         if is_code:
             continue
         for block in re.split(r"\n[ \t]*\n", part):
@@ -370,7 +383,27 @@ def claim_blocks(body):
             prose = " ".join(line.strip() for line in prose.splitlines()
                              if line.strip() and not line.lstrip().startswith("#"))
             if prose:
-                yield prose, PARAGRAPH_SOURCE.findall(block)
+                yield prose, PARAGRAPH_SOURCE.findall(block), EXTERNAL_SOURCE.findall(block)
+
+
+def claim_blocks(body):
+    # Keep the original shape for source-to-body and older receipt readers.
+    for prose, sources, _ in claim_details(body):
+        yield prose, sources
+
+
+def critical_values(prose):
+    """Exact locators for common values; a semantic review still finds other facts."""
+    return [{"kind": match.lastgroup, "value": match[0], "start": match.start()}
+            for match in CRITICAL_VALUE.finditer(prose)]
+
+
+def claim_review_rows(body):
+    return [{"id": f"P{index:04}", "text": prose[:120], "sources": sources,
+             "paragraph_sha256": fingerprint([prose, sources, external]),
+             "external_sources": external, "critical_values": critical_values(prose),
+             "fact_checks": [], "outcome": "", "note": ""}
+            for index, (prose, sources, external) in enumerate(claim_details(body), 1)]
 
 
 def coverage_review_template(scope, body=""):
@@ -379,6 +412,7 @@ def coverage_review_template(scope, body=""):
                 for finding in row["candidates"]]
 
     return {
+        "claims_version": CLAIMS_VERSION,
         "videos": [{"lesson": row["lesson"],
                     "windows": [{"range_s": window, "outcome": "", "note": ""} for window in row["windows"]],
                     "channels": [{**zone, "outcome": "", "note": "", "findings": []} for zone in row["zones"]],
@@ -387,8 +421,7 @@ def coverage_review_template(scope, body=""):
                        "units": [{"key": unit["key"], "outcome": "", "note": "", "anchor": "", "channels": []}
                                  for unit in row["units"]],
                        "candidates": findings(row)} for row in scope["documents"]],
-        "claims": [{"id": f"P{index:04}", "text": prose[:120], "sources": sources, "outcome": "", "note": ""}
-                   for index, (prose, sources) in enumerate(claim_blocks(body), 1)],
+        "claims": claim_review_rows(body),
     }
 
 
@@ -550,10 +583,66 @@ def validate_outcome(row, label):
         raise ValueError(f"原件仍有待核内容 {label}：{row['note']}")
 
 
-def validate_source_coverage(body, scope, review):
+def validate_fact_checks(actual, expected, prose, outcome, syntax):
+    """Bind each recognized value and any external claims to explicit, checked evidence."""
+    label = expected["id"]
+    checks = actual.get("fact_checks")
+    if not isinstance(checks, list):
+        raise ValueError(f"关键值需记录实际事实核对 {label}")
+    external = {unescape(value) for value in expected["external_sources"]}
+    if any(not re.fullmatch(r"https?://[^\s<>]+", source) for source in external):
+        raise ValueError(f"外部出处须逐条登记可定位原页的网址 {label}")
+    if bool(external) != (outcome in {"外部核验", "混合来源"}):
+        raise ValueError(f"外部事实须标注外部出处及真实归属 {label}")
+    allowed = {"原件已核": {"原件"}, "外部核验": {"外部"},
+               "混合来源": {"原件", "外部"}, "整理示例": {"整理示例"}, "编辑衔接": set()}
+    original = set()
+    for raw in expected["sources"]:
+        note = unescape(raw)
+        hits = list(syntax.finditer(note))
+        for index, hit in enumerate(hits):
+            end = hits[index + 1].start() if index + 1 < len(hits) else len(note)
+            original.add(note[hit.start(1):end])
+    spans, origins, external_used = [], set(), set()
+    for check in checks:
+        if not isinstance(check, dict):
+            raise ValueError(f"关键事实核对格式无效 {label}")
+        anchor, origin, source, note = (check.get(key) for key in ("anchor", "origin", "source", "note"))
+        if (not populated(anchor) or prose.count(anchor) != 1 or not isinstance(origin, str) or origin not in allowed[outcome]
+                or not isinstance(source, str) or not substantive_note(note)):
+            raise ValueError(f"关键事实需逐项定位实际正文、归属及核证结果 {label}")
+        if origin == "原件" and source not in original:
+            raise ValueError(f"原件关键事实需绑定本段已核出处 {label}")
+        if origin == "外部":
+            if source not in external:
+                raise ValueError(f"外部关键事实需绑定本段外部出处 {label}")
+            external_used.add(source)
+        if origin == "整理示例" and source and source not in original:
+            raise ValueError(f"整理示例的原课依据需能定位 {label}")
+        start = prose.index(anchor)
+        spans.append((start, start + len(anchor)))
+        origins.add(origin)
+    if external_used != external or (outcome == "混合来源" and origins != {"原件", "外部"}):
+        raise ValueError(f"混合或外部事实须分别绑定对应原件和外部原文 {label}")
+    for candidate in expected["critical_values"]:
+        start = candidate["start"]
+        end = start + len(candidate["value"])
+        if not any(left <= start and end <= right for left, right in spans):
+            raise ValueError(f"关键值缺少对应事实核对 {label} · {candidate['value']}")
+
+
+def validate_source_coverage(body, scope, review, *, allow_legacy=False):
     coverage = review.get("source_coverage")
     if not isinstance(coverage, dict):
         raise ValueError("本轮发布需填来源覆盖复核，请使用当前预览模板")
+    legacy = allow_legacy and "claims_version" not in coverage and isinstance(coverage.get("claims"), list) and all(
+        isinstance(row, dict) and not any(key in row for key in
+            ("paragraph_sha256", "external_sources", "critical_values", "fact_checks"))
+        for row in coverage.get("claims", [])
+    )
+    if (not legacy and coverage.get("claims_version") != CLAIMS_VERSION
+            and not (allow_legacy and coverage.get("claims_version") == 2)):
+        raise ValueError("新稿需使用完整正文指纹及关键事实复核模板")
     if scope["unreadable"]:
         raise ValueError(f"原片仍有待恢复取材 {scope['unreadable'][0]}")
     syntax = citation_syntax(scope["documents"])
@@ -633,23 +722,34 @@ def validate_source_coverage(body, scope, review):
                              finding["id"], value=detection.get("value", ""))
 
     timings = {row["display_number"]: row["duration_s"] for row in scope["videos"]}
-    claims = coverage_review_template({"videos": [], "documents": []}, body)["claims"]
-    for actual, expected in matching_rows(coverage.get("claims"), claims, "id", "教材正文反查记录"):
-        if any(actual.get(key) != expected[key] for key in ("text", "sources")) or not substantive_note(actual.get("note")):
+    claims = claim_review_rows(body)
+    compared = list(matching_rows(coverage.get("claims"), claims, "id", "教材正文反查记录"))
+    for actual, expected in compared:
+        fields = ("text", "sources") if legacy else (
+            "text", "sources", "paragraph_sha256", "external_sources", "critical_values")
+        if any(actual.get(key) != expected[key] for key in fields) or not substantive_note(actual.get("note")):
             raise ValueError(f"需交代每段正文实际反查结论 {expected['id']}")
+    for actual, expected in compared:
         text, cites = blocks[int(expected["id"][1:]) - 1]
         outcome = actual.get("outcome")
         if outcome == "原件已核":
             if not cites:
                 raise ValueError(f"原件事实缺少段落出处 {expected['id']}")
         elif outcome == "编辑衔接" and not expected["sources"]:
-            continue
+            pass
         elif outcome == "整理示例" and any(word in text for word in ("演算示例", "练习", "假设", "示意")):
             pass
-        elif outcome == "外部核验" and any(word in text for word in ("外部核验", "另行核实", "补充核验")):
+        elif outcome == "外部核验" and (
+            (not legacy and not cites) or
+            (legacy and any(word in text for word in ("外部核验", "另行核实", "补充核验")))
+        ):
+            pass
+        elif not legacy and outcome == "混合来源" and cites:
             pass
         else:
             raise ValueError(f"正文反查须标明原件事实、衔接、示例或外部核验 {expected['id']}")
+        if not legacy:
+            validate_fact_checks(actual, expected, text, outcome, syntax)
         for kind, identity, location in cites:
             if kind == "video":
                 if identity not in timings or not 0 <= location[0] <= location[1] <= timings[identity] + .01:

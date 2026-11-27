@@ -80,6 +80,12 @@ flowchart LR
 
 **证据已发布 ≠ Agent 已阅读；OCR/ASR 已执行 ≠ 内容无误；补采已交付 ≠ 语义缺口已解决。**
 
+### 网盘视频的新采集顺序
+
+当前选定流程为：**完整枚举指定目录 → 对全部视频分别取得平台文稿和课件 → 第一遍结束后只补确认的文字/画面缺口 → 复用证据库与 Obsidian 呈现**。不新增完整本地视频或音频文件。
+
+新增 `worldanalysis.platform_pass` 调度入口和本地产物验证；文稿、课件分别记账，等待中的生成只对账，覆盖未知进入复核。该入口没有内置在线浏览器采集或远程补采执行器。本轮真实访问被宿主站点策略阻止，未将历史清单或离线测试记作实网完成。见[两遍采集入口与执行记录](docs/platform-first-20261116/README.md)。
+
 <a id="quick-start"></a>
 
 ## 🚀 快速开始
@@ -170,6 +176,10 @@ Set-Content -Path "手动投放/demo.txt" -Value "Worldanalysis demo: local evid
 | 本地音视频 | 有界窗口、检查点、CPU ASR、画面候选与 Bundle | 需要已准入本地模型；稀疏关键帧不保证覆盖每个操作。 |
 | 增量与恢复 | 版本绑定、证据复用、发布对账、显式任务恢复 | 未知提交状态不能盲目重放。 |
 | 网站 / 云盘 | 来源观察、范围校验、转存与读回状态接口 | 真实来源有阶段性验证，不代表整课全量运输或生产验收。 |
+| 已有平台资料包 | 本地字幕、文稿、笔记与图片接入现有 Store；附件变化形成新修订 | 离线入口，不自动访问百度；来源声明、全文与关键帧覆盖保持待核验。 |
+| Obsidian 呈现 | 已发布 Bundle 导出 Markdown、本地图像、个人笔记和缺口 | 只读证据；导出不代表网盘采集、全文覆盖或分析已完成。 |
+
+已有百度资料可通过独立入口 `python -m worldanalysis.platform_materials` 导入，再使用 `python -m worldanalysis.obsidian` 呈现。具体格式、PowerShell 命令、人工编辑保护和已验证边界见[百度课程资料接入与 Obsidian 呈现](<docs/obsidian-20261115/README.md>)。
 
 ### 按需依赖
 
@@ -239,6 +249,7 @@ worldanalysis/
 | [English documentation](<README.en.md>) | 与本页对应的英文介绍和使用说明。 |
 | [本地执行说明](<WORLDANALYSIS.md>) | 原环境入口、历史实测与未完成范围；部分材料路径仅本机存在。 |
 | [本地课程教材开发文档](<docs/课程资料整理与 Obsidian 教材制作手册.md>) | 从课程文件夹入库到逐集复核、配图和 Obsidian 发布。 |
+| [百度资料与 Obsidian](<docs/obsidian-20261115/README.md>) | 参考项目深度研究、本地资料接入、Vault 导出、验证记录和真实采集剩余工作。 |
 | [开发包总览](<worldanalysis_agent_devpack_20261110/README.md>) | 项目意图、模块划分与设计文档索引；规划不等于全部已实现。 |
 | [架构与数据契约](<worldanalysis_agent_devpack_20261110/02_ARCHITECTURE_AND_CONTRACTS.md>) | 采集、分析、台账与证据的接口边界。 |
 | [分析 Agent 规范](<worldanalysis_agent_devpack_20261110/04_ANALYSIS_AGENT.md>) | 阅读、引用、核验、补采及增量更新要求。 |

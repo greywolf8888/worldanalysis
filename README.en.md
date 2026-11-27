@@ -170,6 +170,10 @@ Use `--help` to discover image-region, audio-window, and supplementation-deliver
 | Local audio and video | Bounded windows, checkpoints, CPU ASR, visual candidates, and Bundles | Admitted local models are required; sparse keyframes do not guarantee every operation is captured. |
 | Incremental processing and recovery | Version binding, evidence reuse, publication reconciliation, and explicit task resumption | Unknown submission states must not be blindly replayed. |
 | Websites / cloud drives | Source observation, scope checks, and transfer/readback state interfaces | Limited real-source checks do not establish full-course transport or production acceptance. |
+| Existing platform material packages | Local subtitles, transcripts, notes, and images enter the existing Store; attachment changes create revisions | Offline intake only; declared cloud identity and source-video coverage remain unverified. |
+| Obsidian presentation | Published Bundles become Markdown, local images, personal notes, and explicit gaps | Read-only evidence projection; export does not establish collection, transcript completeness, or analysis completion. |
+
+Use the separate `python -m worldanalysis.platform_materials` and `python -m worldanalysis.obsidian` entry points for local material intake and presentation. See the [Baidu materials and Obsidian guide](<docs/obsidian-20261115/README.md>) for the package format, PowerShell commands, edit protection, and verified boundaries (Chinese).
 
 ### Dependencies by use case
 
@@ -240,6 +244,7 @@ The following detailed implementation and planning documents are currently in Ch
 | :--- | :--- |
 | [简体中文](<README.md>) | Chinese version of this introduction and usage guide. |
 | [Local execution notes](<WORLDANALYSIS.md>) | Original environment, historical checks, and remaining scope; some material paths exist only locally. |
+| [Baidu materials and Obsidian](<docs/obsidian-20261115/README.md>) | Source research, local material intake, Vault export, validation, and remaining online collection work. |
 | [Development package overview](<worldanalysis_agent_devpack_20261110/README.md>) | Intent, module boundaries, and design index; plans are not claims of completed implementation. |
 | [Architecture and contracts](<worldanalysis_agent_devpack_20261110/02_ARCHITECTURE_AND_CONTRACTS.md>) | Collection, analysis, ledger, and evidence interfaces. |
 | [Analysis agent specification](<worldanalysis_agent_devpack_20261110/04_ANALYSIS_AGENT.md>) | Reading, citations, verification, supplementation, and incremental updates. |

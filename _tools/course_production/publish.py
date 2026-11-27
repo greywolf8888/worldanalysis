@@ -2,11 +2,12 @@
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from html import escape
+from itertools import groupby
 from pathlib import Path
 import re
 from urllib.parse import quote, unquote
 
-from frames import diagram_source, document_image, orig
+from frames import diagram_source, document_image, nearby_requests, orig, orig_many
 from project import ENTRY, copy_file, local_child, read, require_readable_videos, sha, write
 from reader_review import markdown_segments
 from transcript import stamp
@@ -59,7 +60,7 @@ def hidden_source(kind, detail):
     return f"<!-- {kind} {payload} -->"
 
 
-def check_figure(course, info, *, ledger, art_root):
+def check_figure(course, info, *, ledger, art_root, native=None):
     if "diagram" in info:
         original, frame, digest = diagram_source(course, ledger, art_root.parent, info["diagram"])
         if digest != info["diagram_sha256"]:
@@ -72,7 +73,7 @@ def check_figure(course, info, *, ledger, art_root):
             full_slide=info.get("full_slide", False), embedded_picture=embedded_picture,
         )
     else:
-        original, frame, pts = orig(course, info["lesson"], info["pts"], ledger=ledger)
+        original, frame, pts = native if native is not None else orig(course, info["lesson"], info["pts"], ledger=ledger)
         if abs(info["pts"] - pts) >= .00001:
             raise ValueError(f"原图时间偏移 {info['name']}")
     if original != info["source"]:
@@ -81,6 +82,15 @@ def check_figure(course, info, *, ledger, art_root):
     with Image.open(local_child(art_root, info["name"])) as image:
         if image.size != expected.size or ImageChops.difference(image.convert("RGB"), expected).getbbox():
             raise ValueError(f"原图与原件的裁图不符 {info['name']}")
+
+
+def check_video_figures(course, selected, *, ledger, art_root):
+    if len(selected) == 1:
+        check_figure(course, selected[0], ledger=ledger, art_root=art_root)
+        return
+    lesson = selected[0]["lesson"]
+    for info, native in zip(selected, orig_many(course, lesson, (row["pts"] for row in selected), ledger=ledger)):
+        check_figure(course, info, ledger=ledger, art_root=art_root, native=native)
 
 
 def verify_links(course, deliver, *, art_root):
@@ -238,14 +248,17 @@ def compile_textbook(course, work, ledger, *, art_root, order):
     if {unquote(raw) for raw in LOCAL_IMAGE.findall(body)} != expected:
         raise ValueError("教材配图需要使用已登记的原图标记")
     check = partial(check_figure, course, ledger=ledger, art_root=art_root)
-    video_figures = [image for image in images if "lesson" in image]
-    if len(video_figures) > 1:
+    video_figures = sorted((image for image in images if "lesson" in image), key=lambda row: (row["lesson"], row["pts"]))
+    batches = [group for _, lesson in groupby(video_figures, key=lambda row: row["lesson"])
+               for group in nearby_requests(lesson, lambda row: row["pts"])]
+    check_batch = partial(check_video_figures, course, ledger=ledger, art_root=art_root)
+    if len(batches) > 1:
         with ThreadPoolExecutor(max_workers=6) as pool:
-            for _ in pool.map(check, video_figures):
+            for _ in pool.map(check_batch, batches):
                 pass
     else:
-        for image in video_figures:
-            check(image)
+        for group in batches:
+            check_batch(group)
     # Document figures can use native PDF bindings or the PowerPoint renderer.
     for image in images:
         if "lesson" not in image:

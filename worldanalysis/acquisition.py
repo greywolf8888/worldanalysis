@@ -242,21 +242,40 @@ class Acquisition:
             raise GateError('RECONCILE_BEFORE_RESUBMIT')
         return self.operation(operation_id)
 
-    def record_submission(self, operation_id: str, *, remote_task_ref: str | None = None, errno: int = 0):
+    def record_submission(self, operation_id: str, *, remote_task_ref: str | None = None,
+                          errno: int = 0, captcha_required: bool = False):
         op = self.operation(operation_id)
         if op['state'] != 'submission_unknown':
             raise GateError('INVALID_SUBMISSION_STATE')
-        if errno in (113, 401, 403):
+        if type(errno) is not int or type(captcha_required) is not bool:
+            raise GateError('INVALID_SUBMISSION_RECEIPT')
+        if errno in (113, 401, 403, 429):
             state, reason = 'blocked', 'Provider refused; do not change channel or retry this operation'
+        elif captcha_required:
+            if remote_task_ref is not None:
+                raise GateError('INVALID_SUBMISSION_RECEIPT')
+            state, reason = 'captcha_required', 'Observed verification required; not a successful transfer receipt'
         elif errno:
             state, reason = 'submission_unknown', 'Non-success response; reconcile existing target before considering another action'
         else:
             state, reason = 'submitted', 'UI receipt retained; target read-back still required'
-        if remote_task_ref and ('://' in remote_task_ref or any(c in remote_task_ref for c in ('?', '&', '='))):
+        if remote_task_ref is not None and (not isinstance(remote_task_ref, str) or not remote_task_ref or len(remote_task_ref) > 128 or not all(c.isascii() and (c.isalnum() or c in '._-') for c in remote_task_ref)):
             raise GateError('INVALID_TASK_REFERENCE')
         self.connection.execute('UPDATE cloud_operations SET state=?,remote_task_ref=?,reason=?,updated_at=? WHERE operation_id=?', (state, remote_task_ref, reason, now(), operation_id))
         self.connection.commit()
         return self.operation(operation_id)
+
+    def handle_transfer_captcha(self, operation_id, challenge, *, resolve_destination,
+                                challenge_is_current, apply_solution, solver=None):
+        """Use the opt-in provider only for a current host-classified challenge.
+
+        This does not implement a browser driver or permit a second transfer.
+        Project policy and environment credentials load only on this branch.
+        """
+        from .transfer_captcha import handle
+        return handle(self, operation_id, challenge, resolve_destination=resolve_destination,
+                      challenge_is_current=challenge_is_current, apply_solution=apply_solution,
+                      solver=solver)
 
     def reconcile(self, operation_id: str, observed: list[dict], *, resolve_asset, destination_account_ref: str, enumeration_complete: bool) -> dict:
         op = self.operation(operation_id)

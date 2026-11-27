@@ -100,6 +100,7 @@ def preview(project):
     from acceptance import TEMPLATE, prepare_review
     from media_inventory import verify_course_media
     from publish import compile_textbook, render_preview
+    from scope_review import add_scope_summary, declaration_from_project
 
     sources = project.validate_raw()
     media = read(project.ledger / "media-summary.json")
@@ -108,9 +109,11 @@ def preview(project):
     order = read(project.work / ORDER)
     deliver, receipt, figures = compile_textbook(
         project.folder, project.work, project.ledger, art_root=project.art, order=order)
-    body = deliver[ENTRY.as_posix()]
+    scope_declaration = declaration_from_project(project)
+    body = add_scope_summary(deliver[ENTRY.as_posix()], scope_declaration)
+    deliver[ENTRY.as_posix()] = body
     render_preview(project.preview, deliver, figures, project.art)
-    template = prepare_review(project, body, order, receipt)
+    template = prepare_review(project, body, order, receipt, scope_declaration=scope_declaration)
     put(project.work / TEMPLATE, template)
     return body, figures, template
 
@@ -125,7 +128,34 @@ def reviewed_preview(project):
     review = read(review_path)
     validate_review(body, figures, review, template)
     validate_review_proofs(project, review)
+    # The production author's JSON is not the independent tester's receipt.
+    review.pop("independent_fact_review", None)
+    from independent_facts import load_independent_receipt
+
+    receipt = load_independent_receipt(body, review)
+    if receipt is not None:
+        review["independent_fact_review"] = receipt
     return body, figures, template, review
+
+
+def prepare_fact_request(project):
+    from acceptance import REVIEW, TEMPLATE, validate_scope_against_template
+    from independent_facts import review_request
+    from source_coverage import validate_source_coverage
+
+    preview_path = project.preview / ENTRY
+    review = read(project.work / REVIEW)
+    template = read(project.work / TEMPLATE)
+    if (review.get("snapshot") != template["snapshot"] or review.get("source_scope") != template["source_scope"]
+            or sha(preview_path) != template["snapshot"]["text_sha256"]):
+        raise ValueError("请从当前已生成的同版预览填写验收记录，再生成独立事实待查清单")
+    body = preview_path.read_text(encoding="utf-8")
+    validate_source_coverage(body, template["source_scope"], review)
+    validate_scope_against_template(body, review, template)
+    request = review_request(body, review)
+    path = project.work / "独立事实核验待查.json"
+    put(path, request)
+    return path, request
 
 
 def accept(project, obsidian_exe):
@@ -218,6 +248,10 @@ def main(argv=None):
     add_arguments(commands)
     catalog = commands.add_parser("refresh-catalog", help="按已交付笔记更新 Obsidian 项目总览")
     catalog.add_argument("vault", type=Path)
+    catalog.add_argument("--batch", type=Path, action="append", default=[],
+                         help="从当前同版验收及已记录批次中回填证实的分析日期")
+    catalog.add_argument("--production-evidence", type=Path, action="append", default=[],
+                         help="明确绑定核心原件和当前版次的制作日期证据")
     start = commands.add_parser("start", help="从用户提供的文件夹入库，提取文字、转写和画面候选")
     start.add_argument("source", type=Path)
     start.add_argument("--output", type=Path, help="独立课程包完整路径")
@@ -229,6 +263,7 @@ def main(argv=None):
         ("status", "查看课程包内的当前产物"),
         ("coverage", "从原件和取材记录列出独立核查范围"),
         ("preview", "编译一篇阅读稿和逐集验收填写模板"),
+        ("fact-review-template", "生成同版待独立核验的事实清单，不代替测试 agent 签收"),
         ("check-review", "运行双向内容验收，暂不发布或打开阅读器"),
         ("accept", "核验课程包预览并更新已绑定的日常阅读库"),
         ("verify", "复验课程包文件与交付状态"),
@@ -297,7 +332,7 @@ def main(argv=None):
         if args.action == "refresh-catalog":
             from vault_catalog import refresh_catalog
 
-            print(refresh_catalog(args.vault))
+            print(refresh_catalog(args.vault, manifests=args.batch, production_evidence=args.production_evidence))
             return 0
         project = (CourseProject.initialize(args.source, args.output) if args.action == "start"
                    else CourseProject.open(args.project))
@@ -322,6 +357,10 @@ def main(argv=None):
             elif args.action == "check-review":
                 reviewed_preview(project)
                 print("双向内容核对通过，尚未发布")
+            elif args.action == "fact-review-template":
+                path, request = prepare_fact_request(project)
+                print(f"{path} · {len(request['facts'])} 项待核事实")
+                print(f"测试 agent 回执位置：{request['receipt_path']}")
             elif args.action == "window":
                 from frames import review_window
 
@@ -358,20 +397,23 @@ def main(argv=None):
                 print(project.work / "验收填写模板.json")
             else:
                 from acceptance import verify_publication
+                from scope_review import publication_scope
                 from vault_delivery import confirm, delivery, delivery_status, install
 
                 record = accept(project, args.obsidian_exe) if args.action == "accept" else verify_publication(project)
+                edition_scope = publication_scope(record)
                 if args.action == "deliver":
                     if record["review"].get("schema") != 2:
                         raise ValueError("旧版回执可复验现有交付，重新发布需要先完成新版双向内容验收")
-                    print(json.dumps(install(project, record, args.vault, args.course_folder, args.reviewed_previous),
+                    print(json.dumps({**install(project, record, args.vault, args.course_folder, args.reviewed_previous),
+                                      **edition_scope},
                                      ensure_ascii=False, indent=2))
                     return 0
                 if args.action == "confirm-vault":
-                    print(json.dumps(confirm(project, record, read(args.observation)), ensure_ascii=False, indent=2))
+                    print(json.dumps({**confirm(project, record, read(args.observation)), **edition_scope}, ensure_ascii=False, indent=2))
                     return 0
                 if args.action == "verify-reader":
-                    print(json.dumps(verify_reader(project, record, args.obsidian_exe), ensure_ascii=False, indent=2))
+                    print(json.dumps({**verify_reader(project, record, args.obsidian_exe), **edition_scope}, ensure_ascii=False, indent=2))
                     return 0
                 if args.action == "accept" and delivery(project):
                     install(project, record)
@@ -386,7 +428,7 @@ def main(argv=None):
                                   "embedded_videos": sum("embedded" in row and row.get("kind") != "audio" for row in episodes),
                                   "attachments": len(record["review"]["documents"]),
                                   "images": len(record["outputs"]) - 1,
-                                  "vault_delivery": live}, ensure_ascii=False, indent=2))
+                                   "vault_delivery": live, **edition_scope}, ensure_ascii=False, indent=2))
         return 0
     except subprocess.CalledProcessError as error:
         detail = error.stderr.decode("utf-8", "replace")[-1500:] if isinstance(error.stderr, bytes) else ""

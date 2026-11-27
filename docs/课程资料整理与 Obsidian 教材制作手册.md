@@ -30,12 +30,14 @@ $courseTool = '_tools/course_production/course.ps1'
 `start` 自动完成原件盘点、附件读取、视频转写和画音候选扫描。随后从它回报的课程包继续。重复 `start` 会核对输入和入库快照，复用可用的处理结果。拿到已有课程包时可直接从快照续作。
 
 ~~~powershell
-$course = 'G:\Worldanalysis\整理结果\课程教材\一门课'
+$course = Join-Path (Get-Location) '整理结果\课程教材\一门课'
 & $courseTool status $course
 & $courseTool prepare $course
 ~~~
 
 `status` 列出课程包和现有产物。`verify` 核实课程包和日常库的交付状态，`verify --require-vault` 要求当前版本已经在日常库重开验收。课程文件发生变化时，为新输入建独立包，或者恢复已登记的快照来续作旧包。
+
+新稿预览前在课程包 `.course/work/范围验收.json` 声明 `scope_status`、`scope_gaps`、`scope_teaching` 和必要的 `scope_resolutions`。实际 JSON 结构、来源定位、历史缺件处置及独立测试填写见 [本地教材验收](../.agents/skills/course-material-archive/acceptance.md)。范围说明自动生成在最终正文，且与事实待查回执绑定。未收到的非核心资料不阻塞收到范围出版；核心缺件按收到内容完成后标为核心待补。已经收到的文件依然必须全量核对。新旧范围验收不混淆。
 
 ### 运行环境
 
@@ -274,7 +276,7 @@ PDF 的 URI 链接注释离线保存到提取结果的 `metadata.pdf_hyperlinks`
 
 `deliver` 返回日常库实际路径 `entry`、Obsidian 直达链接 `uri`、正文指纹 `sha256` 和落库时间 `installed_at`。链接使用 Obsidian 支持的 `obsidian://open?path=...`，可直接从课单或验收记录打开。 [Obsidian 直达链接](https://obsidian.md/help/Extending%2BObsidian%2BURI)
 
-首次发布会在读者看不到的同盘临时区准备副本，核对正文和链接后把完整项目目录一次移入库。这样 Obsidian 看到新项目时，正文、原图和引用的原件已经到齐。首次 `deliver` 和已绑定课程的 `accept` 都更新 `00 入口/00 项目总览.md`。Obsidian 文件列表按名称升序，展开最前面的 `00 入口` 即可打开总览。总览正文按已发布教材的最近更新时间排列。`refresh-catalog <日常库路径>` 可手动重建程序维护区，并迁移根目录的纯程序生成旧版总览。已有手写内容的旧页保留原位。若日常窗口曾漏掉外部写入，先在实际窗口重载一次并打开总览。后续在打开的库中确认新项目显示，独立阅读回执仍记录整篇核对。
+首次发布会在读者看不到的同盘临时区准备副本，核对正文和链接后把当前已核范围的完整项目目录一次移入库。这样 Obsidian 看到新项目时，正文、原图和引用的原件已经到齐。首次 `deliver`、已绑定课程的 `accept`、日常同版阅读确认与已登记批次状态变更都更新 `00 入口/00 项目总览.md`。Obsidian 文件列表按名称升序，展开最前面的 `00 入口` 即可打开总览。保留分析日期和制作日期两个排序视图，同一实际笔记只计一次；每个入口标记范围状态。旧版没有新版范围证明时显示历史已发布，当前安装未重开先显示待验；同源复用、留档、待原件及待复审另列，不计作额外项目教材。`refresh-catalog <日常库路径> --batch <批次清单>` 可重新绑定并重建总览，后续不带参数的刷新也读该库 `.obsidian/worldanalysis-catalog-sources.json` 已登记批次；只读调度不重写总览。已有手写内容的旧页保留原位。独立阅读回执仍记录整篇核对。
 
 `verify-reader` 从日常库中读取已交付的正文和链接文件，在独立 Obsidian 环境按该项目路径打开、关闭后重开，读到所有章节和文末，确认全部图片已加载、出处默认折叠以及页面无横向溢出。回执保存于 `.course/work/日常库接口验收/`，其版本摘要记录于 `.course/ledger/obsidian-delivery.json`。有额外实际窗口观察时可运行 `confirm-vault <课程包> <观察记录.json>`。手填记录须有同一版的 `entry`、`sha256`、`installed_at`，以及阅读模式、重开、页尾、折叠、引文、已看到的章节和图片，字段详见命令校验。
 
@@ -321,7 +323,9 @@ Word 字段中的链接可能和显示网址不同，核对两者及所在段落
 & $courseTool batch finish $batchManifest 1 $course
 ~~~
 
-`claim` 绑定现有包、原件指纹和目标文件夹，同一项目中断后从绑定信息续做。遇到同源重复时查原包和重复内容，确需独立项目笔记用 `--separate` 记录依据。待补的项目用 `batch defer` 记录所需原件和影响，下一项可继续。补件后用 `batch reopen`，核实变动时再明确登记变更。批次目录新增一级项目时用 `batch refresh` 纳入，既有顺位编号保留。`finish` 复验本项目的原件、已验收正文及同版 Obsidian 阅读回执后更新批次。清单、原件和回执留在本地。
+`claim` 绑定现有包、原件指纹和目标文件夹，同一项目中断后从绑定信息续做。遇到同源重复时查原包和重复内容，确需独立项目笔记用 `--separate` 记录依据。对于只有指引、没有实质教学原件或收到资料确不可处理的项目，用 `batch defer` 记录所需原件和影响，下一项继续。收到实质教学原件的项目不得因未取得外部配套提前停止，按全部已收范围取材并验收，正确区分完整、配套待补、核心待补。补件后用 `batch reopen`，核实变动时再明确登记变更；无需等待其它缺件全部齐全。批次目录新增一级项目时用 `batch refresh` 纳入，既有顺位编号保留。`finish` 复验本项目的收到原件、独立签收正文及同版 Obsidian 阅读回执后按真实范围更新批次。清单、原件和回执留在本地。
+
+在已完成逐行审计的旧混合待补批次，`batch audit-migrate <清单> <完整审计JSON> --priority <用户指定顺位...>` 默认只读计划；实际写入须加 `--apply`。原台账和生产控制指纹、逐行身份、实际原件、既有同名笔记/回证须匹配，不能仅凭名称或目录数量迁移。迁移一次后重复执行幂等。关联待补跟随主项目，不反复重新领取；登记本批已有复用或留档可用 `batch reuse <清单> <顺位> --related <主项目顺位> --evidence <证据JSON> --reason <核实说明>` 和 `batch archive <清单> <顺位> --evidence <证据JSON> --reason <核实说明>`。对本批外的已签历史教材，用同一 `reuse` 命令的 `--canonical-package <实际历史课程包>` 代替 `--related`。证据绑定实际来源 ID、原件 SHA、明确结论；同源还绑定已签收主项目身份与原件指纹，本批外的同源证据还须绑定主包绝对路径及签收正文 SHA。留档依据为 `schema:1, kind:archive, source_id, source_sha256, basis`；同源 `kind:same_source`，并提供对应的 `canonical_id` 或 `canonical_package`、`canonical_source_sha256`，本批外需 `canonical_publication_sha256`。同源附属收到新材料后查看调度的 `changed_waiting_sources`、`alias_followups`，用 `batch alias-review <清单> <顺位> --resolution pending|reuse|separate --evidence <证据JSON> --reason <核实说明>` 核定继续随主课补件、同版复用或有实证的新独立版本，保留原身份。具体命令和字段以 `batch --help` 和实际回执为准。
 
 处理中发现另一个本地目录含同课缺讲时，比较共有视频的讲名、时长、多个时间点的画面和声音。转码可能改变文件哈希，可以用对齐后的音画核实。逐件检查另版独有教材、名片和附加资料，记录补入文件的路径、指纹及归属依据。把当前全部原件和确定的新增原件放在独立补料目录，经 `start` 建立另一份课程包。
 

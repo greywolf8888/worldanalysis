@@ -176,7 +176,9 @@ def install(project, publication, vault=None, folder=None, reviewed_previous=Non
         state = {**binding, "entry": str(entry), "uri": obsidian_uri(entry), "sha256": expected,
                  "installed_at": datetime.now(timezone.utc).isoformat(), "observation": None}
         put(project.ledger / DELIVERY, state)
-    refresh_catalog(vault)
+    # Register this delivery even before reader confirmation, so an intervening
+    # empty-context refresh cannot mistake it for a scope-accepted edition.
+    refresh_catalog(vault, packages=(project.folder,))
     return state
 
 
@@ -197,6 +199,7 @@ def confirm(project, publication, observed):
         raise ValueError("需记录同一版教材在日常 Obsidian 库重开后的章节、配图和阅读结果")
     state["observation"] = observed
     put(project.ledger / DELIVERY, state)
+    refresh_catalog(Path(state["vault"]), packages=(project.folder,))
     return state
 
 

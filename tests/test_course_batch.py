@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_tools/course_prod
 import batch
 from project import CourseProject, ENTRY, put, sha
 from reader_review import snapshot
+from independent_facts import review_request
+from scope_review import add_scope_summary
 from source_coverage import coverage_review_template, fingerprint
 from vault_delivery import confirm, install
 
@@ -46,11 +48,25 @@ class CourseBatchTest(unittest.TestCase):
         (path / "资料/说明.md").write_text(data, encoding="utf-8")
         return path
 
-    def existing_publication(self, source, package, *, vault=None, folder=None, observed=True, legacy=False):
+    def existing_publication(self, source, package, *, vault=None, folder=None, observed=True, legacy=False,
+                             scope_status="完整验收", scope_gaps=(), unclassified=False, scope_resolutions=()):
         project = CourseProject.initialize(source, package)
+        prior_scope = None
+        if project.entry.is_file():
+            old_sha = sha(project.entry)
+            previous = batch.read(project.ledger / f"publications/{old_sha}.json")
+            if previous.get("scope_gaps"):
+                prior_scope = {"publication_sha256": old_sha, "gaps": previous["scope_gaps"]}
         document = "资料/说明.md"
         text = f"# 项目\n\n## 实操\n\n准备资料。 <!-- 段落出处 {document} · 首段 -->\n"
-        project.entry.parent.mkdir()
+        declaration = None
+        if not legacy and not unclassified:
+            declaration = {"scope_status": scope_status, "scope_gaps": list(scope_gaps),
+                           "scope_resolutions": list(scope_resolutions),
+                           "scope_teaching": [{"source": document + " · 首段", "anchor": "准备资料",
+                                                "observation": "本地原说明记录了准备资料的实际步骤"}]}
+            text = add_scope_summary(text, declaration)
+        project.entry.parent.mkdir(exist_ok=True)
         project.entry.write_bytes(text.encode("utf-8"))
         body_sha = sha(project.entry)
         record = {
@@ -71,6 +87,20 @@ class CourseBatchTest(unittest.TestCase):
             coverage["claims"][0].update(outcome="原件已核", note="已对照原说明")
             record["review"].update(schema=2, source_scope=scope, source_coverage=coverage)
             record["review"]["snapshot"]["source_scope_sha256"] = fingerprint(scope)
+        if declaration is not None:
+            record.update(scope_status=scope_status, scope_gaps=list(scope_gaps),
+                          scope_resolutions=list(scope_resolutions))
+            review = record["review"]
+            review.update(scope_review_schema=1, scope_document_candidates=["D001"],
+                          scope_prior=prior_scope, **declaration)
+            receipt = review_request(text, review)
+            receipt.update(reviewer={"role": "测试agent", "thread_id": "batch-test-fixture",
+                                     "reviewed_at": "2026-11-26T00:00:00+08:00"}, decision="通过")
+            acceptance = receipt["scope_acceptance"]
+            acceptance.update(decision="通过", coverage_observation="隔离测试确认实际教学和已知未到手缺件")
+            for item in acceptance["gaps"] + acceptance["teaching"] + acceptance.get("resolutions", []):
+                item.update(decision="通过", review_observation="隔离测试已核实范围对应")
+            review["independent_fact_review"] = receipt
         put(project.ledger / "publications" / f"{body_sha}.json", record)
         state = install(project, record, vault or self.vault, folder)
         if observed:
@@ -184,6 +214,135 @@ class CourseBatchTest(unittest.TestCase):
         self.existing_publication(source, package, legacy=True)
         self.assertIn("当前来源覆盖验收", self.command("finish", self.state, 1, package, success=False))
         self.assertEqual(self.command("status", self.state)["counts"], {batch.ACTIVE: 1})
+
+    def test_new_schema_without_scope_still_cannot_be_new_complete_acceptance(self):
+        source = self.source_folder("文档项目", "课程说明")
+        self.initialize()
+        package = self.root / "无明确范围的新旧稿"
+        self.command("claim", self.state, 1, package)
+        self.existing_publication(source, package, unclassified=True)
+        self.assertIn("缺明确范围签收状态", self.command("finish", self.state, 1, package, success=False))
+        self.assertEqual(self.command("status", self.state)["counts"], {batch.ACTIVE: 1})
+
+    def test_core_and_support_scopes_advance_queue_and_keep_same_entry(self):
+        source = self.source_folder("第1项 原有课", "首章课程说明")
+        second = self.source_folder("第2项", "另一门原课程")
+        self.initialize()
+        package = self.root / "第一课程包"
+        self.command("claim", self.state, 1, package, "--course-folder", "原有同名阅读入口")
+        gap = {"item": "续讲.mp4", "kind": "核心", "source": "资料/说明.md · 首段",
+               "impact": "原课程续讲需要补齐", "obtain": "取得课方同版本独立原片"}
+        self.existing_publication(source, package, folder="原有同名阅读入口",
+                                  scope_status="核心待补", scope_gaps=[gap])
+        finished = self.command("finish", self.state, 1, package)
+        self.assertEqual(finished["status"], batch.CORE_PENDING)
+        self.assertEqual(finished["scope_gaps"], [gap])
+        old_entry = finished["publication"]["entry"]
+        self.assertEqual(self.command("status", self.state)["next"], 2)
+
+        second_package = self.root / "第二课程包"
+        self.command("claim", self.state, 2, second_package)
+        support = {**gap, "item": "可选课后练习模板", "kind": "非核心"}
+        self.existing_publication(second, second_package, scope_status="配套待补", scope_gaps=[support])
+        self.assertEqual(self.command("finish", self.state, 2, second_package)["status"], batch.SUPPLEMENT_PENDING)
+        self.assertIsNone(self.command("status", self.state)["next"])
+
+        reopened = self.command("reopen", self.state, 1, "--accept-changes", "再次对照原课程范围")
+        self.assertEqual(reopened["publication"]["entry"], old_entry)
+        self.command("claim", self.state, 1, package)
+        self.existing_publication(source, package, folder="原有同名阅读入口")
+        self.assertIn("此前明确缺件", self.command("finish", self.state, 1, package, success=False))
+        resolution = {"item": gap["item"], "source": "资料/说明.md · 首段",
+                      "resolution": "经复核原缺件不成立", "note": "隔离测试核实该续讲是相同章节重复标识"}
+        self.existing_publication(source, package, folder="原有同名阅读入口", scope_resolutions=[resolution])
+        updated = self.command("finish", self.state, 1, package)
+        self.assertEqual(updated["status"], batch.COMPLETE)
+        self.assertEqual(updated["scope_resolutions"], [resolution])
+        self.assertEqual(updated["publication"]["entry"], old_entry)
+
+    def test_partial_scope_must_carry_previous_gap_or_verified_resolution(self):
+        old = {"scope_gaps": [{"item": "旧缺件"}]}
+        with self.assertRaisesRegex(ValueError, "上一版缺件"):
+            batch.require_gap_disposition(old, {"scope_status": "核心待补",
+                "scope_gaps": [{"item": "另一个缺件"}], "scope_resolutions": []})
+        with self.assertRaisesRegex(ValueError, "旧项目已登记缺件"):
+            batch.require_gap_disposition({"re_review": {"gaps_before_review": "旧审计反映缺件"}},
+                {"scope_status": "完整验收", "scope_gaps": [], "scope_resolutions": []})
+
+    def test_same_source_alias_reuses_one_partial_edition_and_changed_source_waits_for_review(self):
+        source = self.source_folder("第1项 主课", "课程正文")
+        alias = self.source_folder("第2项 同源来件", "课程正文")
+        self.initialize()
+        saved = batch.read(self.state)
+        saved["projects"][1].update(status=batch.DEFERRED, same_source_primary=1,
+                                    re_review={"state": "关联待复审"})
+        put(self.state, saved)
+        package = self.root / "主课程包"
+        self.command("claim", self.state, 1, package)
+        gap = {"item": "配套练习文件", "kind": "非核心", "source": "资料/说明.md · 首段",
+               "impact": "练习辅助尚缺", "obtain": "取得课方授权的原件"}
+        self.existing_publication(source, package, scope_status="配套待补", scope_gaps=[gap])
+        primary = self.command("finish", self.state, 1, package)
+        queue = batch.read(self.state)
+        related = queue["projects"][1]
+        self.assertEqual(related["status"], batch.REUSED)
+        self.assertEqual(related["publication"], primary["publication"])
+        self.assertEqual(related["scope_gaps"], [gap])
+        self.assertEqual(len([p for p in self.vault.glob("*/课件/*.md")]), 1)
+        (alias / "独立新增材料.txt").write_text("新教案", encoding="utf-8")
+        meta = batch.metadata(alias)
+        _, _, identity = batch.identify(queue, {**related, "metadata": meta, "source_sha256": None})
+        evidence = self.root / "同源补料核证.json"
+        proof = {"schema": 1, "kind": "alias_review", "source_id": related["id"],
+                 "source_sha256": identity["source_sha256"], "canonical_id": primary["id"],
+                 "canonical_source_sha256": primary["source_sha256"], "resolution": "pending",
+                 "basis": "夹具核实新增的材料需要主课复核"}
+        put(evidence, proof)
+        pending = self.command("alias-review", self.state, 2, "--resolution", "pending",
+                               "--evidence", evidence, "--reason", "主课待加入材料")
+        self.assertTrue(pending["requires_alias_resolution"])
+        self.command("finish", self.state, 1, package)
+        self.assertEqual(batch.read(self.state)["projects"][1]["status"], batch.DEFERRED)
+        proof.update(resolution="reuse", canonical_publication_sha256=primary["publication"]["sha256"])
+        put(evidence, proof)
+        self.assertIn("主稿仍为旧版", self.command("alias-review", self.state, 2, "--resolution", "reuse",
+                                                "--evidence", evidence, "--reason", "复核同源",
+                                                success=False))
+
+    def test_external_canonical_package_reuses_only_the_verified_existing_entry(self):
+        self.source_folder("同源来件", "课程正文")
+        historical_source = self.root / "旧课程原件"
+        (historical_source / "资料").mkdir(parents=True)
+        (historical_source / "资料/说明.md").write_text("课程正文", encoding="utf-8")
+        historical_package = self.root / "历史课程包"
+        project, _, observed = self.existing_publication(historical_source, historical_package,
+            folder="真实旧入口", legacy=True)
+        self.initialize()
+        queue = batch.read(self.state)
+        row = queue["projects"][0]
+        _, _, identity = batch.identify(queue, row)
+        evidence = self.root / "历史同源核证.json"
+        proof = {"schema": 1, "kind": "same_source", "source_id": row["id"],
+                 "source_sha256": identity["source_sha256"],
+                 "canonical_package": str(project.folder),
+                 "canonical_source_sha256": batch.source_fingerprint(project.validate_raw()),
+                 "canonical_publication_sha256": "0" * 64,
+                 "basis": "隔离测试已核实两份同源原件正文和实际历史签收入口"}
+        put(evidence, proof)
+        unchanged = self.state.read_bytes()
+        self.assertIn("历史主包同源证据", self.command("reuse", self.state, 1, "--canonical-package",
+            historical_package, "--evidence", evidence, "--reason", "核实同源", success=False))
+        self.assertEqual(self.state.read_bytes(), unchanged)
+        proof["canonical_publication_sha256"] = observed["sha256"]
+        put(evidence, proof)
+        reused = self.command("reuse", self.state, 1, "--canonical-package", historical_package,
+            "--evidence", evidence, "--reason", "核实同源")
+        self.assertEqual(reused["status"], batch.REUSED)
+        self.assertIsNone(reused["scope_status"])
+        self.assertEqual(reused["reuse_target"]["package"], str(project.folder))
+        self.assertEqual(reused["publication"]["entry"], observed["entry"])
+        self.assertEqual(len([p for p in self.vault.glob("*/课件/*.md")]), 1)
+        self.assertIsNone(self.command("status", self.state)["next"])
 
     def test_refresh_keeps_existing_ids_and_claims_pending_in_natural_order(self):
         initial = self.source_folder("第20项", "课程说明")

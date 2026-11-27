@@ -112,28 +112,28 @@ async function main(){
   const vault=path.join(qa,"搬移后的学习库"),roam=path.join(qa,"roaming"),local=path.join(qa,"local");
   const profile=path.join(roam,"obsidian");
   const cases=new Map();
-  await prepareNote(vault, cases, folder, preview, entry);
-  await configureVault(vault);
-  for(const d of [profile,local]) await fs.mkdir(d,{recursive:true});
-  await fs.writeFile(path.join(profile,"obsidian.json"),JSON.stringify({vaults:{a73c12e5f03b94d6:{path:vault,ts:Date.now(),open:true}},updateDisabled:true}));
-  const exeCandidates = process.env.OBSIDIAN_EXE ? [process.env.OBSIDIAN_EXE] :
-    [process.env.LOCALAPPDATA, process.env.ProgramFiles].filter(Boolean)
-      .map(folder => path.join(folder, "Obsidian", "Obsidian.exe"));
-  let exe;
-  for (const candidate of exeCandidates) {
-    if (await fs.stat(candidate).then(value => value.isFile(), () => false)) {
-      exe = candidate;
-      break;
-    }
-  }
-  if (!exe) throw Error("找不到 Obsidian，请用 --obsidian-exe 或 OBSIDIAN_EXE 指定位置");
-  const app=spawn(exe,["--user-data-dir="+profile,"--remote-debugging-port=0","--remote-debugging-address=127.0.0.1",
-    "--disable-background-networking","--disable-component-update","--no-first-run","--disable-gpu",
-    "--disable-background-timer-throttling","--disable-renderer-backgrounding","--disable-backgrounding-occluded-windows",
-    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost"],{cwd:qa,windowsHide:true,
-    env:{...process.env,APPDATA:roam,LOCALAPPDATA:local,TEMP:qa,TMP:qa},stdio:"ignore"});
-  let browser, client, passed=false;
+  let app, browser, client, passed=false;
   try {
+    await prepareNote(vault, cases, folder, preview, entry);
+    await configureVault(vault);
+    for(const d of [profile,local]) await fs.mkdir(d,{recursive:true});
+    await fs.writeFile(path.join(profile,"obsidian.json"),JSON.stringify({vaults:{a73c12e5f03b94d6:{path:vault,ts:Date.now(),open:true}},updateDisabled:true}));
+    const exeCandidates = process.env.OBSIDIAN_EXE ? [process.env.OBSIDIAN_EXE] :
+      [process.env.LOCALAPPDATA, process.env.ProgramFiles].filter(Boolean)
+        .map(folder => path.join(folder, "Obsidian", "Obsidian.exe"));
+    let exe;
+    for (const candidate of exeCandidates) {
+      if (await fs.stat(candidate).then(value => value.isFile(), () => false)) {
+        exe = candidate;
+        break;
+      }
+    }
+    if (!exe) throw Error("找不到 Obsidian，请用 --obsidian-exe 或 OBSIDIAN_EXE 指定位置");
+    app=spawn(exe,["--user-data-dir="+profile,"--remote-debugging-port=0","--remote-debugging-address=127.0.0.1",
+      "--disable-background-networking","--disable-component-update","--no-first-run","--disable-gpu",
+      "--disable-background-timer-throttling","--disable-renderer-backgrounding","--disable-backgrounding-occluded-windows",
+      "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost"],{cwd:qa,windowsHide:true,
+      env:{...process.env,APPDATA:roam,LOCALAPPDATA:local,TEMP:qa,TMP:qa,TMPDIR:qa},stdio:"ignore"});
     const port=await until(async()=>Number((await fs.readFile(path.join(profile,"DevToolsActivePort"),"utf8")).split(/\r?\n/)[0]),20000);
     const url="http://127.0.0.1:"+port;
     const ver=await (await fetch(url+"/json/version")).json();
@@ -205,7 +205,7 @@ async function main(){
           }
         };
         let expanded=0, title="", formula=false, code=false, table=false, reachedBottom=false, horizontalOverflow=false;
-        let bottomRepeats=0;
+        let bottomRepeats=0, repeats=0; const pastMissing=[];
         const walkStarted=performance.now();
         for(let pos=0;performance.now()-walkStarted<${walkBudget};){
           view.scrollTop=pos; await wait(85);
@@ -216,6 +216,16 @@ async function main(){
             else {node.click(); expanded++;}
           }
           if(expanded>expandedBefore)await wait(65);
+          // A mounted image can still be decoding when the reading view moves past it.
+          // Give visible pending images a bounded chance to finish before the next scroll.
+          const bounds=view.getBoundingClientRect();
+          const pendingImages=[...view.querySelectorAll("img")].filter(image=>{
+            const rect=image.getBoundingClientRect();
+            return (!image.complete || !image.naturalWidth) && rect.top<bounds.bottom && rect.bottom>=bounds.top;
+          });
+          if(pendingImages.length){
+            await Promise.race([Promise.allSettled(pendingImages.map(image=>image.decode())),wait(700)]);
+          }
           for(const i of view.querySelectorAll("img")){
             const src=i.getAttribute("src")||"";
             if(i.complete && i.naturalWidth>0){
@@ -253,6 +263,10 @@ async function main(){
           // Obsidian can briefly report a smaller document before the next chunks are mounted.
           bottomRepeats=atBottom ? bottomRepeats+1 : 0;
           if(atBottom && sawEnding && bottomRepeats>=2){reachedBottom=true;break;}
+          if(bottomRepeats>=4 && !sawEnding && repeats<2){
+            pastMissing.push(expectedImages.filter(name=>!seen.has(name)).length);
+            repeats++; bottomRepeats=0; pos=0; view.scrollTop=0; await wait(400); continue;
+          }
           if(bottomRepeats>=20)break;
           pos=view.scrollTop+Math.max(120,view.clientHeight*0.68);
         }
@@ -271,7 +285,7 @@ async function main(){
             !!cache?.headings?.some(h=>h.heading===mark)));
           return {link:l.link,found};
         });
-        return {file:target.path,mode:leaf.view.getMode(),title,expanded,reopened:${installed},reachedBottom,
+        return {file:target.path,mode:leaf.view.getMode(),title,expanded,reopened:${installed},reachedBottom,repeats,pastMissing,
           sections:[...sections],closedAppendices:[...closedAppendices],
           images:[...seen].map(([name,size])=>({name,...size})),
           internal, formula, code, table, rawLinks:urls.size,
@@ -280,7 +294,9 @@ async function main(){
           clientWidth:view.clientWidth, scrollWidth:view.scrollWidth,
           scrollTop:view.scrollTop,scrollHeight:view.scrollHeight,clientHeight:view.clientHeight,overflowElements};
       })()`,walkBudget+30000);
-      info.document_sha256=cases.get(file).digest;
+      const actualDigest=createHash("sha256").update(await fs.readFile(path.join(vault,file))).digest("hex");
+      if(actualDigest!==noteCase.digest) throw Error("阅读过程中文档版本发生变化 "+file);
+      info.document_sha256=actualDigest;
       checks.push(info);
     }
     const result={version:ver.Browser,testVault:vault,checks};
@@ -294,20 +310,22 @@ async function main(){
       })());
     if(unreadable.length){
       await fs.writeFile(path.join(qa,"incomplete-render.json"),JSON.stringify(result,null,2));
-      throw Error("Incomplete reading-view checks "+JSON.stringify(unreadable.map(v=>({
-        file:v.file,reachedBottom:v.reachedBottom,sections:v.sections,closedAppendices:v.closedAppendices,
-        links:v.internal.filter(x=>!x.found),images:v.images.map(x=>[x.name,x.fit]),raw:v.rawLinks,
-        missingRawLinks:v.missingRawLinks,
-        formula:v.formula,code:v.code,table:v.table,visibleCitations:v.visibleCitations,
-        overflow:v.horizontalOverflow,extended:v.overflowElements})))+" "+qa);
+      throw Error(`Incomplete reading-view checks: ${unreadable.length} notes; full observations: ${path.join(qa,"incomplete-render.json")}`);
     }
     await fs.writeFile(output, JSON.stringify({version:ver.Browser,checks},null,2)+"\n");
     passed=true;
     console.log("Rendered",checks.length,"notes and",checks.reduce((a,v)=>a+v.images.length,0),"images");
+  }catch(error){
+    // Keep the full isolated evidence, including failures before the application starts.
+    const diagnostic=path.join(qa,"failure-report.json");
+    const expected=[...cases.entries()].map(([file,c])=>({file,digest:c.digest,images:c.images,
+      urls:c.urls,appendices:c.appendices}));
+    await fs.writeFile(diagnostic,JSON.stringify({error:String(error),folder,preview,entry,expected},null,2)+"\n");
+    throw Error(`${String(error.message||error).slice(0,1200)}; failure evidence: ${diagnostic}`);
   }finally{
     if(browser){try{await browser.call("Browser.close");}catch{} browser.ws.close();}
     if(client)client.ws.close();
-    if(app.exitCode===null){await delay(1200); if(app.exitCode===null) app.kill();}
+    if(app && app.exitCode===null){await delay(1200); if(app.exitCode===null) app.kill();}
     if(passed && path.dirname(path.resolve(qa)) === path.resolve(working)) {
       await fs.rm(qa,{recursive:true,force:true,maxRetries:3}).catch(() => {});
     }

@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -220,11 +221,21 @@ def prepare_project_media(project, videos, documents, gpu=None, *, routing_unres
         original_cues = cues
         audio_scope = []
         audio_error = None
+        shared_stats = None
         try:
             if audio and gpu:
                 identity = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
                 cache = project.work / "音轨取材" / f"{number:02}" / identity
-                rows = gpu.transcribe(sound, duration, track, language, offset, cache=cache)
+                share = os.environ.get("WORLDANALYSIS_ASR_EXACT_CACHE", "1") == "1"
+                audio_hash = (sources[reference]["sha256"] if reference else
+                              recovery["file_sha256"] if recovery and source == recovered else item["sha256"])
+                # Keep project-specific path/lesson and adopted transcript outside this cache.
+                exact = {"raw_sha256": item["sha256"], "audio_sha256": audio_hash,
+                         "settings": prefs, "subtitle_sha256": signature["subtitle_sha256"],
+                         "kind": kind, "recovery": recovery, "embedded": item.get("embedded")}
+                rows = gpu.transcribe(sound, duration, track, language, offset, cache=cache, shared_context=exact,
+                                      use_shared_cache=share)
+                shared_stats = {"enabled": share, **gpu.shared_cache_stats}
                 audio_scope = gpu.decoded_windows
                 cues = [{"start": row["start"], "end": row["end"], "text": row["text"]}
                         for row in rows if row["text"]]
@@ -268,6 +279,8 @@ def prepare_project_media(project, videos, documents, gpu=None, *, routing_unres
                   "cues": cues, "speech_windows": rows}
         if audio_error:
             record["audio_error"] = audio_error
+        if shared_stats is not None:
+            record["asr_exact_cache"] = shared_stats
         if recovery:
             record["recovery"] = recovery
         if "embedded" in item:

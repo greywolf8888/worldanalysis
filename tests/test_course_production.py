@@ -392,12 +392,35 @@ class CourseProductionTest(unittest.TestCase):
 
     def publish(self, expected_videos):
         self.assertFalse((self.package / ENTRY).exists())
+        # Explicit isolated fixture approval. Real courses require a separate tester from production.
+        self.command("preview", self.package)
+        with patch.dict(self.env, {"WORLDANALYSIS_COURSE_RUNTIME": str(self.root / "fixture-runtime")}):
+            self.command("fact-review-template", self.package)
+            receipt = self.data(self.work / "独立事实核验待查.json")
+            receipt.update(reviewer={"role": "测试agent", "thread_id": "scope-integration-fixture",
+                                     "reviewed_at": "2026-11-26T00:00:00+08:00"}, decision="通过")
+            for fact in receipt["facts"]:
+                fact.update(decision="通过", observation="隔离合成原件已对照正文中的动作或参数",
+                            evidence="本测试夹具的原始教学画板和讲义")
+            scope = receipt["scope_acceptance"]
+            scope.update(decision="通过", coverage_observation="隔离夹具已核对收到的原始教学录屏和配套内容")
+            for row in scope["teaching"] + scope["gaps"] + scope["resolutions"]:
+                row.update(decision="通过", review_observation="隔离夹具确认原件内容、缺件边界及可见正文")
+            path = Path(receipt["receipt_path"])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.save(path, receipt)
+            self.publish_after_fixture_approval(expected_videos)
+
+    def publish_after_fixture_approval(self, expected_videos):
         if OBSIDIAN:
             self.command("accept", self.package, "--obsidian-exe", OBSIDIAN)
             verified = self.command("verify", self.package)
             self.assertIn(f'"videos": {expected_videos}', verified)
             self.assertTrue(json.loads(verified)["package_verified"])
             self.assertFalse(json.loads(verified)["verified"])
+            declaration = self.data(self.work / "范围验收.json")
+            self.assertEqual(json.loads(verified)["scope_status"], declaration["scope_status"])
+            self.assertEqual(json.loads(verified)["scope_gaps"], declaration["scope_gaps"])
             self.assertIn("尚未交付到日常", self.command("verify", self.package, "--require-vault", okay=False))
             self.assertEqual(list((self.package / "课件").rglob("*.md")), [self.package / ENTRY])
             self.assertIn("<!-- 段落出处", (self.package / ENTRY).read_text(encoding="utf-8"))
@@ -429,6 +452,12 @@ class CourseProductionTest(unittest.TestCase):
         supplemental = {"anchor": "讲义首页用于复习画板尺寸",
                         "sources": [f"{guide.name} · 第 1 页，比例和预览设置"]}
         supplement_file = self.work / "补充内容复核.json"
+        self.save(self.work / "范围验收.json", {"scope_status": "配套待补", "scope_gaps": [{
+            "item": "课堂独立练习原件", "kind": "非核心", "source": f"{resource.name} · InternetShortcut 中的 URL",
+            "impact": "已收到原始练习入口，独立练习原件本身未随本隔离课程提供",
+            "obtain": "需由课程发布方另行提供练习原件"}], "scope_teaching": [
+            {"source": f"{guide.name} · 第 1 页，比例和预览设置", "anchor": "选 3:4",
+             "observation": "隔离讲义原页显示比例和导出预览步骤"}]})
         self.save(supplement_file, [{**supplemental, "sources": [f"{guide.name} · 第 2 页"]}])
         self.command("preview", self.package)
         preview = (self.work / "阅读预览" / ENTRY).read_text(encoding="utf-8")
@@ -482,6 +511,7 @@ class CourseProductionTest(unittest.TestCase):
             self.command("verify-reader", self.package, "--obsidian-exe", OBSIDIAN)
             result = json.loads(self.command("verify", self.package, "--require-vault"))
             self.assertTrue(result["verified"])
+            self.assertEqual(result["scope_status"], "配套待补")
             render = self.work / "日常库接口验收" / f"{installed['sha256']}.json"
             self.assertTrue(self.data(render)["checks"][0]["reopened"])
             render.write_text("{}", encoding="utf-8")
@@ -640,6 +670,9 @@ class CourseProductionTest(unittest.TestCase):
         for lesson in (1, 2):
             self.save(point_dir / f"{lesson:02}.json", [
                 {"range_s": [0, 3], "kind": "画面", "source_note": "空白画板经过短暂菜单，最后显示 3:4 已应用"}])
+        self.save(self.work / "范围验收.json", {"scope_status": "完整验收", "scope_gaps": [], "scope_teaching": [
+            {"source": "第 1 讲 00:00–00:03", "anchor": "打开比例菜单",
+             "observation": "隔离录屏演示空白画板打开实际比例菜单"}]})
         self.command("preview", self.package)
         review = self.data(self.work / "验收填写模板.json")
         review_path = self.work / "验收记录.json"
