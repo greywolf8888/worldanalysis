@@ -67,8 +67,6 @@ function paintFacets() {
   if (!facetMeta) return;
   catalogFacets.render(facetTargets, facetMeta, selections, (field, value) => {
     if (selections[field] === value && filters.elements.q.value.trim() === selections.q) return;
-    const menu = facetTargets.platform.querySelector('details');
-    if (menu) menu.open = false;
     const changes = {[field]: value, q: filters.elements.q.value.trim()};
     if (field === 'category' && value !== selections.category) changes.subcategory = '';
     reset({...selections, ...changes}, true);

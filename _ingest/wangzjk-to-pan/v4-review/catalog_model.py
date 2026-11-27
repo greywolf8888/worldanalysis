@@ -11,9 +11,10 @@ from unicodedata import normalize
 from urllib.parse import urlsplit
 
 from catalog_relations import CatalogRelations
-from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, FILTER_ROLES, PLATFORMS as PLATFORM_LABELS
+from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, PLATFORMS as PLATFORM_LABELS
 from catalog_semantics import CatalogStore, article_key, relationship_input, source_input
 from catalog_topics import TOPIC_REVISION, intro_preview, project_topic
+from catalog_platforms import PLATFORM_REVISION, project_platforms
 from intro_inputs import choose_intro, intro_revision, legacy_intro, read_intros
 from share_locations import historical_share_locations, merge_share_locations, protected_owner_exports, read_protected_owner_export
 
@@ -320,7 +321,8 @@ class Library:
             category,subtopic = project_topic(value['title'],value['paragraphs'],value['excerpt'],valid,manual=record_state=='manual')
             secondary = valid.get('secondary_category','')
             secondary = secondary if secondary in TAXONOMY and secondary!=category else ''
-            live_platforms = tuple(dict.fromkeys(p['id'] for p in valid.get('platforms',[]) if p['role'] in FILTER_ROLES))
+            live_platforms = project_platforms(value['title'],value['paragraphs'],value['excerpt'],valid,
+                                               manual=record_state=='manual')
             row = {**raw, 'article_key':token, 'input_hash':relationship_input(value,valid)['input_hash'], 'analysis':valid,
                    'coverage':value['coverage'],'paragraphs':value['paragraphs'],'classification_state':{'agent':'verified','manual':'manual'}.get(record_state,'pending'),
                    'category':category,'category_label':TAXONOMY.get(category,('',()))[0],'subcategory':subtopic,
@@ -375,7 +377,7 @@ class Library:
                         'subcategories':[{'id':tag,'label':tag,'count':count(sub_sets[(key,tag)])}
                                          for tag in tags if sub_sets[(key,tag)]]})
         return {'categories':categories,'platforms':[{'id':p,'label':label,'count':count(platform_sets[p])}
-                 for p,label in PLATFORM_LABELS.items()],
+                 for p,label in PLATFORM_LABELS.items() if p!='general' or platform_sets[p]],
                 'category_aliases':CATEGORY_ALIASES,'project_count':project_count}
 
     def display_detail(self,row):
@@ -546,7 +548,7 @@ def open_index():
     if catalog_input_stamp()!=data_stamp or store.revision()!=catalog_revision:
         raise ValueError('资料读取期间发生更新，请稍后重读')
     lib.catalog_inputs_stamp=data_stamp
-    lib.snapshot_id=digest([lib.operations_snapshot_id,catalog_revision,data_stamp[-1],TOPIC_REVISION])
+    lib.snapshot_id=digest([lib.operations_snapshot_id,catalog_revision,data_stamp[-1],TOPIC_REVISION,PLATFORM_REVISION])
     facets=lib.facets()
     lib.catalog_all=lib.match({},set())
     lib.requestable_count=sum(r['requestable'] for r in lib.catalog_all)

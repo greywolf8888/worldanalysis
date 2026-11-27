@@ -11,21 +11,14 @@ from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
 from catalog_topics import CATEGORIES, CATEGORY_ALIASES, NO_TOPIC
+from catalog_platforms import PLATFORMS, FILTER_ROLES
 
 RULES = 'catalog-zh-1'
 SCHEMA = 1
 MAX_TASKS = 20
 MAX_BYTES = 512 * 1024
 MAX_TEXT = 160_000
-PLATFORMS = {
-    'xiaohongshu':'小红书', 'douyin':'抖音', 'wechat_articles':'公众号', 'wechat_video':'视频号',
-    'wechat':'微信', 'kuaishou':'快手', 'bilibili':'B站', 'tiktok':'TikTok', 'youtube':'YouTube',
-    'taobao':'淘宝', 'xianyu':'闲鱼', 'pinduoduo':'拼多多', 'jd':'京东', 'amazon':'亚马逊',
-    'meituan':'美团', 'zhihu':'知乎', 'toutiao':'头条', 'shipinhao_shop':'微信小店',
-    'taptap':'TapTap', 'fanqie':'番茄小说', 'qidian':'起点', 'general':'通用',
-}
 ROLES = {'use', 'acquire', 'receive', 'tool', 'delivery', 'mention', 'excluded'}
-FILTER_ROLES = {'use', 'acquire', 'receive'}
 RELATIONS = {'same_version','different_version','related','contains','uncertain'}
 COVERAGE = {'complete','partial','excerpt','image_only','missing'}
 IDENTITY = re.compile(r'[a-zA-Z0-9_.-]{1,128}\Z')

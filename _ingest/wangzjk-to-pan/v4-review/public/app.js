@@ -215,10 +215,6 @@ function applyFilter(changes) {
 function paintTopics() {
   catalogFacets.render(facetTargets, meta, filter, (field, id) => {
     if (filter[field] !== id || $('q').value.trim() !== filter.q) {
-      if (field === 'platform') {
-        const menu = $('platforms').querySelector('details');
-        if (menu) menu.open = false;
-      }
       applyFilter({[field]:id});
     }
   });
@@ -675,7 +671,7 @@ function relatedSection(kind, label, entries) {
 }
 function renderReader(row) {
   $('reader-title').textContent = row.title;
-  const platforms = catalogFacets.labels(row, filter.platform);
+  const platforms = catalogFacets.labels(row, filter.platform, Infinity);
   notice('reader-meta', [row.site_label, shortDate(row.published_at), row.category_label,
     platforms.join('、'), row.version_label, resourceState(row)].filter(Boolean).join(' · '));
   const article = $('reader-body');
