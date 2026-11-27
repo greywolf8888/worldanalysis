@@ -11,7 +11,7 @@
   <script defer src="/production.js"></script>
   <script defer src="/priority.js"></script>
 </head>
-<body>
+<body class="catalog-page">
 <a class="skip" href="#results">跳到资料列表</a>
 <header class="masthead">
   <div class="shell masthead-inner">
@@ -81,22 +81,21 @@
     <div id="empty" class="empty" hidden>
       <p>没有符合条件的资料。</p><button type="button" id="empty-reset">清除筛选</button>
     </div>
-    <nav id="pagination" class="pagination" aria-label="目录分页" hidden>
-      <div id="page-controls" class="page-controls" role="group" aria-label="首页、相邻页和末页">
-        <button id="first" type="button" disabled>首页</button>
-        <button id="prev" type="button" disabled>上一页</button>
-        <button id="next" type="button" disabled>下一页</button>
-        <button id="last" type="button" disabled>末页</button>
+    <nav id="pagination" class="catalog-pagination" aria-label="目录分页" hidden>
+      <span id="page-range" role="status" aria-atomic="true"></span>
+      <div class="page-controls">
+        <button id="first" class="page-edge" type="button" aria-label="首页" title="首页" disabled><span aria-hidden="true">«</span></button>
+        <button id="prev" class="page-direction" type="button" aria-label="上一页" title="上一页" disabled><span aria-hidden="true">‹</span><span class="page-direction-label">上一页</span></button>
+        <ul id="page-numbers" class="page-numbers" aria-label="直接选择页码"></ul>
+        <span id="page-label" class="page-compact-location" aria-current="page"></span>
+        <button id="next" class="page-direction" type="button" aria-label="下一页" title="下一页" disabled><span class="page-direction-label">下一页</span><span aria-hidden="true">›</span></button>
+        <button id="last" class="page-edge" type="button" aria-label="末页" title="末页" disabled><span aria-hidden="true">»</span></button>
       </div>
-      <div id="page-numbers" class="page-numbers" role="group" aria-label="相邻页码"></div>
-      <div class="page-position">
-        <span id="page-label" role="status" aria-atomic="true"></span>
-        <form id="page-jump" class="page-jump">
-          <label for="jump-number">跳到</label>
-          <input id="jump-number" name="page" type="number" min="1" step="1" inputmode="numeric" required disabled>
-          <button id="jump-submit" type="submit" disabled>前往</button>
-        </form>
-      </div>
+      <form id="page-jump" class="page-jump">
+        <label for="jump-number">跳页</label>
+        <input id="jump-number" name="page" type="number" min="1" step="1" inputmode="numeric" required disabled>
+        <button id="jump-submit" type="submit" disabled>前往</button>
+      </form>
     </nav>
   </div>
 </main>

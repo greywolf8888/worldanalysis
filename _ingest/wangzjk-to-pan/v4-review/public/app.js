@@ -203,7 +203,7 @@ function setInteractionState() {
     $('first').disabled = $('prev').disabled = blocked || page.page <= 1;
     $('next').disabled = $('last').disabled = blocked || page.page >= page.pages;
     $('jump-number').disabled = $('jump-submit').disabled = blocked || page.pages <= 1;
-    $('page-numbers').querySelectorAll('button').forEach(b => { b.disabled = blocked || b.hasAttribute('aria-current'); });
+    $('page-numbers').querySelectorAll('button').forEach(b => { b.disabled = blocked; });
   }
   if ($('draft').open) {
     const entries = draft.entries || [];
@@ -243,9 +243,10 @@ function cardExcerpt(row) {
   const excerpt = row.excerpt?.trim();
   if (!excerpt) return '';
   const title = row.title?.trim();
-  return title && excerpt.startsWith(title)
+  const preview = title && excerpt.startsWith(title)
     ? excerpt.slice(title.length).replace(/^[\s：:·，、—-]+/, '')
     : excerpt;
+  return /^(?:\[\s*(?:\.{3}|…)\s*\]|…)\s*$/u.test(preview) ? '' : preview;
 }
 function card(row) {
   const article = el('article', null, 'card');
@@ -308,27 +309,36 @@ function cardsFrom(result) {
   if (restore) cards.find(c => c.dataset.version === active.dataset.version)?.querySelector(cardType)?.focus({preventScroll:true});
 }
 function pagination() {
-  const {page:current, pages} = page;
-  $('pagination').hidden = page.total === 0;
-  $('page-controls').hidden = $('page-jump').hidden = pages <= 1;
+  const {page:current, pages, limit, total, items} = page;
+  $('pagination').hidden = pages <= 1;
+  const start = (current - 1) * limit + 1;
+  $('page-range').textContent = total ? fmt(start) + '–' + fmt(start + items.length - 1) + ' 项，共 ' + fmt(total) + ' 项' : '';
   $('page-label').textContent = '第 ' + fmt(current) + ' / ' + fmt(pages) + ' 页';
   const jump = $('jump-number');
   jump.max = String(pages);
   jump.placeholder = String(current);
   if (jump.valueAsNumber === current || jump.valueAsNumber > pages) jump.value = '';
   const holder = $('page-numbers');
-  holder.hidden = pages <= 1;
   const restoreFocus = holder.contains(document.activeElement);
-  const start = Math.max(1, Math.min(current - 2, pages - 4));
-  const pagesVisible = [];
-  for (let n = start; n <= Math.min(pages, start + 4); n++) {
-    const go = button(String(n));
-    go.setAttribute('aria-label', '第 ' + n + ' 页');
-    if (n === current) go.setAttribute('aria-current', 'page');
-    go.addEventListener('click', () => goPage(n));
-    pagesVisible.push(go);
-  }
-  holder.replaceChildren(...pagesVisible);
+  const values = pages <= 7 ? Array.from({length:pages}, (_, index) => index + 1) :
+    current <= 4 ? [1, 2, 3, 4, 5, null, pages] :
+      current >= pages - 3 ? [1, null, pages - 4, pages - 3, pages - 2, pages - 1, pages] :
+        [1, null, current - 1, current, current + 1, null, pages];
+  holder.replaceChildren(...values.map(n => {
+    const item = el('li');
+    if (n === null) {
+      item.setAttribute('aria-hidden', 'true');
+      item.append(el('span', '…', 'page-ellipsis'));
+    } else {
+      const label = (n === 1 ? '首页，第 ' : n === pages ? '末页，第 ' : '第 ') + fmt(n) + ' 页';
+      const control = n === current ? el('span', fmt(n), 'active-page') : button(fmt(n));
+      control.setAttribute('aria-label', label);
+      if (n === current) control.setAttribute('aria-current', 'page');
+      else control.addEventListener('click', () => goPage(n));
+      item.append(control);
+    }
+    return item;
+  }));
   if (restoreFocus) $('result-title').focus({preventScroll:true});
 }
 function render() {
@@ -351,6 +361,10 @@ function render() {
   }
   syncControls({search:false});
 }
+function directoryPageFilter(filters) {
+  // The catalog's list profile provides 16 results per page in either visual layout.
+  return {...filters, view:'list'};
+}
 async function query({top = false, restore = null, focusResult = false} = {}) {
   const token = ++querySequence;
   const request = {...filter};
@@ -358,7 +372,7 @@ async function query({top = false, restore = null, focusResult = false} = {}) {
   notice('error');
   setInteractionState();
   try {
-    const result = await api('/api/resources?' + new URLSearchParams(request));
+    const result = await api('/api/resources?' + new URLSearchParams(directoryPageFilter(request)));
     if (token !== querySequence) return;
     if (meta.snapshot_id !== result.snapshot_id) {
       const next = await api('/api/meta');
@@ -710,7 +724,10 @@ $('available').addEventListener('click', () => applyFilter({baidu:filter.baidu =
 $('selected').addEventListener('click', () => applyFilter({selected:filter.selected === '1' ? '0' : '1'}));
 $('order').addEventListener('change', () => applyFilter({order:$('order').value}));
 for (const view of ['grid','list']) $(view).addEventListener('click', () => {
-  if (filter.view !== view) applyFilter({view});
+  if (!loaded || filter.view === view) return;
+  filter = {...filter, view};
+  syncControls({search:false});
+  void query();
 });
 $('first').addEventListener('click', () => goPage(1));
 $('prev').addEventListener('click', () => { if (page) goPage(page.page - 1); });
@@ -725,7 +742,8 @@ for (const b of document.querySelectorAll('[data-scope]')) {
   b.addEventListener('click', () => {
     if (!page || !renderedFilter || saving || querying || b.dataset.overLimit === 'true') return;
     const count = Number(b.dataset.count);
-    confirmedAction = {action:'bulk', scope:b.dataset.scope, expected_count:count, filter:{...renderedFilter}, snapshot_id:page.snapshot_id};
+    confirmedAction = {action:'bulk', scope:b.dataset.scope, expected_count:count,
+      filter:directoryPageFilter(renderedFilter), snapshot_id:page.snapshot_id};
     $('bulk').open = false;
     notice('confirm-text', bulkLabels[b.dataset.scope] + '，共 ' + fmt(count) + ' 项可选资料。');
     $('apply-bulk').textContent = '选中资料';
