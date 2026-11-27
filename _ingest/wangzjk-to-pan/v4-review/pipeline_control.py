@@ -13,11 +13,13 @@ import sqlite3
 import subprocess
 import sys
 from time import monotonic, sleep
+from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 from uuid import uuid4
 
 from catalog_model import ROOT, now
-from collect_public import STATE, collect, collector_lock
+from collect_public import (HOME_TZ, REGULAR_DETAIL_BUDGET, REGULAR_PAGES, STATE, collect,
+                            collector_lock, load, local_clock)
 from confirm_gate import readiness
 from dsh_health import BRIDGE, probe_dsh
 from member_queue import (
@@ -124,20 +126,49 @@ class RunStore:
                 'SELECT * FROM runs ORDER BY rowid DESC LIMIT 24') if row['action'] in labels]
 
 
-def request_local(port, path):
+def request_local(port, path, *, timeout=24):
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('invalid local port')
-    with LOCAL_HTTP.open(f'http://127.0.0.1:{port}/api/{path}', timeout=24) as response:
+    with LOCAL_HTTP.open(f'http://127.0.0.1:{port}/api/{path}', timeout=timeout) as response:
         data = response.read(12_000_001)
     if len(data) > 12_000_000:
         raise ValueError('local response too large')
     return json.loads(data)
 
 
-def collect_catalog(port):
+def current_discovery(marker, clock):
+    """Require public coverage through the latest Singapore 06:00 or 18:00 slot."""
+    if not isinstance(marker, dict):
+        return False
+    clock = clock.astimezone(HOME_TZ)
+    morning = clock.replace(hour=6, minute=0, second=0, microsecond=0)
+    evening = morning.replace(hour=18)
+    slot = evening if clock >= evening else (morning if clock >= morning else evening-timedelta(days=1))
+    try:
+        completed = datetime.fromisoformat(marker.get('completed_at', ''))
+    except (TypeError, ValueError):
+        return False
+    if completed.tzinfo is None or not slot <= completed <= clock:
+        return False
+    published = local_clock(marker.get('published_through'))
+    modified = local_clock(marker.get('modified_through'))
+    bound = slot.replace(tzinfo=None)
+    upper = completed.astimezone(HOME_TZ).replace(tzinfo=None)
+    return bool(published and modified and bound <= min(published, modified)
+                and max(published, modified) <= upper)
+
+
+def collect_catalog(port, *, scheduled=False):
     try:
         with collector_lock(STATE):
-            result = collect(STATE, 12, 4, ())
+            state = load(STATE) if scheduled else {}
+            marker = state.get('collection', {}).get('last_discovery')
+            already_collected = (not state.get('official_site_hold')
+                                 and current_discovery(marker, datetime.now(HOME_TZ)))
+            if already_collected:
+                result = {'state':'updated','last_discovery':marker,'discovery_status':'complete'}
+            else:
+                result = collect(STATE, REGULAR_PAGES, REGULAR_DETAIL_BUDGET, ())
     except OSError as error:
         if locked_elsewhere(error):
             return 'waiting', '已有公开采集在进行，请稍后查看资料来源。'
@@ -146,19 +177,34 @@ def collect_catalog(port):
         if result.get('state') in {'official_publisher_gate', 'publisher_access_restricted'}:
             return 'blocked', '原站限制访问，采集进度已保留。'
         return 'failed', '原站目录读取未完成，请查看资料来源后再试。'
+    if (result.get('discovery_status') != 'complete'
+            or (scheduled and not current_discovery(result.get('last_discovery'), datetime.now(HOME_TZ)))):
+        return 'waiting', '本轮目录尚未读完，已保存进度。'
     try:
-        live = request_local(port, 'meta')
+        live = request_local(port, 'meta', timeout=60)
         observed = live.get('discovery') or {}
-        if live['public_checkpoint_pending_sync'] or observed.get('observed_at') != result.get('observed_at'):
+        if (live['public_checkpoint_pending_sync'] or not result.get('last_discovery')
+                or observed.get('last_discovery') != result['last_discovery']):
             raise ValueError('checkpoint not yet read back')
     except (OSError, ValueError, KeyError):
         return 'waiting', '公开目录已保存，资源库读回待核实。'
-    return 'complete', f"目录已入库，本次新增 {result['new_this_run']} 篇，补充图文 {result['details_added']} 篇。"
+    if already_collected:
+        return 'complete', '本时段已完成公开采集，资源库已读回。'
+    summary = f"目录已入库，本次新增 {result['new_this_run']} 篇，补充简介 {result['introductions_saved']} 篇。"
+    if result['introduction_failures']:
+        summary += f"有 {result['introduction_failures']} 篇简介待补。"
+    return 'complete', summary
 
 
 def verify_pipeline(port):
     meta = request_local(port, 'meta')
     linked = request_local(port, 'resources?baidu=1')
+    filters = []
+    for query, field in (('category', 'categories'), ('platform', 'platforms')):
+        option = next((item for item in meta.get(field, ()) if item['count'] > 0), None)
+        if option:
+            route = 'resources?' + urlencode({query: option['id']})
+            filters.append((option['count'], request_local(port, route)))
     local = request_local(port, 'local-status')
     draft = request_local(port, 'preconfirmation')
     order = request_local(port, 'analysis-priority')
@@ -166,14 +212,17 @@ def verify_pipeline(port):
     latest = request_local(port, 'meta')
     if meta.get('snapshot_id') != latest.get('snapshot_id') or latest.get('public_checkpoint_pending_sync'):
         return 'waiting', '目录正在更新，请稍后再次检查。'
-    if (linked.get('total') != latest['totals']['baidu_linked_articles']
+    if (linked.get('source_total') != latest['totals']['baidu_linked_articles']
             or linked.get('snapshot_id') != latest['snapshot_id']
             or draft.get('snapshot_id') != latest['snapshot_id']
             or not isinstance(order.get('entries'), list)):
         return 'failed', '资源库、转存清单或分析顺序的读回结果不一致。'
+    if any(result.get('total') != expected or result.get('snapshot_id') != latest['snapshot_id']
+           for expected, result in filters):
+        return 'failed', '分类或平台的筛选数量与目录不一致。'
     if local.get('sync_state') != 'live' or cleanup.get('sync_state') != 'live':
         return 'waiting', '本地进度或清理依据待同步，请稍后再次检查。'
-    return 'complete', '已读回目录、百度入口、转存复核、本地进度、分析顺序和清理资格。'
+    return 'complete', '已读回目录、分类筛选、百度入口、转存复核、本地进度、分析顺序和清理资格。'
 
 
 def check_dsh(_port):
@@ -185,7 +234,7 @@ def check_dsh(_port):
     }[probe_dsh()['state']]
 
 
-def worker(store, key, port):
+def worker(store, key, port, *, scheduled=False):
     deadline = monotonic() + 4
     with ExitStack() as held:
         while True:
@@ -200,7 +249,10 @@ def worker(store, key, port):
         if action is None:
             return False
         try:
-            state, summary = {'collect': collect_catalog, 'verify': verify_pipeline, 'check_dsh': check_dsh}[action](port)
+            if scheduled and action == 'collect':
+                state, summary = collect_catalog(port, scheduled=True)
+            else:
+                state, summary = {'collect': collect_catalog, 'verify': verify_pipeline, 'check_dsh': check_dsh}[action](port)
         except (OSError, ValueError, TypeError, KeyError):
             state, summary = 'failed', '本次操作未能读回结果，请先核对当前进度。'
         store.finish(key, 'running', state, summary)
@@ -240,11 +292,13 @@ class PipelineControl:
         preservation = progress.get('local_preservation') or {}
         local_counts = progress.get('counts') or {}
         last_dsh_check = next((row for row in runs if row['action'] == 'check_dsh' and row['finished_at']), None)
+        discovery = public.get('last_discovery') or {}
+        collection_waiting = pending or public.get('discovery_status') == 'incomplete' or not public.get('observed_at')
         stages = [
-            stage('collection', '公开采集', 'running' if active == 'collect' else 'waiting' if pending or not public.get('observed_at') else
-                  'blocked' if public.get('stop_reason') else 'ready',
-                  '公开目录正在更新。' if pending else '原站公开采集待核对。' if public.get('stop_reason') else
-                  '从原站采集公开目录和图文。', public.get('observed_at'),
+            stage('collection', '公开采集', 'running' if active == 'collect' else
+                  'blocked' if public.get('stop_reason') else 'waiting' if collection_waiting else 'ready',
+                  '原站公开采集待核对。' if public.get('stop_reason') else '公开目录正在更新。' if collection_waiting else
+                  '从原站采集公开目录和图文。', discovery.get('completed_at'),
                   {'目录条目': lib.meta['totals']['articles']}, actions=[job_action('collect')] if not active else []),
             stage('member', '会员资料入口', 'waiting' if member['missing_direct_url'] else 'complete',
                   '在已登录的原站浏览器核对资料入口。', None,
@@ -286,7 +340,7 @@ def stage(key, label, state, summary, at, metrics, *, links=None, actions=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8767)
-    parser.add_argument('action', choices=['status', *JOBS, '_worker'])
+    parser.add_argument('action', choices=['status', *JOBS, 'collect-scheduled', '_worker'])
     parser.add_argument('key', nargs='?')
     args = parser.parse_args()
     if not 1 <= args.port <= 65535 or (args.action == '_worker') != (args.key is not None):
@@ -300,8 +354,9 @@ def main():
             if not RUN_ID.fullmatch(args.key):
                 parser.error('invalid run identity')
             return 0 if worker(store, args.key, args.port) else 2
-        key = store.reserve(args.action)
-        completed = worker(store, key, args.port)
+        scheduled = args.action == 'collect-scheduled'
+        key = store.reserve('collect' if scheduled else args.action)
+        completed = worker(store, key, args.port, scheduled=scheduled)
         print(json.dumps(next(row for row in store.recent() if row['id'] == key), ensure_ascii=False))
         return 0 if completed else 2
     except (OSError, ValueError, RunBusy, sqlite3.Error) as error:

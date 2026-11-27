@@ -32,6 +32,7 @@ cd _ingest/wangzjk-to-pan/v4-review
 .\ops.ps1 -Action status        # 查看各阶段及最近运行
 .\ops.ps1 -Action catalog-progress # 核对目录中的转存与分析状态
 .\ops.ps1 -Action collect       # 启动一次公开采集并读回资源库
+.\ops.ps1 -Action collect-scheduled # 复用 06:00、18:00 已完成的目录扫描，或续采未完成的范围
 .\ops.ps1 -Action verify        # 核对整条流程的现有读回
 .\ops.ps1 -Action check_dsh     # 只读检查原 DSH 会话
 .\ops.ps1 -Action member        # 读取会员补录断点
@@ -50,7 +51,7 @@ cd _ingest/wangzjk-to-pan/v4-review
 
 ## 简介识别与续作
 
-简介、分类、关系和人工修订保存在已有的 `data/pipeline-runs.sqlite3`。公开采集沿用现有唯一入口和 12 小时计划，先复用已经保存的正文。新文发现和旧文修改检查各自续跑。正文不足的项目可以继续浏览及搜索。
+简介、分类、关系和人工修订保存在已有的 `data/pipeline-runs.sqlite3`。公开采集沿用现有唯一入口和 12 小时计划。每轮最多批量读取 48 篇简介，优先补新文和修改文章，再续读旧文。新文发现、旧文修改检查和简介补采分别记录进度。已完成时段按新文和修改文章的实际目录覆盖判断。正文不足的项目可以继续浏览及搜索。
 
 站点适配器通过 `catalog_evidence(article_id)` 提供本条目的目录元数据和可见简介。资源库按站点与文章号读取同一版本的证据并运行统一分类。新采集或更新的正文在资源库刷新时自动生效。后续采集会单独保留正文可见的 GitHub 仓库地址，已脱敏的历史正文可继续用明确的标题和简介识别平台。
 

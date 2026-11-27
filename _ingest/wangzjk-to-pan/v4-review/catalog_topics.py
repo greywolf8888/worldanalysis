@@ -5,7 +5,7 @@ from unicodedata import normalize
 from catalog_topic_refinement import CONTEXT_TOPICS, REFINED_TOPICS, reference_topic
 
 
-TOPIC_REVISION = 'project-topics-4'
+TOPIC_REVISION = 'project-topics-6'
 CATEGORIES = {
     'commerce': ('电商与带货', ('商品经营', '店铺运营', '虚拟商品', '联盟带货', '本地团购')),
     'crossborder': ('跨境电商与外贸', ('跨境店铺', '海外带货', '外贸获客')),
@@ -123,6 +123,8 @@ _INVISIBLE_FORMAT = re.compile(r'[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]
 _LEAD_END = re.compile(r'[:|;。!?,，；：—]|\s-\s')
 _TITLE_EXTRAS = re.compile(r'(?:附赠|附送|另赠|内附|赠送|附带|配套赠送|案例包括|案例包含|案例涉及|适用场景包括).*$')
 _BODY_ASIDE = re.compile(r'^(?:附赠|赠品|额外赠送|随课赠送|免责声明|(?:适用|应用)场景举例|素材包附赠)')
+_ANCILLARY_SECTION = re.compile(r'^(?:适合人群|适用人群|推荐人群|目标受众|附赠内容|赠品清单|学员案例|成功案例|效果展示)\s*[:：]?$')
+_PRIMARY_SECTION = re.compile(r'^(?:课程|项目|软件|功能|工具|使用|学习|核心|内容|详细|操作)(?:目标|说明|特点|介绍|简介|大纲|目录|安排|亮点|内容|步骤|演示|教程|模块|实操|方式|方法)(?:\s*[:：]|$)')
 _GENERIC_HEAD = re.compile(r'^(?:(?:\d{1,2}月)?(?:全网|全新|最新|独家|首发|揭秘|牛逼|爆款|必看|系列|进阶|干货|深度|保姆级|小白|项目|实战|课程|实操|入门|实用|必收)[!：: ]*)+$')
 _TRAINING = re.compile(r'大课|课程|系统课|必修课|线下课|操盘课|教程|教学|特训营|训练营|实训(?:课|营)?|\d{1,3}\s*(?:讲|节课)|手把手|教你|从零.{0,7}(?:学|入门)|新手.{0,4}(?:上手|做)|实战(?:课|方法|经验|进阶)|(?:直播|操作).{0,10}拆解|玩法|实操')
 _NEWS_BRIEF = re.compile(r'新闻(?:早讯|早报|晚报|简报|快讯)|每日(?:早报|晚报|快讯)|60\s*(?:秒|s)\s*读懂世界|(?:国际|热点)新闻简报',re.I)
@@ -131,13 +133,15 @@ _REPORTING = re.compile(r'最新发布|报告发布|数据(?:显示|揭示)|统�
 _NEWS_AS_MATERIAL = re.compile(r'模板|脚本|工作流|智能体|自动化|起号|(?:制作|生成|采集|聚合)(?:工具|教程)?')
 _SOFTWARE_INTRO = re.compile(r'^(?:软件|应用|工具)(?:介绍|简介)(?:\b|\s|[:：])', re.I)
 _AI_PRODUCT = re.compile(r'(?:多模态)?ai\s*(?:工具站|生成平台|模型聚合平台)(?:开放|上线|使用|体验)?',re.I)
+_TOOL_COURSE = re.compile(r'(?:即梦|可灵|midjourney|通义万相|海螺|ai.{0,8}(?:工具|平台|软件)).{0,8}(?:全能创作课|全功能|系统课|入门到精通)', re.I)
+_ALL_FEATURES = re.compile(r'覆盖(?:软件|工具|平台)?全(?:部)?功能|从基础功能介绍|从基本功能到高阶(?:功能|操作)')
 _SOFTWARE_RELEASE = re.compile(r'(?<![A-Za-z0-9])v\s*\d{1,4}(?:\.\d+){1,4}|绿色(?:版|便携|纯净|精简)|便携(?:版|汉化)|直装(?:版|/)|安装即用|(?:电脑|桌面|安卓|tv)版.{0,10}(?:客户端|体验丝滑)|客户端(?:增强|补丁|下载)', re.I)
 _SOFTWARE_PRODUCT = re.compile(r'(?:视频|文件|素材|电子教材|字幕|音乐|磁力).{0,6}下载(?:器|工具|助手)|(?:下载|翻译|截图|投屏|录播|卸载|录屏)(?:器|小?工具|助手)|内容监控.{0,22}(?:开源|软件)|(?:多线程|磁力)下载工具',re.I)
 _SOFTWARE_KIND = tuple((sub, re.compile(expr, re.I)) for sub, expr in (
-    ('影音工具',r'录播|追剧|视频.{0,6}(?:下载|播放|压缩|修复|封装|转换|工具|翻译)|影音|视频号下载|字幕(?:提取|转换|机翻)|音频|混音|录屏|播放器|格式工厂|audition|fxsound|camtasia|hypersnap|mkvtoolnix|gamescrcpy'),
+    ('影音工具',r'录播|追剧|视频.{0,6}(?:下载|播放|压缩|修复|封装|转换|工具|翻译)|下载.{0,12}视频软件|影音|视频号下载|字幕(?:提取|转换|机翻)|音频|混音|录屏|播放器|格式工厂|audition|fxsound|camtasia|hypersnap|mkvtoolnix|gamescrcpy'),
     ('办公工具',r'pdf|excel|ppt|office|wps|word|文档|表格|笔记管理|知识库'),
     ('设计工具',r'photoshop|lightroom|illustrator|indesign|blender|topaz|设计软件|修图工具|照片编辑|相片大师|raw处理|adobe bridge|after effects'),
-    ('系统与文件',r'系统(?:清理|优化|重装)|文件(?:处理|复制|管理|转存|批量|同步|恢复)|文件夹|网盘.{0,8}转存|驱动|存储管理|硬盘|解压缩|ftp|ssh|备份|虚拟机|网速聚合|download manager'),
+    ('系统与文件',r'系统(?:清理|优化|重装)|文件(?:处理|复制|管理|转存|批量|同步|恢复)|文件夹|对话.{0,5}导出到本地|网盘.{0,8}转存|驱动|存储管理|硬盘|解压缩|ftp|ssh|备份|虚拟机|网速聚合|download manager'),
 ))
 _ASSET_SIGNAL = re.compile(r'音效(?:合集|音乐包|素材)|背景音乐|配乐素材|音乐素材|(?:bgm|音效|配乐|音乐|转场|片头|字幕|模型|贴图|插画|字体|参考图|素材|预设|样式|模板).{0,9}(?:素材包|素材合集|资源包|资源合集|完整版|合集|打包)|(?:海报|ppt|ps|封面|画册|剪映|视频|分镜|汇报|运营表格)模板|摄影预设|\d[\d,]*\s*(?:套|张).{0,8}(?:参[考照]图|姿势图|图片)|(?:免版权|可商用).{0,10}(?:bgm|音效|音乐|图片|图标|素材)|(?:三维|3d|cg|设计)模型素材', re.I)
 _ASSET_ATTACHMENT = re.compile(r'附(?:赠|送|带|全套|万能|素材|教程|模板)|配套.{0,8}(?:素材|模板)|包含|内附|素材下载器')
@@ -154,8 +158,15 @@ _PRODUCT_TEACHING = re.compile(r'如何使用|使用方法|安装|操作教程|�
 _REPO_PRODUCT = re.compile(r'github.{0,15}(?:开源|工具|神器)|开源.{0,5}(?:工具|软件|客户端|桌面应用)|(?:开源|自托管).{0,14}(?:工作台|自动化项目)', re.I)
 _PRODUCT_OBJECT = re.compile(r'工具|神器|软件|客户端|桌面|自托管|浏览器(?:插件|扩展)|\bv(?:er)?\s*\d+\.\d+', re.I)
 _SOFTWARE_DELIVERY = re.compile(r'(?:windows|macos|mac|安卓|桌面|电脑)(?:版|客户端)|安装包|软件下载|(?:小说|写作).{0,5}(?:创作软件|辅助软件)|免安装版|一键win(?:dows)?系统重装|download manager', re.I)
+_DESKTOP_PRODUCT = re.compile(r'^(?:windows|macos|电脑端|桌面端).{0,14}(?:生成器|客户端|小工具|管理软件)', re.I)
+_OFFERED_SOFTWARE = re.compile(r'(?:本(?:项目|文|课程|资源)|文章).{0,30}(?:提供|附有|分享).{0,20}(?:下载软件|客户端|安装包|浏览器扩展)|(?:纯本地运行|无需联网)[\s\S]{0,95}(?:安装|扩展程序|浏览器插件)', re.I)
+_SOFTWARE_DEMO = re.compile(r'(?:软件|工具|部分功能|全部功能).{0,12}(?:视频展示|视频演示)|\d{1,3}\s*个功能.{0,28}(?:持续更新|维护更新)')
+_SOFTWARE_AND_TUTORIAL = re.compile(r'(?:软件|客户端|安装包)\s*(?:\+|及|与)\s*(?:安装|使用)?教程')
+_PROJECT_LIST = re.compile(r'^(?:\d{1,2}\s*个.{0,8}(?:小项目|副业项目|冷门项目)|(?:国内|国外|海外)?(?:网赚|副业|冷门|小众)项目(?:合集|清单))')
+_PROJECT_LIST_BODY = re.compile(r'给大家把一些必赚的小项目整理了一个\s*清单|小项目大家可以自己实操变现|以下小项目均经过本人实操|(?:覆盖|整理|收录|汇总).{0,5}\d{1,3}(?:余|多)?个.{0,20}(?:赛道|项目)')
+_PROJECT_COLLECTION = re.compile(r'^(?:(?:某收费|小众|轻量)\s*)?精品项目群.{0,38}(?:持续分享|定期更新|每周更新|持续更新|专门分享.{0,8}项目)')
 _PUBLISHING_TOOL = re.compile(r'(?:视频|图文|内容).{0,10}(?:搬运工具|发布工具|跨平台分发工具)|(?:全流程|一键).{0,15}(?:搬到|分发到|发布到)')
-_TEACHING_DELIVERABLE = re.compile(r'本(?:套|期)?课(?:程)?(?:主要|重点|核心|围绕|聚焦|最终|是|将|会|教|以|从)|课程目标[:：]?|本项目(?:是|核心|旨在|专门|教)|(?:主要|重点)(?:教|学习|讲解|交付|训练)|是一套(?:专注|聚焦|围绕|针对)')
+_TEACHING_DELIVERABLE = re.compile(r'本(?:套|期)?课(?:程)?(?:主要|重点|核心|围绕|聚焦|最终|是|将|会|教|以|从)|课程目标[:：]?|本项目(?:是|核心|旨在|专门|教)|(?:主要|重点)(?:教|学习|讲解|交付|训练)|是一套(?:专注|聚焦|围绕|针对)|最终(?:所有)?教学(?:都)?指向')
 _GOAL_EXAMPLES = re.compile(r'[,，](?:同时|课程案例|案例包括|涵盖的案例|例如|并附|顺带|配套|搭配|附带).*$')
 _GAME_PROFILE = re.compile(r'^游戏介绍[:：\s][\s\S]{5,900}(?:游戏截图|游戏视频|游戏特色|版本介绍|游戏玩法)')
 
@@ -184,8 +195,18 @@ def introduction_text(title, paragraphs, excerpt):
 
 def purpose_text(parts):
     """Ignore add-ons and boilerplate while keeping the whole readable introduction."""
-    return '\n'.join(_TITLE_NOISE.sub('', _TITLE_EXTRAS.sub('', part))
-                     for part in parts if not _BODY_ASIDE.match(part))
+    kept = []
+    ancillary = False
+    for part in parts:
+        heading = re.sub(r'^[^\w]+', '', part)
+        if _ANCILLARY_SECTION.fullmatch(heading):
+            ancillary = True
+            continue
+        if _PRIMARY_SECTION.match(heading):
+            ancillary = False
+        if not ancillary and not _BODY_ASIDE.match(heading):
+            kept.append(_TITLE_NOISE.sub('', _TITLE_EXTRAS.sub('', part)))
+    return '\n'.join(kept)
 
 
 def topic_scores(title, head, intro, goal_text):
@@ -223,22 +244,30 @@ def direct_topic(text, intro, head, teaching):
         return 'news','行业观察'
     if not teaching and _GAME_PROFILE.match(intro):
         return 'gaming','游戏资料'
-    if _AI_PRODUCT.search(head):
+    if _PROJECT_COLLECTION.search(text) or (_PROJECT_LIST.search(text) and _PROJECT_LIST_BODY.search(intro)):
+        return 'reference','项目线索'
+    if _AI_PRODUCT.search(head) or (_TOOL_COURSE.search(text) and _ALL_FEATURES.search(intro)):
         return 'automation','AI 工具'
     release = _SOFTWARE_RELEASE.search(text)
     utility = _SOFTWARE_PRODUCT.search(head) or _PUBLISHING_TOOL.search(text)
     repository = _REPO_PRODUCT.search(text) and _PRODUCT_OBJECT.search(text)
     software_intro = _SOFTWARE_INTRO.search(intro)
-    if ((not teaching and (release or software_intro or utility or repository or _SOFTWARE_DELIVERY.search(head)))
-            or (release and (software_intro or utility or _PRODUCT_TEACHING.search(text)))):
+    offered = _OFFERED_SOFTWARE.search(intro)
+    desktop_product = _DESKTOP_PRODUCT.search(head)
+    companion_tutorial = _SOFTWARE_AND_TUTORIAL.search(text) or (_PRODUCT_OBJECT.search(text) and _PRODUCT_TEACHING.search(text))
+    demo = (_PRODUCT_OBJECT.search(head) and _SOFTWARE_DEMO.search(intro)
+            and not (_TRAINING.search(head) or _PRODUCT_TEACHING.search(head)))
+    if ((not teaching and (release or software_intro or utility or repository or desktop_product or _SOFTWARE_DELIVERY.search(head)))
+            or (release and (software_intro or utility or companion_tutorial))
+            or demo or (offered and (companion_tutorial or not teaching))):
         software = text + ' ' + intro[:130]
         sub = next((name for name, pattern in _SOFTWARE_KIND if pattern.search(head)), '')
         if _PUBLISHING_TOOL.search(text):
             sub = '影音工具'
-        if not sub:
+        if not sub and not desktop_product:
             scope = text if repository else software
-            sub = next((name for name, pattern in _SOFTWARE_KIND if pattern.search(scope)), '应用软件')
-        return 'software', sub
+            sub = next((name for name, pattern in _SOFTWARE_KIND if pattern.search(scope)), '')
+        return 'software', sub or '应用软件'
     asset = _ASSET_SIGNAL.search(text)
     if (not teaching and asset and not _ASSET_ATTACHMENT.search(text[:asset.end()])
             and not _ASSET_AS_METHOD.match(text[asset.end():])):
@@ -299,13 +328,14 @@ def automatic_topic(title, paragraphs, excerpt, previous, previous_sub, source_c
         scores.items(), key=lambda item: (item[1][0], item[1][2], item[1][3]),
         default=('', (0, '', False, False)),
     )
-    # Keep source-checked prior decisions when the new evidence is weak.
+    # Keep complete prior decisions when the new evidence is weak.
     retained = (previous, previous_sub)
     if retained == ('content', '短视频'):
         retained = ('media', '短视频制作')
     elif retained == ('content', '短剧与漫剧'):
         retained = ('screen', '短剧与漫剧')
-    if retained[0] in CATEGORIES and retained[0] not in {'news', 'reference'}:
+    if (retained[0] in CATEGORIES and retained[0] not in {'news', 'reference'}
+            and retained[1] in CATEGORIES[retained[0]][1]):
         if not sub or (category != retained[0] and weight < (23 if in_title else 19)):
             return retained
     if weight >= (12 if in_title else 7) and sub != '综合副业':

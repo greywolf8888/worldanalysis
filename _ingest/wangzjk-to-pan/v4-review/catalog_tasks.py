@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from catalog_model import ROOT, SEMANTIC_DB, SITE, catalog_input_stamp, open_index
+from catalog_platforms import PLATFORMS
 from catalog_relations import candidate_pairs, article_identity
 from pipeline_control import RunStore
 from catalog_semantics import CatalogStore, MAX_TASKS, atomic_jsonl, encode, parse_jsonl, relationship_input, usable
@@ -101,6 +102,13 @@ def audit_topics(library, category, sample):
     if not 0 <= sample <= 50:
         raise ValueError('抽样数须在 0 至 50 之间')
     raw = tuple(library.semantic_rows.values())
+    for row in raw:
+        label, subtopics = CATEGORIES.get(row['category'], ('', ()))
+        if (row['category'] and not label or label != row['category_label']
+                or row['subcategory'] and row['subcategory'] not in subtopics
+                or row['secondary_category'] and row['secondary_category'] not in CATEGORIES
+                or any(PLATFORMS.get(p['id']) != p['label'] for p in row['platforms'])):
+            raise ValueError(f"分类或平台字段无效：{row['site_id']} / {row['article_id']}")
     facets = library.meta['categories']
     platforms = library.meta['platforms']
     for option in facets:
@@ -120,6 +128,8 @@ def audit_topics(library, category, sample):
     picked = [chosen[position * (len(chosen)-1) // max(1,count-1)] for position in range(count)]
     return {'sources':len(raw),'projects':library.meta['totals']['projects'],
             'primary':dict(Counter(row['category'] or NO_TOPIC for row in raw)),
+            'without_topic':sum(not row['category'] for row in raw),
+            'without_subcategory':sum(bool(row['category']) and not row['subcategory'] for row in raw),
             'introduction_coverage':dict(Counter(row['coverage'] for row in raw)),
             'categories':facets,'platforms':platforms,
             'sample':[{'site':row['site_id'],'article':row['article_id'],'title':row['title'],

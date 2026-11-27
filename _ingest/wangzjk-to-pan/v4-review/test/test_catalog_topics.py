@@ -88,6 +88,8 @@ class CatalogTopicTest(unittest.TestCase):
         self.assertNotIn('unsorted',CATEGORIES)
         self.assertEqual(project_topic('练习口播剪辑',(),'',{'category':'growth','subcategory':'账号起号'},manual=True),
                          ('growth','账号起号'))
+        self.assertEqual(project_topic('手机屏幕搬上电脑！开源投屏神器GameScrcpy', (), '', {'category':'technical'}),
+                         ('software','影音工具'))
         self.assertEqual(project_topic('每天做一点就有收益',(),'',{'category':'unsorted'}),('',''))
 
     def test_primary_purpose_reclassifies_older_automatic_decisions(self):
@@ -114,3 +116,60 @@ class CatalogTopicTest(unittest.TestCase):
         for title, paragraphs, expected in cases:
             with self.subTest(title=title):
                 self.assertEqual(project_topic(title, paragraphs, '', source_checked=True), expected)
+
+    def test_identifies_software_products_and_what_the_tutorial_teaches(self):
+        cases = (
+            ('图文克隆工具，视频教程', ('以下是部分功能的视频展示。',), ('software', '应用软件')),
+            ('Windows智能题库生成器！导入文档后可生成题目', ('软件读取PDF和Word。',), ('software', '应用软件')),
+            ('实时变声软件教学', ('想在动画制作中切换说话声音？',), ('media', '录音与配音')),
+            ('即梦AI全能创作课：图像和视频', ('课程覆盖软件全功能，从图像到视频生成。',), ('automation', 'AI 工具')),
+            ('即梦AI短视频制作课', ('本课程重点教用同一角色制作短视频。',), ('media', '短视频制作')),
+            ('AE模板高效修改课：学会改模板、装插件', ('内容包含 AE 软件下载安装和视频剪辑实操。',), ('media', '短视频制作')),
+        )
+        for title, paragraphs, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(project_topic(title, paragraphs, '', source_checked=True), expected)
+
+    def test_ancillary_sections_do_not_define_topics_and_curriculum_still_counts(self):
+        cases = (
+            ('入门实战课', ('适合人群：', '电商直播带货和广告投放从业者。',
+                         '课程目录：', '本课程主要教实时变声实操。'), ('media', '录音与配音')),
+            ('9个必赚的小项目', ('给大家把一些必赚的小项目整理了一个清单。',
+                            '小项目大家可以自己实操变现，也可以拿出去送人引流。'), ('reference', '项目线索')),
+            ('办公入门项目', ('课程介绍：', '项目规则与任务要求。',
+                         '提交酒店截图任务，审核之后领取佣金。'), ('services', '技能接单')),
+        )
+        for title, paragraphs, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(project_topic(title, paragraphs, '', source_checked=True), expected)
+
+    def test_primary_outcomes_distinguish_similar_projects(self):
+        cases = (
+            ('亚马逊FBA物流实操课，整理商品库存', ('课程涵盖卖家仓储和库存规划。',), ('crossborder', '跨境店铺')),
+            ('亚马逊KDP出版实战课，教你制作和销售书籍', ('后续学习书籍广告投放。',), ('content', '写作与小说')),
+            ('朋友圈自动成交营，学写文案', ('课程重点是成交话术和销售策略。',), ('growth', '转化营销')),
+            ('小红书CPA拉新实战课，包含短视频曝光技巧', ('完成拉新和拉活任务后按单计酬。',), ('services', '活动推广')),
+            ('AI赋能SEM竞价培训课', ('介绍OCPC投放及组织分工。',), ('growth', '广告投放')),
+            ('即梦AI精细控图课', ('训练构图、风格迁移与景深控制。',), ('design', '平面与作图')),
+            ('付费文章：男女在情感中如何相处', ('文章分析两性择偶心理。',), ('life', '个人成长')),
+            ('视频号分成计划：两性情感视频', (), ('growth', '账号起号')),
+        )
+        for title, paragraphs, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(project_topic(title, paragraphs, '', source_checked=True), expected)
+
+    def test_routes_projects_using_the_business_outcome_and_content_form(self):
+        cases = (
+            ('亚马逊产品开发课程，研究市场与选品', (), '', ('crossborder', '跨境店铺')),
+            ('Facebook中东商城实战课', ('课程讲解广告投放、商品选品与自发货。',), '', ('crossborder', '跨境店铺')),
+            ('知识付费卖项目实操，按份销售', (), '', ('commerce', '虚拟商品')),
+            ('文旅商家AI内容创作课', ('最终所有教学都指向将线上流量转化为门店营收。',), '', ('local_business', '门店经营')),
+            ('抖音动画科普实战课：科普文案、字幕音效与视频发布', (), '', ('media', '短视频制作')),
+            ('虚拟视频制作实战课：CC4建模、Blender渲染、Iclone动画', (), '', ('screen', '动画与特效')),
+            ('宠物托运项目，介绍定价和订单执行', (), '', ('services', '本地服务')),
+            ('番茄小说拉新实操，无脑发视频，每单十元', (), '', ('services', '活动推广')),
+            ('国外网赚项目合集：从建站到流量', (), '汇总二十种玩法，覆盖20余个海外项目。', ('reference', '项目线索')),
+        )
+        for title, paragraphs, excerpt, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(project_topic(title, paragraphs, excerpt, source_checked=bool(paragraphs)), expected)

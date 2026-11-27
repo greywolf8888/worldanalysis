@@ -86,6 +86,14 @@ def safe_image(s):
     return s
 
 
+def detail_matches_revision(article, detail):
+    if not isinstance(detail, dict):
+        return False
+    current = article.get('publisher_modified')
+    observed = detail.get('publisher_modified')
+    return not current or not observed or current == observed
+
+
 def category(title, fallback=''):
     # Explicit business intent first; platforms are keywords, not categories.
     if re.search(r'带货|选品|供应链|店铺|商品转化|开店|亚马逊|电商|跨境|货源',title):return 'commerce'
@@ -150,7 +158,8 @@ class Wangzjk:
         self.articles=state['catalog.json']['articles']
         self.ops=list(state['journal.json']['operations'].values())
         self.markers=state['downloaded-project-markers.json']['entries']
-        self.facts=details.get('articles',{})
+        self.facts={article_id: detail for article_id, detail in details.get('articles', {}).items()
+                    if detail_matches_revision(self.articles.get(article_id, {}), detail)}
         self.by_article=defaultdict(list); self.by_share=defaultdict(list)
         self.target_markers={}
         self.article_download_markers=defaultdict(set)
@@ -492,10 +501,22 @@ def merge_codex_collection(path, articles, facts):
     for key,detail in details.items():
         if not isinstance(detail,dict) or key not in rows or detail.get('state')!='public_sample' or detail.get('article_url')!=rows[key]['url']:
             raise ValueError('公开正文与文章身份不符')
-        previous=facts.get(key)
-        if not previous or previous.get('state')!='public_sample' or str(detail.get('observed_at',''))>=str(previous.get('observed_at','')):
+        article = articles[key]
+        if not detail_matches_revision(article, detail):
+            continue
+        previous = facts.get(key)
+        if (not detail_matches_revision(article, previous) or previous.get('state') != 'public_sample'
+                or str(detail.get('observed_at', '')) >= str(previous.get('observed_at', ''))):
             facts[key]=detail
-    return checksum, {k:collection.get(k) for k in ('observed_at','stop_reason','publisher_total','catalog_complete','history_observed','new_this_run','details_added','read_only')}
+    report_fields = ('observed_at', 'stop_reason', 'publisher_total', 'catalog_complete', 'history_observed',
+                     'new_this_run', 'details_added', 'read_only', 'modified_notice', 'introductions_saved',
+                     'introduction_failures', 'discovery_status')
+    report = {field: collection.get(field) for field in report_fields}
+    last_discovery = collection.get('last_discovery')
+    report['last_discovery'] = ({field: last_discovery.get(field)
+                                 for field in ('published_through', 'modified_through', 'completed_at')}
+                                if isinstance(last_discovery, dict) else None)
+    return checksum, report
 
 
 def catalog_input_stamp():

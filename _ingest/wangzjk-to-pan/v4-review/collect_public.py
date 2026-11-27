@@ -34,6 +34,9 @@ MODIFIED_OVERLAP = timedelta(minutes=20)
 MAX_MODIFIED_PAGES = 3
 TARGET_DETAIL_PAGE_SIZE = 60
 MAX_TARGET_DETAILS = 12_000
+REGULAR_PAGES = 12
+REGULAR_DETAIL_BUDGET = 48
+REGULAR_DETAIL_BATCH = 24
 DELAY = 2.65
 POST_FIELDS = 'id,link,date,modified,status,title,excerpt,featured_media,_links,_embedded'
 DETAIL_FIELDS = 'id,link,date,modified,status,title,content,excerpt,featured_media'
@@ -271,7 +274,7 @@ def capture_projection(payload, key, timestamp, source, checksum):
         return {'state':'unavailable','observed_at':timestamp}
 
 
-def selected_details(client, keys):
+def selected_details(client, keys, *, on_article_error=None):
     """Read a bounded collection of requested public articles through normal pagination."""
     if len(keys) == 1:
         key, = keys
@@ -280,6 +283,10 @@ def selected_details(client, keys):
         except PublicReadError as exc:
             if exc.status in (404, 410):
                 yield key, None, None, None
+                return
+            if on_article_error is not None and exc.reason in {
+                    'publisher_http_error', 'publisher_response_too_large', 'publisher_response_not_readable'}:
+                on_article_error(key)
                 return
             raise
         yield key, payload, source, checksum
@@ -292,8 +299,8 @@ def selected_details(client, keys):
         if exc.reason != 'publisher_response_too_large':
             raise
         middle = len(keys) // 2
-        yield from selected_details(client, keys[:middle])
-        yield from selected_details(client, keys[middle:])
+        yield from selected_details(client, keys[:middle], on_article_error=on_article_error)
+        yield from selected_details(client, keys[middle:], on_article_error=on_article_error)
         return
     if not isinstance(rows, list) or headers.get('X-WP-Total') != str(len(rows)):
         raise PublicReadError('publisher_detail_collection_unverified')
@@ -308,7 +315,53 @@ def selected_details(client, keys):
         if key in mapped:
             yield key, mapped[key], source, checksum
         else:
-            yield from selected_details(client, (key,))
+            yield from selected_details(client, (key,), on_article_error=on_article_error)
+
+
+def published_discovery(client, state, timestamp, upper, page_limit):
+    """Advance the publication cursor only after verifying the whole fixed window."""
+    cursor = state['head']
+    cursor.setdefault('before', upper)
+    lower, end = cursor['after'], cursor['before']
+    if not local_clock(lower) or not local_clock(end) or lower > end:
+        raise ValueError('invalid publication cursor')
+    # Older checkpoints did not carry an exact page count.
+    if cursor['next_page'] > 1 and 'seen_count' not in cursor:
+        cursor['next_page'] = 1
+    changed = []
+    for _ in range(page_limit):
+        page = cursor['next_page']
+        try:
+            raw, total, pages, _ = client.listing(page, after=lower, before=end)
+            rows = [normalize(item) for item in raw]
+            ids = [int(row['article_id']) for row in rows if row is not None]
+            seen = cursor.get('seen_count', 0)
+            last_id = cursor.get('last_id')
+            if (len(ids) != len(raw) or ids != sorted(set(ids), reverse=True)
+                    or (ids and last_id is not None and ids[0] >= last_id)
+                    or cursor.get('publisher_total', total) != total
+                    or (page >= pages and seen + len(ids) != total)
+                    or any(not lower <= row['publisher_published'] <= end for row in rows)):
+                raise PublicReadError('publisher_publication_pagination_changed')
+        except PublicReadError as error:
+            if error.status == 400 or error.reason in {
+                    'publisher_publication_pagination_changed', 'publisher_page_size_changed'}:
+                cursor.clear()
+                cursor.update(after=lower, before=end, next_page=1)
+            raise
+        for row in rows:
+            if merge_article(state['articles'], row, timestamp):
+                changed.append(row['article_id'])
+        if page >= pages:
+            cursor.clear()
+            cursor.update(after=end, next_page=1)
+            if end >= upper:
+                break
+            lower, end = end, upper
+            cursor['before'] = end
+            continue
+        cursor.update(next_page=page+1, seen_count=seen+len(ids), last_id=ids[-1], publisher_total=total)
+    return changed
 
 
 def modified_discovery(client, state, timestamp, start, upper, page_limit):
@@ -333,8 +386,10 @@ def modified_discovery(client, state, timestamp, start, upper, page_limit):
             raise
         ids = [row.get('id') if isinstance(row, dict) else None for row in rows]
         dates = [row.get('modified') if isinstance(row, dict) else None for row in rows]
+        normalized = [normalize(row) for row in rows] if all(type(key) is int for key in ids) else ()
         seen = set(cursor.get('seen_ids', []))
         if (any(type(key) is not int for key in ids) or len(ids) != len(set(ids)) or seen.intersection(ids)
+                or any(row is None for row in normalized)
                 or any(local_clock(date) is None or not lower <= date <= cursor['before'] for date in dates)
                 or cursor.get('publisher_total', total) != total
                 or (page >= pages and len(seen) + len(ids) != total)):
@@ -345,9 +400,8 @@ def modified_discovery(client, state, timestamp, start, upper, page_limit):
             raise PublicReadError('publisher_modified_pagination_changed')
         # The publisher honors the date window but can return an unsorted page.
         # Verify coverage by unique IDs and the advertised total, then prioritize newer text locally.
-        for raw in sorted(rows, key=lambda row: (row['modified'], row['id']), reverse=True):
-            row = normalize(raw)
-            if row and merge_article(state['articles'], row, timestamp):
+        for row in sorted(normalized, key=lambda row: (row['publisher_modified'], int(row['article_id'])), reverse=True):
+            if merge_article(state['articles'], row, timestamp):
                 changed.append(row['article_id'])
         if page >= pages:
             cursor.clear()
@@ -373,17 +427,30 @@ def collect(path, max_pages, max_details, seed, *, intro_db=None, only_seed=Fals
     introductions_saved = 0
     intro_failures = 0
     modified_notice = None
+    last_discovery = state.get('collection', {}).get('last_discovery')
     changed = list(seed)
 
-    def status(stop=None):
+    def status(stop=None, *, finished=False):
+        nonlocal last_discovery
+        observed_at = datetime.now(HOME_TZ).isoformat(timespec='seconds')
+        head, modified = state['head'], state.get('modified', {})
+        completed = (finished and stop is None and modified_notice is None and bool(max_pages)
+                     and history.get('completed') and history.get('unmapped') == 0
+                     and head.get('after') and modified.get('after')
+                     and not head.get('before') and not modified.get('before'))
+        if completed:
+            last_discovery = {'completed_at': observed_at, 'published_through': head['after'],
+                              'modified_through': modified['after']}
         state['collection'] = {
-            'observed_at':datetime.now(HOME_TZ).isoformat(timespec='seconds'),
+            'observed_at':observed_at,
             'stop_reason':stop,'publisher_total':history.get('publisher_total'),
             'catalog_complete':history.get('completed') is True and history.get('unmapped') == 0,
             'history_observed':history['collected'],'next_page':history['next_page'],
             'new_this_run':len(state['articles'])-before_size,'details_added':details_added,
             'introductions_saved':introductions_saved,'introduction_failures':intro_failures,
             'modified_notice':modified_notice,
+            'discovery_status':('complete' if completed else 'incomplete' if max_pages else 'details_only'),
+            'last_discovery':last_discovery,
             'read_only':True
         }
         publish(state, path)
@@ -395,21 +462,9 @@ def collect(path, max_pages, max_details, seed, *, intro_db=None, only_seed=Fals
         modified_start = state['head'].get('after', history['before'])
         if history.get('completed') and not state['head']:
             state['head'] = {'after':history['before'],'next_page':1}
-        if state['head']:
-            head = state['head']
-            head['before'] = head.get('before') or clock.isoformat().split('+')[0]
-            for _ in range(max_pages):
-                page = head['next_page']
-                rows, total, pages, _ = client.listing(page, after=head['after'], before=head['before'])
-                for raw in rows:
-                    if row := normalize(raw):
-                        if merge_article(state['articles'], row, timestamp):
-                            changed.append(row['article_id'])
-                if page >= pages:
-                    head.update(after=head['before'], next_page=1)
-                    head.pop('before')
-                    break
-                head['next_page'] += 1
+        upper = clock.replace(tzinfo=None).isoformat()
+        if state['head'] and max_pages:
+            changed.extend(published_discovery(client, state, timestamp, upper, max_pages))
         for index in range(max_pages):
             if history.get('completed'):
                 break
@@ -437,13 +492,13 @@ def collect(path, max_pages, max_details, seed, *, intro_db=None, only_seed=Fals
         if history.get('completed') and max_pages:
             try:
                 changed.extend(modified_discovery(client, state, timestamp, modified_start,
-                                                  clock.isoformat().split('+')[0], min(max_pages, MAX_MODIFIED_PAGES)))
+                                                  upper, min(max_pages, MAX_MODIFIED_PAGES)))
             except PublicReadError as error:
                 if error.reason not in {'publisher_modified_pagination_changed', 'publisher_page_size_changed'} and error.status != 400:
                     raise
                 modified_notice = error.reason
         if not max_details:
-            return status()
+            return status(finished=True)
         legacy = existing_details(path, state)
         attempts = read_attempts(intro_db, SITE)
         display_bytes = sum(len(compact(detail)) + 40 for detail in state['details'].values())
@@ -485,27 +540,20 @@ def collect(path, max_pages, max_details, seed, *, intro_db=None, only_seed=Fals
                     details_added += int(previous is None)
         chosen = (key for _, key in zip(
             range(max_details), detail_candidates(state, attempts, legacy, clock, changed, only_seed=only_seed)))
-        if only_seed:
-            for number, group in enumerate(batched(chosen,TARGET_DETAIL_PAGE_SIZE),1):
-                for args in selected_details(client, group):
-                    accept_detail(*args)
-                if number % 6 == 0:
-                    status()
-        else:
-            for key in chosen:
-                try:
-                    for args in selected_details(client,(key,)):
-                        accept_detail(*args)
-                except PublicReadError as exc:
-                    if exc.reason == 'publisher_http_error' or exc.reason in {
-                        'publisher_response_too_large', 'publisher_response_not_readable'
-                    }:
-                        modified = state['articles'][key].get('publisher_modified')
-                        record_attempt(intro_db, SITE, key, modified, timestamp, 'failed')
-                        intro_failures += 1
-                    else:
-                        raise
-        return status()
+
+        def defer_unreadable(key):
+            nonlocal intro_failures
+            modified = state['articles'][key].get('publisher_modified')
+            record_attempt(intro_db, SITE, key, modified, timestamp, 'failed')
+            intro_failures += 1
+
+        batch_size = TARGET_DETAIL_PAGE_SIZE if only_seed else REGULAR_DETAIL_BATCH
+        for number, group in enumerate(batched(chosen, batch_size), 1):
+            for args in selected_details(client, group, on_article_error=None if only_seed else defer_unreadable):
+                accept_detail(*args)
+            if only_seed and number % 6 == 0:
+                status()
+        return status(finished=True)
     except PublicReadError as exc:
         state['official_site_hold'] = exc.reason == 'official_publisher_gate'
         state['last_http'] = exc.status
@@ -514,12 +562,12 @@ def collect(path, max_pages, max_details, seed, *, intro_db=None, only_seed=Fals
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--pages', type=int, default=12)
-    parser.add_argument('--details', type=int, default=4)
+    parser.add_argument('--pages', type=int, default=REGULAR_PAGES)
+    parser.add_argument('--details', type=int, default=REGULAR_DETAIL_BUDGET)
     parser.add_argument('--seed-detail', action='append', default=[])
     parser.add_argument('--detail-list',type=Path,help='仅补采项目内清单指定的来源文章，一行一个文章号')
     args = parser.parse_args()
-    maximum = MAX_TARGET_DETAILS if args.detail_list else 20
+    maximum = MAX_TARGET_DETAILS if args.detail_list else REGULAR_DETAIL_BUDGET
     if not 0 <= args.pages <= 160 or not 0 <= args.details <= maximum or not all(ART.fullmatch(value) for value in args.seed_detail):
         parser.error('batch out of bounds')
     seeds = args.seed_detail

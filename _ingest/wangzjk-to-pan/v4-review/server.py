@@ -10,7 +10,7 @@ import sqlite3
 from threading import RLock
 from time import perf_counter
 from urllib.parse import parse_qs, urlsplit
-from catalog_model import CATEGORIES, STATUS, ROOT, compact, digest, now, open_index
+from catalog_model import CATEGORIES, STATUS, ROOT, catalog_input_stamp, compact, digest, now, open_index
 
 from production_bridge import LocalProjection
 from catalog_progress import CatalogProgress
@@ -199,6 +199,12 @@ class LiveSnapshot:
         self.catalog_db=catalog_db
         self.watch=(watch,) if isinstance(watch,Path) else tuple(watch or ());self.lock=RLock();self.current=(library,draft,local)
         self.last_attempt=self.version() if self.watch else None;self.pending=False
+        if self.watch and hasattr(library, 'catalog_inputs_stamp') and (
+            library.catalog_inputs_stamp != catalog_input_stamp()
+            or catalog_db is not None and library.catalog_revision != CatalogStore(catalog_db).revision()
+        ):
+            # A collector can publish between building the index and starting the server.
+            self.last_attempt = None
         self.progress = None
 
     def resource_progress(self, library, local):

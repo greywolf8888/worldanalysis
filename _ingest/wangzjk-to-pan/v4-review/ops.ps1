@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('start', 'status', 'collect', 'verify', 'check_dsh', 'member', 'member-review', 'member-access', 'next', 'catalog', 'catalog-progress')]
+    [ValidateSet('start', 'status', 'collect', 'collect-scheduled', 'verify', 'check_dsh', 'member', 'member-review', 'member-access', 'next', 'catalog', 'catalog-progress')]
     [string]$Action = 'status',
     [ValidateRange(1, 65535)]
     [int]$Port = 8767,

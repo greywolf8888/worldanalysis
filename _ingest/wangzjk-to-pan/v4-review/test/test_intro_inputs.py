@@ -62,6 +62,20 @@ class IntroInputTests(unittest.TestCase):
                 list(collector.selected_details(client.return_value, ('12','18')))
             self.assertEqual(error.exception.reason,'publisher_detail_collection_mismatch')
 
+    def test_regular_batch_keeps_reading_after_one_unreadable_article(self):
+        stamp = '2026-11-26T14:15:00'
+        readable = wordpress_post('18', stamp)
+        deferred = []
+        with patch.object(collector,'WordPress') as client:
+            client.return_value.get.side_effect = [
+                ([readable], {'X-WP-Total': '1'}, 'rest', 'test'),
+                collector.PublicReadError('publisher_http_error', 500),
+            ]
+            results = list(collector.selected_details(client.return_value, ('12','18'),
+                                                     on_article_error=deferred.append))
+        self.assertEqual(deferred, ['12'])
+        self.assertEqual(results, [('18', readable, 'rest', 'test')])
+
     def test_visible_body_survives_restricted_download_and_long_detail_is_retained(self):
         long_text = '摘要之外的课程内容。' * 1800
         payload = wordpress_post('459', '2026-11-27T08:00:00', f'''
@@ -229,6 +243,20 @@ class IntroInputTests(unittest.TestCase):
                 with self.assertRaises(collector.PublicReadError):
                     collector.modified_discovery(Publisher(), state, upper, start, '2026-11-27T10:00:00', 1)
                 self.assertEqual(state['modified'], {'after':start, 'before':upper, 'next_page':1})
+
+    def test_publication_window_keeps_bound_and_stops_on_duplicate(self):
+        start = '2026-11-27T08:00:00'
+        upper = '2026-11-27T09:00:00'
+        row = wordpress_post('35', '2026-11-27T08:15:00')
+        state = {'articles': {}, 'head': {'after': start, 'next_page': 1}}
+        with patch.object(collector, 'WordPress') as client:
+            source = client.return_value
+            source.listing.return_value = [row], 2, 2, 'test'
+            collector.published_discovery(source, state, upper, upper, 1)
+            with self.assertRaises(collector.PublicReadError):
+                collector.published_discovery(source, state, upper, '2026-11-27T10:00:00', 1)
+            source.listing.assert_called_with(2, after=start, before=upper)
+        self.assertEqual(state['head'], {'after': start, 'before': upper, 'next_page': 1})
 
     def test_retry_waits_and_exhausted_attempt_only_reopens_for_new_source(self):
         modified = '2026-11-26T08:00:00'
