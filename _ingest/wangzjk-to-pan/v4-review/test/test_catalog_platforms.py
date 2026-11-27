@@ -1,6 +1,6 @@
 import unittest
 
-from catalog_platforms import project_platforms
+from catalog_platforms import PLATFORMS, github_repository_links, normalize_github_repository, project_platforms
 
 
 class PlatformProjectionTest(unittest.TestCase):
@@ -61,3 +61,39 @@ class PlatformProjectionTest(unittest.TestCase):
         title='抖音起号，淘宝开店，企业微信承接'
         self.assertEqual(project_platforms(title, (), '', review), ('xiaohongshu','taobao'))
         self.assertEqual(project_platforms(title, (), '', review, manual=True), ('xiaohongshu',))
+
+    def test_github_is_separate_from_tools_compatible_platforms_and_incidental_names(self):
+        self.assertEqual(PLATFORMS['github'], 'GitHub')
+        cases = (
+            ('GitHub基础入门实战课：掌握版本控制和团队协作', (), ('github',)),
+            ('零基础玩转Git_Github：命令行、分支合并、自动化部署实操', (), ('github',)),
+            ('GitHub开源多平台直播录屏神器！支持B站、抖音和YouTube', (), ('github',)),
+            ('图书在线点读项目', ('代码公开在GitHub上，采用MIT许可。',), ('github',)),
+            ('全栈项目部署', ('将生产应用部署到服务器，使用 GitHub Actions 自动化构建。',), ('github',)),
+            ('Git版本控制课程：分支操作、冲突合并、团队协作', (), ()),
+            ('AI辅助开发工具', ('这是 GitHub Copilot 的底层技术。',), ()),
+            ('应用界面介绍', ('支持GitHub登录，图片参考GitHub。',), ()),
+            ('作者主页与采访', ('作者曾在GitHub讨论过同行项目。',), ()),
+            ('微信登录示例', ('不使用GitHub登录。',), ()),
+        )
+        for title, paragraphs, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(project_platforms(title, paragraphs, ''), expected)
+
+    def test_github_requires_a_literal_repository_and_keeps_only_its_canonical_root(self):
+        self.assertEqual(github_repository_links((
+            '源码见 https://github.com/Public-Org/Example-Releases/releases/tag/v1.0?ref=secret.',
+            '重复 github.com/public-org/example-releases.git',
+            '介绍页 https://github.com/about https://github.com/maintainer https://github.com/topics/example',
+            '假域名 https://notgithub.com/org/repo https://github.com.example.com/org/repo'
+            ' https://example.com/github.com/org/repo https://other@github.com/org/repo',
+        )), ('https://github.com/Public-Org/Example-Releases',))
+        for value in ('https://github.com/user/repo/%2esettings', 'https://github.com/user/..',
+                      'https://github.com/user/repo\\path', 'https://github.com/user',
+                      'https://github.com/marketplace/some-name', 'https://github.com/user/repo/unknown'):
+            with self.subTest(value=value):
+                self.assertIsNone(normalize_github_repository(value))
+        canonical = 'https://github.com/org/public-tool'
+        self.assertEqual(project_platforms('工具箱', (), '', github_links=[canonical]), ('github',))
+        self.assertEqual(project_platforms('工具箱', (), '', {'platforms':[{'id':'github','role':'excluded'}]},
+                                           github_links=[canonical]), ())

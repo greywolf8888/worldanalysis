@@ -89,3 +89,28 @@ class CatalogTopicTest(unittest.TestCase):
         self.assertEqual(project_topic('练习口播剪辑',(),'',{'category':'growth','subcategory':'账号起号'},manual=True),
                          ('growth','账号起号'))
         self.assertEqual(project_topic('每天做一点就有收益',(),'',{'category':'unsorted'}),('',''))
+
+    def test_primary_purpose_reclassifies_older_automatic_decisions(self):
+        cases = (
+            ('抖音AI创作者计划实操课程', ('创作者开通发布与分成计划。',), 'reference', ('growth', '账号起号')),
+            ('AI短剧工作流实战课：脚本到成片', ('课程核心是短剧制作。',), 'automation', ('screen', '短剧与漫剧')),
+            ('酒店民宿线上获客系统课：抖音起号和直播', ('系统学习酒店民宿的获客和开店经营。',), 'growth', ('local_business', '门店经营')),
+            ('小红书无货源0粉电商课：图文方法', (), 'content', ('commerce', '店铺运营')),
+            ('微信小游戏制作付费课程', (), 'gaming', ('gaming', '游戏开发')),
+            ('飞书多维表格自动化训练营', (), 'automation', ('office', '表格与文档')),
+        )
+        for title, paragraphs, previous, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(project_topic(title, paragraphs, '', {'category': previous}, source_checked=True), expected)
+
+    def test_platform_and_tool_names_do_not_define_the_primary_topic(self):
+        cases = (
+            ('GitHub项目：开源视频压缩工具', ('可批量压缩视频并保留画质。',), ('software', '影音工具')),
+            ('GitHub上的人生指南', ('汇集提高生活质量的人生经验。',), ('life', '个人成长')),
+            ('AI和抖音红利来了：三天就能上手', ('项目收益由个人实际情况决定。',), ('reference', '项目线索')),
+            ('抖音同城直播实训', ('本课程主要教餐饮门店获客。课程案例包括短视频制作。',), ('local_business', '门店经营')),
+            ('平面设计实战：附赠电商带货教程', ('本课程主要学习平面设计和海报。',), ('design', '平面与作图')),
+        )
+        for title, paragraphs, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(project_topic(title, paragraphs, '', source_checked=True), expected)

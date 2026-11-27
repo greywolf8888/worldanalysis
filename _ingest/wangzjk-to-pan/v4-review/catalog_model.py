@@ -130,6 +130,7 @@ class SourceAdapter(Protocol):
     def project_page_url(self, article_id: str) -> str: ...
     def discover(self,cursor: int, scope: dict) -> tuple[list[str],int|None]: ...
     def read_article(self,article_id: str) -> dict: ...
+    def catalog_evidence(self, article_id: str) -> tuple[dict, dict | None]: ...
     def resolve_resource_ranges(self,article_id: str) -> list[dict]: ...
     def checkpoint(self) -> dict: ...
 
@@ -170,6 +171,9 @@ class Wangzjk:
                 if not days or str(a.get('published_at',''))[:10] in days), key=lambda i:(self.articles[i].get('published_at') or '',int(i)),reverse=True)
         block=keys[cursor:cursor+128]; tail=cursor+len(block)
         return block, tail if tail<len(keys) else None
+
+    def catalog_evidence(self, article_id):
+        return self.articles[article_id], legacy_intro(self.site_id, article_id, self.facts.get(article_id))
 
     def resolve_resource_ranges(self,article_id):
         a=self.articles[article_id]; url_keys={source_key(s.get('url')) for s in a.get('shares',[])}-{None}
@@ -252,7 +256,11 @@ class Library:
     def __init__(self, adapters):
         rows=[]; self.sites=[]; self.share_locations={}
         self.project_page_entries = {}
+        self.adapters = {}
         for adapter in adapters:
+            if adapter.site_id in self.adapters:
+                raise ValueError('重复的资料来源')
+            self.adapters[adapter.site_id] = adapter
             self.sites.append({'id':adapter.site_id,'label':adapter.site_label,'checkpoint':adapter.checkpoint()})
             cursor=0; aliases=set()
             while cursor is not None:
@@ -297,16 +305,19 @@ class Library:
                 'coverage','other_sources','other_versions','paragraphs','excerpt_full','source_kind'}
         return {k:v for k,v in r.items() if k not in omit and not k.startswith('_')}
 
-    def attach_catalog(self, source, store, intros):
+    def attach_catalog(self, store, intros):
         self.semantic_inputs = {}
         self.semantic_rows = {}
+        repository_links = {}
         for raw in self.raw_rows:
             site, aid = raw['site_id'], str(raw['article_id'])
-            source_article = source.articles[aid]
-            historic = legacy_intro(site, aid, source.facts.get(aid))
+            source_article, historic = self.adapters[site].catalog_evidence(aid)
             saved = choose_intro(intros.get((site, aid)), historic, source_article.get('publisher_modified'))
             value = source_input(raw, saved, source_article)
-            self.semantic_inputs[value['article_key']] = value
+            token = value['article_key']
+            self.semantic_inputs[token] = value
+            if saved and saved.get('github_links'):
+                repository_links[token] = saved['github_links']
         classified, relations, self.stale_relations = store.read(self.semantic_inputs)
         self.semantic_classified = classified
         self.semantic_relations = relations
@@ -323,7 +334,7 @@ class Library:
                                               source_checked=value['coverage'] in {'complete','partial','image_only'})
             secondary = displayed_secondary_topic(category,valid,manual=record_state=='manual')
             live_platforms = project_platforms(value['title'],value['paragraphs'],value['excerpt'],valid,
-                                               manual=record_state=='manual')
+                                               manual=record_state=='manual',github_links=repository_links.get(token, ()))
             row = {**raw, 'article_key':token, 'input_hash':relationship_input(value,valid)['input_hash'], 'analysis':valid,
                    'coverage':value['coverage'],'paragraphs':value['paragraphs'],'classification_state':{'agent':'verified','manual':'manual'}.get(record_state,'pending'),
                    'category':category,'category_label':TAXONOMY.get(category,('',()))[0],'subcategory':subtopic,
@@ -545,7 +556,7 @@ def open_index():
     lib.share_locations = {**historical, **member_links}
     lib.operations_snapshot_id=lib.snapshot_id
     lib.catalog_revision=catalog_revision
-    lib.attach_catalog(source,store,read_intros(SEMANTIC_DB))
+    lib.attach_catalog(store,read_intros(SEMANTIC_DB))
     if catalog_input_stamp()!=data_stamp or store.revision()!=catalog_revision:
         raise ValueError('资料读取期间发生更新，请稍后重读')
     lib.catalog_inputs_stamp=data_stamp

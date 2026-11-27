@@ -6,6 +6,7 @@ import sys
 from lxml import etree, html
 
 from catalog_model import ORIGIN, SITE, safe_image, safe_text
+from catalog_platforms import MAX_GITHUB_REPOSITORIES, github_repository_links, normalize_github_repository
 from intro_inputs import make_intro
 
 GATE = re.compile(r'内容需要权限查看|登录后查看全文|请(?:付费|购买|登录)后查看|无权查看|解锁全文|访问过于频繁|安全验证后继续|输入提取码')
@@ -16,7 +17,7 @@ SKIP = {'script','style','noscript','iframe','form','input','button','video','au
 FENCE = {'p','li','ul','ol','div','section','figure','figcaption','br','blockquote','tr','h1','h2','h3','h4','h5','h6','pre','hr'}
 
 
-def visible_blocks(raw, markup_limit):
+def visible_blocks(raw, markup_limit, *, github_links=None):
     if not isinstance(raw, str):
         return [], False, 'markup_unavailable'
     if len(raw) > markup_limit:
@@ -26,21 +27,43 @@ def visible_blocks(raw, markup_limit):
     parser = html.HTMLParser(recover=True, no_network=True, remove_comments=True)
     root = html.fragment_fromstring(raw, create_parent='div', parser=parser)
     output, pending = [], []
+    pending_links = {}
+    pending_chars = 0
     has_images = False
     partial_reason = None
 
+    def keep_links(links):
+        if github_links is None:
+            return
+        for address in links:
+            if len(github_links) < MAX_GITHUB_REPOSITORIES:
+                github_links.setdefault(address.casefold(), address)
+
+    def append_text(value, anchor):
+        nonlocal pending_chars
+        if value:
+            if anchor and value.strip():
+                pending_links.setdefault(anchor, pending_chars)
+            pending.append(value)
+            pending_chars += len(value)
+
     def flush():
-        nonlocal partial_reason
+        nonlocal partial_reason, pending_chars
         value = ''.join(pending)
         pending.clear()
+        pending_chars = 0
         if gate := GATE.search(value):
             # Unmarked access warnings can precede an unmarked gated suffix.
             value = value[:gate.start()]
             partial_reason = 'unmarked_access_boundary'
+        keep_links(address for address, offset in pending_links.items() if offset < len(value))
+        pending_links.clear()
+        if github_links is not None:
+            keep_links(github_repository_links((value,)))
         if paragraph := safe_text(value, 3 * len(value) + 100):
             output.append({'kind': 'text', 'text': paragraph})
 
-    def walk(element, depth):
+    def walk(element, depth, anchor=None):
         nonlocal has_images, partial_reason
         if partial_reason or not isinstance(element.tag, str):
             return
@@ -63,18 +86,21 @@ def visible_blocks(raw, markup_limit):
             if link := safe_image(attributes.get('data-src')) or safe_image(attributes.get('src')):
                 flush()
                 if not partial_reason:
+                    if anchor:
+                        keep_links((anchor,))
                     output.append({'kind': 'image', 'url': link, 'alt': safe_text(attributes.get('alt'), 400)})
             return
         if tag == 'a' and ACCESS_LINK.search(attributes.get('href', '')):
             return
-        if element.text:
-            pending.append(element.text)
+        if github_links is not None and tag == 'a':
+            address = normalize_github_repository(attributes.get('href'))
+            anchor = address if address and not GATE.search(element.text_content()) else None
+        append_text(element.text, anchor)
         for child in element:
-            walk(child, depth + 1)
+            walk(child, depth + 1, anchor)
             if partial_reason:
                 return
-            if child.tail:
-                pending.append(child.tail)
+            append_text(child.tail, anchor)
         if tag in FENCE:
             flush()
 
@@ -112,14 +138,20 @@ def project(sample, *, block_limit=180, markup_limit=95_000, include_intro=False
     if not isinstance(content, dict) or content.get('protected') is not False:
         return {**base, 'state': 'restricted'}
 
-    sequence, has_images, partial_reason = visible_blocks(content.get('rendered'), markup_limit)
+    repositories = {}
+    sequence, has_images, partial_reason = visible_blocks(content.get('rendered'), markup_limit,
+                                                        github_links=repositories)
     if sample.get('truncated'):
         partial_reason = 'response_truncated'
+    links = list(repositories.values())
+    if links:
+        base['github_links'] = links
     paragraphs = [block['text'] for block in sequence if block['kind'] == 'text']
     if include_intro:
         base['introduction'] = make_intro(
             SITE, article_id, paragraphs, publisher_modified=payload.get('modified'),
-            observed_at=sample['observed_at'], has_images=has_images, partial_reason=partial_reason)
+            observed_at=sample['observed_at'], has_images=has_images, partial_reason=partial_reason,
+            github_links=links if partial_reason not in ('markup_budget', 'markup_unavailable', 'response_truncated') else None)
     if not sequence:
         return {**base, 'state': 'restricted' if partial_reason == 'unmarked_access_boundary' else 'unavailable'}
 

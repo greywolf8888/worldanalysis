@@ -102,9 +102,17 @@ def audit_topics(library, category, sample):
         raise ValueError('抽样数须在 0 至 50 之间')
     raw = tuple(library.semantic_rows.values())
     facets = library.meta['categories']
+    platforms = library.meta['platforms']
     for option in facets:
-        if len(library.match({'category':option['id']},set())) != option['count']:
-            raise ValueError('分类计数与实际筛选结果不一致')
+        query = {'category': option['id']}
+        if len(library.match(query, set())) != option['count']:
+            raise ValueError('大类计数与实际筛选结果不一致')
+        for subcategory in option['subcategories']:
+            if len(library.match({**query, 'subcategory': subcategory['id']}, set())) != subcategory['count']:
+                raise ValueError('细分计数与实际筛选结果不一致')
+    for platform in platforms:
+        if len(library.match({'platform': platform['id']}, set())) != platform['count']:
+            raise ValueError('平台计数与实际筛选结果不一致')
     chosen = [row for row in raw if category is None or (row['category'] or NO_TOPIC) == category
               or row['secondary_category'] == category]
     chosen.sort(key=lambda row:(row['published_at'],row['article_id']))
@@ -113,7 +121,7 @@ def audit_topics(library, category, sample):
     return {'sources':len(raw),'projects':library.meta['totals']['projects'],
             'primary':dict(Counter(row['category'] or NO_TOPIC for row in raw)),
             'introduction_coverage':dict(Counter(row['coverage'] for row in raw)),
-            'categories':facets,
+            'categories':facets,'platforms':platforms,
             'sample':[{'site':row['site_id'],'article':row['article_id'],'title':row['title'],
                        'category':row['category_label'],'subcategory':row['subcategory']} for row in picked]}
 

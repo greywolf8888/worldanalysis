@@ -1,10 +1,11 @@
 """Browse topics derived from the scope of the projects in the library."""
+from functools import lru_cache
 import re
 from unicodedata import normalize
-from catalog_topic_refinement import reference_topic, refined_topic
+from catalog_topic_refinement import CONTEXT_TOPICS, REFINED_TOPICS, reference_topic
 
 
-TOPIC_REVISION = 'project-topics-3.1'
+TOPIC_REVISION = 'project-topics-4'
 CATEGORIES = {
     'commerce': ('电商与带货', ('商品经营', '店铺运营', '虚拟商品', '联盟带货', '本地团购')),
     'crossborder': ('跨境电商与外贸', ('跨境店铺', '海外带货', '外贸获客')),
@@ -61,7 +62,7 @@ _RULES = (
     ('design','摄影与空间设计',10,r'摄影|拍照构图|室内设计|建筑设计|空间设计|景观设计|效果图制作'),
     ('office','表格与文档',9,r'办公(?:提效|套件|效率|实操)|办公软件|表格|文档编辑|数据透视|excel|wps|acrobat|pdf专家|pdf编辑|pdf阅读|财务报表|记账软件|文档翻译|microsoft office'),
     ('office','汇报与演示',9,r'做ppt|写ppt|代写ppt|ppt|powerpoint|演示文稿|汇报材料|公文写作'),
-    ('office','笔记与知识管理',9,r'知识管理|知识库管理|笔记软件|笔记管理|markdown编辑|typora|obsidian|飞书多维表格|trilium'),
+    ('office','笔记与知识管理',9,r'知识管理|知识库管理|笔记软件|笔记管理|markdown编辑|typora|obsidian|trilium'),
     ('automation','智能体',9,r'智能体|agent|openclaw|workbuddy|skill(?:工具|体系|技能|标准化|封装)|muse全能|bot搭建|扣子(?:实战|搭建|智能)|多智能体|grok bot'),
     ('automation','自动化工作流',9,r'工作流|流程自动化|自动化工具|自动化(?:脚本|任务|办公)|n8n|dify|coze|扣子|自动化系统'),
     ('automation','AI 工具',8,r'deepseek(?:入门|教程|实战|工具|应用|提示词)|ai工具|提示词工程|ai提示词|ai指令|即梦ai.{0,8}(?:系统课|教程)|大模型(?:部署|应用|入门|教程|训练)|模型部署|模型接入|大模型聚合'),
@@ -109,14 +110,20 @@ _PURPOSE_RULES = (
     ('services','活动推广',12,r'(?:豆包|百度|夸克|uc|迅雷|网盘|快手极速版|剪映模板).{0,4}拉(?:新|转|存)|(?:浏览|看|点击)广告.{0,10}(?:任务|挂机|项目|收益)|广告挂机|悬赏(?:评论|任务|接单)'),
     ('services','本地服务',12,r'(?:同城|单身).{0,8}(?:配对|相亲|婚介|经济项目)|陪伴经济|电影票.{0,8}(?:代购|代订|项目|玩法)'),
 )
-SIGNALS = tuple((category, sub, weight, re.compile(expression,re.I))
-                for category, sub, weight, expression in (*_PURPOSE_RULES, *_RULES))
-_TITLE_NOISE = re.compile(r'(?:无需|不用|不需要|不必|免去)(?:再)?(?:直播|剪辑|拍摄|拍视频|开店|囤货|投流|露脸|出镜|懂技术|写代码)')
+SIGNALS = tuple((category, sub, weight, re.compile(expression, re.I))
+                for category, sub, weight, expression in (
+                    *CONTEXT_TOPICS, *_PURPOSE_RULES, *_RULES,
+                    *((category, sub, 10, expression) for category, sub, expression in REFINED_TOPICS),
+                ))
+_TITLE_NOISE = re.compile(r'(?:无需|不用|不需要|不必|免去)(?:再)?(?:直播|剪辑|拍摄|拍视频|开店|囤货|投流|露脸|出镜|懂技术|写代码|设计|接单)')
 _TAGS = re.compile(r'^(?:课程内容|课程|项目|内容|软件|公开)?(?:介绍|简介)(?:[:：\s]|$)')
 _EDITION_PREFIX = re.compile(r'^\s*(?:(?:\(\d{4,7}期\)|【(?:无水印|原创双语字幕|独家)】)\s*)+')
 _ENTRY_FORMAT = re.compile(r'^(?:(?:某|微信)?公众号)?(?:付费文章|课程介绍|项目简介)\s*[:：]\s*')
 _INVISIBLE_FORMAT = re.compile(r'[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]')
 _LEAD_END = re.compile(r'[:|;。!?,，；：—]|\s-\s')
+_TITLE_EXTRAS = re.compile(r'(?:附赠|附送|另赠|内附|赠送|附带|配套赠送|案例包括|案例包含|案例涉及|适用场景包括).*$')
+_BODY_ASIDE = re.compile(r'^(?:附赠|赠品|额外赠送|随课赠送|免责声明|(?:适用|应用)场景举例|素材包附赠)')
+_GENERIC_HEAD = re.compile(r'^(?:(?:\d{1,2}月)?(?:全网|全新|最新|独家|首发|揭秘|牛逼|爆款|必看|系列|进阶|干货|深度|保姆级|小白|项目|实战|课程|实操|入门|实用|必收)[!：: ]*)+$')
 _TRAINING = re.compile(r'大课|课程|系统课|必修课|线下课|操盘课|教程|教学|特训营|训练营|实训(?:课|营)?|\d{1,3}\s*(?:讲|节课)|手把手|教你|从零.{0,7}(?:学|入门)|新手.{0,4}(?:上手|做)|实战(?:课|方法|经验|进阶)|(?:直播|操作).{0,10}拆解|玩法|实操')
 _NEWS_BRIEF = re.compile(r'新闻(?:早讯|早报|晚报|简报|快讯)|每日(?:早报|晚报|快讯)|60\s*(?:秒|s)\s*读懂世界|(?:国际|热点)新闻简报',re.I)
 _NEWS_REPORT = re.compile(r'行业(?:观察|快讯|简报|动态)|市场观察|政策要闻|行业报告发布|政策正式(?:实施|出台)',re.I)
@@ -127,12 +134,12 @@ _AI_PRODUCT = re.compile(r'(?:多模态)?ai\s*(?:工具站|生成平台|模型�
 _SOFTWARE_RELEASE = re.compile(r'(?<![A-Za-z0-9])v\s*\d{1,4}(?:\.\d+){1,4}|绿色(?:版|便携|纯净|精简)|便携(?:版|汉化)|直装(?:版|/)|安装即用|(?:电脑|桌面|安卓|tv)版.{0,10}(?:客户端|体验丝滑)|客户端(?:增强|补丁|下载)', re.I)
 _SOFTWARE_PRODUCT = re.compile(r'(?:视频|文件|素材|电子教材|字幕|音乐|磁力).{0,6}下载(?:器|工具|助手)|(?:下载|翻译|截图|投屏|录播|卸载|录屏)(?:器|小?工具|助手)|内容监控.{0,22}(?:开源|软件)|(?:多线程|磁力)下载工具',re.I)
 _SOFTWARE_KIND = tuple((sub, re.compile(expr, re.I)) for sub, expr in (
-    ('影音工具',r'录播|追剧|视频.{0,6}(?:下载|播放|修复|封装|转换|工具|翻译)|影音|视频号下载|字幕(?:提取|转换|机翻)|音频|混音|录屏|播放器|格式工厂|audition|fxsound|camtasia|hypersnap|mkvtoolnix|gamescrcpy'),
+    ('影音工具',r'录播|追剧|视频.{0,6}(?:下载|播放|压缩|修复|封装|转换|工具|翻译)|影音|视频号下载|字幕(?:提取|转换|机翻)|音频|混音|录屏|播放器|格式工厂|audition|fxsound|camtasia|hypersnap|mkvtoolnix|gamescrcpy'),
     ('办公工具',r'pdf|excel|ppt|office|wps|word|文档|表格|笔记管理|知识库'),
     ('设计工具',r'photoshop|lightroom|illustrator|indesign|blender|topaz|设计软件|修图工具|照片编辑|相片大师|raw处理|adobe bridge|after effects'),
-    ('系统与文件',r'windows|系统(?:清理|优化)|文件(?:处理|复制|管理|批量|同步|恢复)|文件夹|驱动|存储管理|硬盘|解压缩|ftp|ssh|备份|虚拟机'),
+    ('系统与文件',r'系统(?:清理|优化|重装)|文件(?:处理|复制|管理|转存|批量|同步|恢复)|文件夹|网盘.{0,8}转存|驱动|存储管理|硬盘|解压缩|ftp|ssh|备份|虚拟机|网速聚合|download manager'),
 ))
-_ASSET_SIGNAL = re.compile(r'音效合集|音效素材|背景音乐|配乐素材|音乐素材|(?:bgm|音效|配乐|音乐|转场|片头|字幕|模型|贴图|插画|字体|参考图|素材|预设|样式|模板).{0,9}(?:素材包|素材合集|资源包|资源合集|完整版|合集|打包)|(?:海报|ppt|ps|封面|画册|剪映|视频|分镜|汇报|运营表格)模板|摄影预设|\d[\d,]*\s*(?:套|张).{0,8}(?:参[考照]图|姿势图|图片)|(?:免版权|可商用).{0,10}(?:bgm|音效|音乐|图片|图标|素材)|(?:三维|3d|cg|设计)模型素材', re.I)
+_ASSET_SIGNAL = re.compile(r'音效(?:合集|音乐包|素材)|背景音乐|配乐素材|音乐素材|(?:bgm|音效|配乐|音乐|转场|片头|字幕|模型|贴图|插画|字体|参考图|素材|预设|样式|模板).{0,9}(?:素材包|素材合集|资源包|资源合集|完整版|合集|打包)|(?:海报|ppt|ps|封面|画册|剪映|视频|分镜|汇报|运营表格)模板|摄影预设|\d[\d,]*\s*(?:套|张).{0,8}(?:参[考照]图|姿势图|图片)|(?:免版权|可商用).{0,10}(?:bgm|音效|音乐|图片|图标|素材)|(?:三维|3d|cg|设计)模型素材', re.I)
 _ASSET_ATTACHMENT = re.compile(r'附(?:赠|送|带|全套|万能|素材|教程|模板)|配套.{0,8}(?:素材|模板)|包含|内附|素材下载器')
 _ASSET_AS_METHOD = re.compile(r'^\s*(?:拉新|拉转|分销|代理)(?:项目|推广|任务)')
 _ASSET_KIND = tuple((sub, re.compile(expr, re.I)) for sub, expr in (
@@ -143,12 +150,14 @@ _ASSET_KIND = tuple((sub, re.compile(expr, re.I)) for sub, expr in (
 _SIDE_JOB = re.compile(r'(?:副业(?:项目|复盘|路线|实战|教程)|信息差(?:项目|实操|机会)|精品项目群|副业项目群|任务(?:平台|项目)|副业.{0,12}(?:落地|实收|第一笔收入))')
 _EXPORT_GOAL = re.compile(r'(?:聚焦|面向|专为|专题讲解).{0,10}(?:跨境出海|跨境电商|外贸独立站)')
 _EXPORT_SCOPE = re.compile(r'独立站|出海|跨境|外贸|海外社媒')
-_FROM_LEGACY = {
-    'commerce': {'crossborder','local_business'}, 'content': {'design','media','screen'},
-    'growth': {'business','crossborder','gaming','local_business'}, 'automation': {'media','office','technical','design','screen'},
-    'technical': {'design','software','office','gaming','automation'}, 'business': {'crossborder','services','gaming'},
-    'design': {'assets','screen','software'}, 'software': {'assets'},
-}
+_PRODUCT_TEACHING = re.compile(r'如何使用|使用方法|安装|操作教程|实操演示|使用教程|配置教程|使用指南')
+_REPO_PRODUCT = re.compile(r'github.{0,15}(?:开源|工具|神器)|开源.{0,5}(?:工具|软件|客户端|桌面应用)|(?:开源|自托管).{0,14}(?:工作台|自动化项目)', re.I)
+_PRODUCT_OBJECT = re.compile(r'工具|神器|软件|客户端|桌面|自托管|浏览器(?:插件|扩展)|\bv(?:er)?\s*\d+\.\d+', re.I)
+_SOFTWARE_DELIVERY = re.compile(r'(?:windows|macos|mac|安卓|桌面|电脑)(?:版|客户端)|安装包|软件下载|(?:小说|写作).{0,5}(?:创作软件|辅助软件)|免安装版|一键win(?:dows)?系统重装|download manager', re.I)
+_PUBLISHING_TOOL = re.compile(r'(?:视频|图文|内容).{0,10}(?:搬运工具|发布工具|跨平台分发工具)|(?:全流程|一键).{0,15}(?:搬到|分发到|发布到)')
+_TEACHING_DELIVERABLE = re.compile(r'本(?:套|期)?课(?:程)?(?:主要|重点|核心|围绕|聚焦|最终|是|将|会|教|以|从)|课程目标[:：]?|本项目(?:是|核心|旨在|专门|教)|(?:主要|重点)(?:教|学习|讲解|交付|训练)|是一套(?:专注|聚焦|围绕|针对)')
+_GOAL_EXAMPLES = re.compile(r'[,，](?:同时|课程案例|案例包括|涵盖的案例|例如|并附|顺带|配套|搭配|附带).*$')
+_GAME_PROFILE = re.compile(r'^游戏介绍[:：\s][\s\S]{5,900}(?:游戏截图|游戏视频|游戏特色|版本介绍|游戏玩法)')
 
 
 def title_text(title):
@@ -173,16 +182,38 @@ def introduction_text(title, paragraphs, excerpt):
         yield text
 
 
-def evidence_topics(text, *, head=0):
+def purpose_text(parts):
+    """Ignore add-ons and boilerplate while keeping the whole readable introduction."""
+    return '\n'.join(_TITLE_NOISE.sub('', _TITLE_EXTRAS.sub('', part))
+                     for part in parts if not _BODY_ASIDE.match(part))
+
+
+def topic_scores(title, head, intro, goal_text):
+    """Score independent fields, with capped support from repeated body terms."""
     scores = {}
     for category, sub, weight, pattern in SIGNALS:
-        found = pattern.search(text)
-        if not found:
+        title_match = pattern.search(title)
+        body_match = pattern.search(intro) if intro else None
+        goal_match = goal_text and pattern.search(goal_text)
+        if not (title_match or body_match or goal_match):
             continue
-        score = weight + (5 if head and found.end() <= head else 0)
-        if score > scores.get(category, (0, ''))[0]:
-            scores[category] = (score, sub)
-    return scores
+        if title_match:
+            score = weight + (10 if title_match.end() <= len(head) else 5)
+        elif body_match:
+            score = weight + (0 if body_match.start() < 320 else -4)
+        else:
+            score = 0
+        if goal_match and weight >= 10:
+            score = max(score, weight + 7)
+        item = scores.setdefault(category, {})
+        previous = item.get(sub, (0, False, False))
+        item[sub] = (max(previous[0], score), previous[1] or bool(title_match),
+                     previous[2] or bool(body_match or goal_match))
+    # Corroboration changes close calls but a long list of examples cannot
+    # outrank a clearer title by sheer frequency.
+    return {category: max(((base + (3 if matched_title and body else 0), sub, matched_title, body)
+                          for sub, (base, matched_title, body) in subtopics.items()), key=lambda item: item[0])
+            for category, subtopics in scores.items()}
 
 
 def direct_topic(text, intro, head, teaching):
@@ -190,12 +221,23 @@ def direct_topic(text, intro, head, teaching):
         return 'news','新闻简报'
     if not teaching and _NEWS_REPORT.search(head) and _REPORTING.search(intro) and not _NEWS_AS_MATERIAL.search(text):
         return 'news','行业观察'
+    if not teaching and _GAME_PROFILE.match(intro):
+        return 'gaming','游戏资料'
     if _AI_PRODUCT.search(head):
         return 'automation','AI 工具'
     release = _SOFTWARE_RELEASE.search(text)
-    if not teaching and (release or _SOFTWARE_INTRO.search(intro) or _SOFTWARE_PRODUCT.search(text)):
+    utility = _SOFTWARE_PRODUCT.search(head) or _PUBLISHING_TOOL.search(text)
+    repository = _REPO_PRODUCT.search(text) and _PRODUCT_OBJECT.search(text)
+    software_intro = _SOFTWARE_INTRO.search(intro)
+    if ((not teaching and (release or software_intro or utility or repository or _SOFTWARE_DELIVERY.search(head)))
+            or (release and (software_intro or utility or _PRODUCT_TEACHING.search(text)))):
         software = text + ' ' + intro[:130]
-        sub = next((name for name, pattern in _SOFTWARE_KIND if pattern.search(software)), '应用软件')
+        sub = next((name for name, pattern in _SOFTWARE_KIND if pattern.search(head)), '')
+        if _PUBLISHING_TOOL.search(text):
+            sub = '影音工具'
+        if not sub:
+            scope = text if repository else software
+            sub = next((name for name, pattern in _SOFTWARE_KIND if pattern.search(scope)), '应用软件')
         return 'software', sub
     asset = _ASSET_SIGNAL.search(text)
     if (not teaching and asset and not _ASSET_ATTACHMENT.search(text[:asset.end()])
@@ -229,58 +271,58 @@ def project_topic(title, paragraphs, excerpt, reviewed=None, *, manual=False, so
     previous_sub=reviewed.get('subcategory','')
     if manual:
         return (previous, previous_sub) if previous in CATEGORIES else ('', '')
+    return automatic_topic(title, tuple(paragraphs), excerpt, previous, previous_sub, source_checked)
 
+
+@lru_cache(maxsize=20_000)
+def automatic_topic(title, paragraphs, excerpt, previous, previous_sub, source_checked):
     title_scope = title_text(title)
-    text = _TITLE_NOISE.sub('', title_scope)
+    text = _TITLE_NOISE.sub('', _TITLE_EXTRAS.sub('', title_scope)).strip()
     boundary = _LEAD_END.search(text)
     head = text[:boundary.start()] if boundary else text
-    if len(head.strip()) < 5:
+    if len(head.strip()) < 5 or _GENERIC_HEAD.fullmatch(head.strip()):
         head = text
-    teaching = bool(_TRAINING.search(title_scope))
-    # The reader's short card summary is independent of classification evidence.
-    intro = '。'.join(introduction_text(title, paragraphs, excerpt))
-    explicit = direct_topic(title_scope, intro, head, teaching)
+    teaching = bool(_TRAINING.search(text))
+    parts = tuple(introduction_text(title, paragraphs, excerpt))
+    intro = purpose_text(parts)
+    reference = reference_topic(_INVISIBLE_FORMAT.sub('', normalize('NFKC', title)), intro) if source_checked else ('','')
+    if reference == ('reference', '站点说明'):
+        return reference
+    goals = '\n'.join(_GOAL_EXAMPLES.sub('', part) for part in re.split('[。！？\n]', intro)
+                      if _TEACHING_DELIVERABLE.search(part[:52]))
+    explicit = direct_topic(text, intro, head, teaching)
     if explicit[0]:
         return explicit
 
-    points = evidence_topics(text, head=len(head))
-    ranked = sorted((value[0] for value in points.values()), reverse=True)
-    if not ranked or ranked[0] < 16 or (len(ranked)>1 and ranked[0] - ranked[1] <= 3) or paragraphs:
-        if intro:
-            body = evidence_topics(_TITLE_NOISE.sub('', intro))
-            for category, (value, sub) in body.items():
-                if category in points:
-                    title_points, title_sub = points[category]
-                    points[category] = (title_points + min(4, value // 3), title_sub)
-                else:
-                    points[category] = (value - 1, sub)
-    if points:
-        category, (weight, sub) = max(points.items(), key=lambda item: item[1][0])
-    elif _SIDE_JOB.search(text[:180]) or _SIDE_JOB.search(intro[:100]):
-        category, weight, sub = 'services', 8, '综合副业'
-    else:
-        category, weight, sub = '', 0, ''
-    if previous in CATEGORIES and previous != 'news':
-        if previous=='content' and previous_sub=='短视频':
-            return 'media','短视频制作'
-        if previous=='content' and previous_sub=='短剧与漫剧':
-            return 'screen','短剧与漫剧'
-        if category == previous and previous_sub and previous_sub not in {'本地团购','动画与短剧','设计素材'}:
-            return previous, previous_sub
-        if category not in _FROM_LEGACY.get(previous,()) or weight<8:
-            return previous, previous_sub
-    if weight >= 7 and sub != '综合副业':
+    scores = topic_scores(text, head, intro, goals)
+    category, (weight, sub, in_title, _) = max(
+        scores.items(), key=lambda item: (item[1][0], item[1][2], item[1][3]),
+        default=('', (0, '', False, False)),
+    )
+    # Keep source-checked prior decisions when the new evidence is weak.
+    retained = (previous, previous_sub)
+    if retained == ('content', '短视频'):
+        retained = ('media', '短视频制作')
+    elif retained == ('content', '短剧与漫剧'):
+        retained = ('screen', '短剧与漫剧')
+    if retained[0] in CATEGORIES and retained[0] not in {'news', 'reference'}:
+        if not sub or (category != retained[0] and weight < (23 if in_title else 19)):
+            return retained
+    if weight >= (12 if in_title else 7) and sub != '综合副业':
         return category, sub
-    refined = refined_topic(text, intro)
-    if refined[0]:
-        return refined
-    if weight >= 7:
-        return category, sub
-    return reference_topic(_INVISIBLE_FORMAT.sub('',normalize('NFKC',title)),intro) if source_checked else ('','')
+    if reference[0]:
+        return reference
+    if previous == 'reference' and previous_sub in CATEGORIES['reference'][1]:
+        return previous, previous_sub
+    if _SIDE_JOB.search(text) or _SIDE_JOB.search(intro[:100]):
+        return 'services','综合副业'
+    return '', ''
 
 
 def displayed_secondary_topic(category, reviewed, *, manual=False):
     saved = reviewed.get('secondary_category')
+    if not manual and reviewed.get('category', category) != category:
+        return ''
     if saved in CATEGORIES and saved != category and (saved != 'news' or manual):
         return saved
     return ''

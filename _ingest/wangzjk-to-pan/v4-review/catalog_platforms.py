@@ -2,9 +2,10 @@
 
 import re
 from unicodedata import normalize
+from urllib.parse import urlsplit
 
 
-PLATFORM_REVISION = 'platform-purpose-1'
+PLATFORM_REVISION = 'platform-purpose-2'
 
 # Put specific forms before more general aliases when they share a prefix.
 _ALIASES = {
@@ -58,7 +59,7 @@ _ALIASES = {
     'quark_pan': ('夸克网盘', r'夸克网盘|夸克(?=\s*(?:网盘|拉新|拉转|拉存))'),
     'xunlei_pan': ('迅雷网盘', r'迅雷(?:网盘|云盘)|迅雷(?=\s*(?:网盘|拉新|拉转|拉存))'),
 }
-PLATFORMS = {key: label for key, (label, _) in _ALIASES.items()} | {'general': '通用'}
+PLATFORMS = {key: label for key, (label, _) in _ALIASES.items()} | {'github': 'GitHub', 'general': '通用'}
 FILTER_ROLES = frozenset({'use', 'acquire', 'receive'})
 
 _REFERENCES = re.compile(
@@ -111,6 +112,100 @@ _LIST_PADDING = re.compile(r'(?:[\s、/+&×:()·\[\]-]|以及|或者|适用于|�
 _HISTORICAL = re.compile(r'实操过|做过|从事过|接触过|早先运营过|曾经运营过')
 _HARD_OPERATION = re.compile(r'推广|经营|运营|开店|发布|起号|变现|获客|投稿|拉新|商品上架|上架店铺')
 _CLAUSE_COMPARE = re.compile(r'^\s*(?:[vV][sS]\.?\s*|对比|比较)|(?:两者)?(?:差异|区别)(?:一览|分析|对照)?$')
+
+_GITHUB_NAME = re.compile(r'(?<![a-z0-9./@-])github(?=desktop(?![a-z0-9])|[^a-z0-9.-]|$)', re.I)
+_GITHUB_LEFT = re.compile(
+    r'(?:发表于?|发布(?:在|到|于)|开源于|公开在|托管(?:到|在)|部署(?:到|在)|推送(?:到|至)|'
+    r'源码(?:放在|在|已在)|使用|学习|玩转|掌握|讲解|理解|联动|'
+    r'打通|复制|git\s*[+&＆_＋与和、/]\s*|(?:学习|讲解|掌握).{0,26}[、/])\s*$', re.I,
+)
+_GITHUB_RIGHT = re.compile(
+    r'^\s*[-—:]?\s*(?:(?:desktop|actions|release)(?![a-z0-9])|(?:免费)?开源|源码|源代码|仓库|版本控制|'
+    r'推送|发布|托管|分叉|提交|协作|issue\b|pull\s+request\b|地址|项目|最新|热门|宝藏|'
+    r'又来|狂揽|星标|超过|惊人|免费版|完全免费项目|'
+    r'文件批量下载|网速优化工具|基础入门|[零0]基础|小白入门|全功能|全套实操|'
+    r'实战|教程|教学|技能|[+&]\s*git(?![a-z0-9])|'
+    r'上.{0,22}(?:公开|发布|开源|项目|工具|应用|源码|star|星标|神器|有人做了)|'
+    r'copilot\s*(?:入门|实战|教学|教程|操作|使用))', re.I,
+)
+_GITHUB_INCIDENTAL = re.compile(
+    r'^\s*(?:copilot(?:的|底层|原始|内核)|登录|账号登录|(?:无关|不适用|作为参考))', re.I,
+)
+_GITHUB_TEXT_LINK = re.compile(
+    r'(?<![a-z0-9_./:@-])(?:https?://)?(?:www\.)?github\.com/[a-z0-9_.~/-]+'
+    r'(?![a-z0-9_./%@~+-])', re.I,
+)
+_GITHUB_OWNER = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?', re.I | re.ASCII)
+_GITHUB_REPO = re.compile(r'[a-z0-9_.-]{1,100}', re.I | re.ASCII)
+_GITHUB_NON_REPOSITORIES = frozenset({
+    'about', 'account', 'apps', 'codespaces', 'collections', 'contact', 'customer-stories',
+    'education', 'enterprise', 'events', 'explore', 'features', 'git-guides',
+    'github-copilot', 'gists', 'issues', 'login', 'logout', 'marketplace', 'new',
+    'notifications', 'orgs', 'organizations', 'pricing', 'pulls', 'readme',
+    'search', 'security', 'settings', 'site', 'sponsors', 'topics', 'trending', 'users',
+})
+_GITHUB_REPOSITORY_ROUTES = frozenset({
+    'actions', 'archive', 'blob', 'branches', 'commit', 'commits', 'compare',
+    'discussions', 'forks', 'issues', 'pull', 'pulls', 'raw', 'releases', 'tags', 'tree', 'wiki',
+})
+MAX_GITHUB_REPOSITORIES = 24
+
+
+def normalize_github_repository(value):
+    """Accept an explicit repository or repository subpage and keep its public root."""
+    if not isinstance(value, str) or not 0 < len(value) <= 1800 or re.search(r'[\s\x00-\x1f\x7f\\]', value):
+        return None
+    if '://' not in value:
+        value = 'https://' + value.removeprefix('//')
+    try:
+        url = urlsplit(value)
+    except ValueError:
+        return None
+    if url.scheme not in ('https', 'http') or url.netloc.lower() not in ('github.com', 'www.github.com'):
+        return None
+    parts = url.path.rstrip('/').removeprefix('/').split('/')
+    if len(parts) < 2 or any(not part or part in ('.', '..') or '%' in part for part in parts):
+        return None
+    owner, repo = parts[:2]
+    if repo.lower().endswith('.git'):
+        repo = repo[:-4]
+    if (not _GITHUB_OWNER.fullmatch(owner) or owner.lower() in _GITHUB_NON_REPOSITORIES
+            or not _GITHUB_REPO.fullmatch(repo) or repo in ('.', '..', '...')
+            or (len(parts) > 2 and parts[2] not in _GITHUB_REPOSITORY_ROUTES)):
+        return None
+    return f'https://github.com/{owner}/{repo}'
+
+
+def github_repository_links(texts=(), *, links=()):
+    """Read explicit GitHub repository addresses from visible text or trusted hrefs."""
+    found = {}
+    def add(value):
+        link = normalize_github_repository(value)
+        if link and len(found) < MAX_GITHUB_REPOSITORIES:
+            found.setdefault(link.lower(), link)
+
+    for link in links:
+        add(link)
+    for text in texts:
+        if not isinstance(text, str) or 'github.com' not in text.lower():
+            continue
+        for match in _GITHUB_TEXT_LINK.finditer(text):
+            add(match[0].rstrip('.'))
+    return tuple(found.values())
+
+
+def _github_mentioned(text):
+    if not text or 'github' not in text.lower():
+        return False
+    for clause in _CLAUSES.split(normalize('NFKC', text)):
+        for match in _GITHUB_NAME.finditer(clause):
+            left, right = clause[max(0, match.start()-30):match.start()], clause[match.end():match.end()+60]
+            if (_EXPLICIT_SKIP.search(left) or _REFERENCE_ONLY.search(left)
+                    or _GITHUB_INCIDENTAL.match(right) or _AFTER_EXCLUDED.match(right)):
+                continue
+            if _GITHUB_LEFT.search(left) or _GITHUB_RIGHT.match(right):
+                return True
+    return False
 
 
 def _signals_in_clause(clause, title_scope=False):
@@ -174,7 +269,7 @@ def _mentions(text, *, title=False):
         yield from _signals_in_clause(clause, title_scope)
 
 
-def project_platforms(title, paragraphs, excerpt, reviewed=None, *, manual=False):
+def project_platforms(title, paragraphs, excerpt, reviewed=None, *, manual=False, github_links=()):
     """Return platform IDs with evidence of the project's intended operating scope."""
     verdicts = (reviewed or {}).get('platforms', ())
     excluded = {p['id'] for p in verdicts if p['role']=='excluded'}
@@ -183,10 +278,15 @@ def project_platforms(title, paragraphs, excerpt, reviewed=None, *, manual=False
     if manual:
         return tuple(accepted)
     decided = {p['id'] for p in verdicts}
-    if _TOOL_CONTEXT.search(title) and not _HARD_OPERATION.search(title):
-        return tuple(accepted)
     clipped = re.sub(r'\s*\[\s*(?:…|\.\.\.)\s*\]$', '', excerpt or '').strip()
     texts = dict.fromkeys((title, *paragraphs, '' if title.startswith(clipped) else excerpt))
+    # A tool may be published on GitHub even though the platforms it supports
+    # are not where the tool itself is used or released.
+    if ('github' not in decided and
+            (github_repository_links(texts, links=github_links) or any(map(_github_mentioned, texts)))):
+        accepted['github'] = None
+    if _TOOL_CONTEXT.search(title) and not _HARD_OPERATION.search(title):
+        return tuple(accepted)
     for text in texts:
         for pid in _mentions(text, title=text==title):
             if pid not in decided:

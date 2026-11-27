@@ -33,7 +33,8 @@ class IntroInputTests(unittest.TestCase):
     def test_targeted_collection_keeps_article_scope_and_text_counts(self):
         stamp='2026-11-26T14:15:00'
         rows = {
-            '12': wordpress_post('12', stamp, '<p>这是可读的原始课程介绍。</p>'),
+            '12': wordpress_post('12', stamp, '<p>这是可读的原始课程介绍。'
+                                 '<a href="https://github.com/public/example/releases/latest">仓库</a></p>'),
             '18': wordpress_post('18', stamp, '<img src="/unused.png">'),
             '23': wordpress_post('23', stamp),
         }
@@ -48,6 +49,7 @@ class IntroInputTests(unittest.TestCase):
                 self.assertEqual(client.return_value.get.call_count,1)
                 self.assertEqual(client.return_value.get.call_args.kwargs['include'],'12,18')
             found=intro_inputs.read_intros(path.parent/'pipeline-runs.sqlite3')
+            self.assertEqual(found[(collector.SITE,'12')]['github_links'], ('https://github.com/public/example',))
             self.assertEqual(found[(collector.SITE,'18')]['coverage'],'image_only')
             self.assertNotIn((collector.SITE,'23'),found)
             self.assertEqual(out['introductions_saved'],1)
@@ -83,6 +85,41 @@ class IntroInputTests(unittest.TestCase):
         self.assertEqual(intro['coverage_reason'], 'unmarked_access_boundary')
         payload['content']['protected'] = True
         self.assertNotIn('introduction', projection(payload))
+
+    def test_visible_github_anchors_are_additive_and_respect_access_boundaries(self):
+        body = ('<p>细节在<a href="https://github.com/public/sample/releases/latest?key=private">'
+                '<span>项目仓库</span></a>，以及 https://github.com/open-source/linked-notes。</p>'
+                '<p><a href="https://github.com/hidden/not-rendered"><span hidden>不可见</span></a></p>'
+                '<div class="download-box"><a href="https://github.com/hidden/download">受限链接</a></div>'
+                '<p>公开前缀，登录后查看全文 <a href="https://github.com/hidden/not-public">受限链接</a></p>')
+        result = projection(wordpress_post('459','2026-11-27T08:00:00',body))
+        expected = ('https://github.com/public/sample', 'https://github.com/open-source/linked-notes')
+        self.assertEqual(tuple(result['github_links']), expected)
+        self.assertEqual(result['introduction']['github_links'], expected)
+        self.assertNotIn('github.com', result['introduction']['raw_text'])
+        self.assertNotIn('private', str(result))
+        no_anchor = projection(wordpress_post('459','2026-11-27T08:00:00',
+                                              body.replace('href="https://github.com/public/sample/releases/latest?key=private"', '')))
+        self.assertEqual(result['introduction']['fingerprint'],no_anchor['introduction']['fingerprint'])
+
+    def test_repository_changes_reload_intro_without_reversioning_text(self):
+        timestamp = '2026-11-27T08:00:00+08:00'
+        old_version = '2026-11-26T08:00:00'
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            db = Path(directory) / 'pipeline-runs.sqlite3'
+            row = intro_inputs.make_intro(collector.SITE,'459',['介绍段落'],publisher_modified=old_version)
+            def save(value):
+                intro_inputs.record_attempt(db,collector.SITE,'459',value['publisher_modified'],timestamp,'saved',value)
+            save(row)
+            save({**row,'github_links':['https://github.com/public/source/tree/main']})
+            found = intro_inputs.read_intros(db)[(collector.SITE,'459')]
+            self.assertEqual(found['github_links'],('https://github.com/public/source',))
+            self.assertEqual(found['fingerprint'],row['fingerprint'])
+            self.assertEqual(intro_inputs.intro_revision(db),2)
+            save({**row,'github_links':['https://github.com/public/source']})
+            self.assertEqual(intro_inputs.intro_revision(db),2)
+            save({**row,'publisher_modified':'2026-11-27T08:00:00'})
+            self.assertNotIn('github_links',intro_inputs.read_intros(db)[(collector.SITE,'459')])
 
     def test_image_only_template_and_intro_budget_keep_truthful_coverage(self):
         page = wordpress_post('459', '2026-11-27T08:00:00',

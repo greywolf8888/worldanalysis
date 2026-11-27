@@ -10,6 +10,8 @@ import re
 import sqlite3
 from urllib.parse import urlsplit
 
+from catalog_platforms import github_repository_links
+
 
 MAX_INTRO_BYTES = 256 * 1024
 MAX_INTRO_TOTAL_BYTES = 256 * 1024 * 1024
@@ -23,7 +25,7 @@ EXACT_BOILERPLATE = frozenset({
 
 
 def make_intro(site_id, article_id, paragraphs, *, publisher_modified=None, observed_at=None,
-               source_kind='public_rest', has_images=False, partial_reason=None):
+               source_kind='public_rest', has_images=False, partial_reason=None, github_links=None):
     """Keep visible paragraphs in order and remove only exact boilerplate for reading."""
     kept = []
     remaining = MAX_INTRO_BYTES
@@ -47,11 +49,14 @@ def make_intro(site_id, article_id, paragraphs, *, publisher_modified=None, obse
                 'complete' if cleaned else 'image_only' if has_images else 'missing')
     fingerprint = sha256(json.dumps([raw, cleaned, coverage, partial_reason],
                                     ensure_ascii=False, separators=(',', ':')).encode('utf-8')).hexdigest()
-    return {
+    intro = {
         'site_id': site_id, 'article_id': article_id, 'raw_text': raw, 'clean_text': cleaned,
         'coverage': coverage, 'coverage_reason': partial_reason, 'source_kind': source_kind,
         'publisher_modified': publisher_modified, 'observed_at': observed_at, 'fingerprint': fingerprint,
     }
+    if github_links is not None:
+        intro['github_links'] = github_repository_links(links=github_links)
+    return intro
 
 
 def legacy_intro(site_id, article_id, detail):
@@ -77,6 +82,7 @@ def legacy_intro(site_id, article_id, detail):
         source_kind='existing_public_detail',
         has_images=any(isinstance(b, dict) and b.get('kind') == 'image' for b in blocks),
         partial_reason='historical_projection' if any(paragraphs) else None,
+        github_links=detail.get('github_links'),
     )
 
 
@@ -111,9 +117,21 @@ def read_intros(db_path):
     with closing(_connect(db_path)) as connection:
         if not _exists(connection, 'catalog_intros'):
             return {}
-        return {(row['site_id'], row['article_id']): {
+        rows = {(row['site_id'], row['article_id']): {
             **dict(row), 'clean_text': row['raw_text'] if row['clean_text'] is None else row['clean_text'],
         } for row in connection.execute('SELECT * FROM catalog_intros')}
+        if _exists(connection, 'catalog_intro_github_links'):
+            for link_row in connection.execute('SELECT * FROM catalog_intro_github_links'):
+                intro = rows.get((link_row['site_id'], link_row['article_id']))
+                if intro is None or intro['publisher_modified'] != link_row['publisher_modified']:
+                    continue
+                try:
+                    links = json.loads(link_row['urls'])
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(links, list) and (verified := github_repository_links(links=links)):
+                    intro['github_links'] = verified
+        return rows
 
 
 def intro_revision(db_path):
@@ -158,6 +176,30 @@ def _ensure_tables(connection):
     connection.execute('''CREATE TABLE IF NOT EXISTS catalog_intro_state (
         id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL, total_bytes INTEGER NOT NULL)''')
     connection.execute('INSERT OR IGNORE INTO catalog_intro_state VALUES (1, 0, 0)')
+    connection.execute('''CREATE TABLE IF NOT EXISTS catalog_intro_github_links (
+        site_id TEXT NOT NULL, article_id TEXT NOT NULL, publisher_modified TEXT,
+        urls TEXT NOT NULL, PRIMARY KEY (site_id, article_id))''')
+
+
+def _save_github_links(connection, intro):
+    if 'github_links' not in intro:
+        return False
+    site, article, modified = (intro[key] for key in ('site_id', 'article_id', 'publisher_modified'))
+    addresses = github_repository_links(links=intro['github_links'])
+    previous = connection.execute('''SELECT publisher_modified, urls FROM catalog_intro_github_links
+                                      WHERE site_id = ? AND article_id = ?''', (site, article)).fetchone()
+    if not addresses:
+        connection.execute('DELETE FROM catalog_intro_github_links WHERE site_id = ? AND article_id = ?',
+                           (site, article))
+        return previous is not None
+    encoded = json.dumps(addresses, ensure_ascii=True, separators=(',', ':'))
+    if previous is not None and tuple(previous) == (modified, encoded):
+        return False
+    connection.execute('''INSERT INTO catalog_intro_github_links (site_id, article_id, publisher_modified, urls)
+                          VALUES (?, ?, ?, ?) ON CONFLICT(site_id, article_id) DO UPDATE SET
+                          publisher_modified = excluded.publisher_modified, urls = excluded.urls''',
+                       (site, article, modified, encoded))
+    return True
 
 
 def record_attempt(db_path, site_id, article_id, publisher_modified, observed_at, state, intro=None):
@@ -181,15 +223,18 @@ def record_attempt(db_path, site_id, article_id, publisher_modified, observed_at
             total = connection.execute('SELECT total_bytes FROM catalog_intro_state WHERE id = 1').fetchone()[0]
             if total + delta > MAX_INTRO_TOTAL_BYTES:
                 raise ValueError('introduction storage budget exceeded')
-            if old is None or (old['fingerprint'], old['publisher_modified']) != (intro['fingerprint'], publisher_modified):
+            changed = old is None or (old['fingerprint'], old['publisher_modified']) != (intro['fingerprint'], publisher_modified)
+            if changed:
                 fields = ('coverage', 'coverage_reason', 'source_kind', 'publisher_modified', 'observed_at', 'fingerprint')
                 connection.execute('''INSERT OR REPLACE INTO catalog_intros (
                     site_id, article_id, raw_text, clean_text, coverage, coverage_reason, source_kind,
                     publisher_modified, observed_at, fingerprint, payload_bytes)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                                    (site_id, article_id, raw, saved_cleaned, *[intro[key] for key in fields], size))
+            links_changed = _save_github_links(connection, intro)
+            if changed or links_changed:
                 connection.execute('UPDATE catalog_intro_state SET revision = revision + 1, total_bytes = total_bytes + ? WHERE id = 1',
-                                   (delta,))
+                                   (delta if changed else 0,))
         connection.execute('''INSERT INTO catalog_intro_attempts
             (site_id, article_id, publisher_modified, observed_at, state, attempts)
             VALUES (?, ?, ?, ?, ?, 1) ON CONFLICT(site_id, article_id) DO UPDATE SET
