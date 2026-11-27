@@ -18,11 +18,14 @@ const resourceStates = {
 };
 const bulkLabels = {page:'本页全选', filtered:'筛选结果全选', site_all:'全库全选'};
 const transferPageSize = 60;
+const baseCatalogLimit = 16;
 
 let filter = {...DEFAULT};
 let meta = null;
 let page = null;
 let renderedFilter = null;
+let renderedPageFilter = null;
+let catalogResizeTimer;
 let draft = {revision:0, ids:[], entries:[]};
 let querySequence = 0;
 let readerSequence = 0;
@@ -128,14 +131,14 @@ function prefs() {
       localStorage.getItem('wa-v4-view:0672be837662755c2539c596728da81da983bccf20dea500b20517df843f7081');
     const value = JSON.parse(raw);
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    return Object.fromEntries(Object.keys(DEFAULT).filter(k => Object.hasOwn(value, k)).map(k => [k, value[k]]));
+    return Object.fromEntries([...Object.keys(DEFAULT), 'pageLimit'].filter(k => Object.hasOwn(value, k)).map(k => [k, value[k]]));
   } catch { return {}; }
 }
 function remember() {
   if (!loaded) return;
   try {
     const scroll = Math.max(0, Math.round(window.scrollY));
-    localStorage.setItem(PREFS_KEY, JSON.stringify({...filter, scroll}));
+    localStorage.setItem(PREFS_KEY, JSON.stringify({...filter, pageLimit:page?.limit ?? baseCatalogLimit, scroll}));
   } catch {}
 }
 function setPressed(id, pressed) {
@@ -305,6 +308,8 @@ function cardsFrom(result) {
     focused?.matches('.photo') ? '.photo' : focused?.matches('.card-topic') ? '.card-topic' : '.title';
   const cards = result.items.map(card);
   $('cards').className = 'cards ' + renderedFilter.view;
+  $('cards').dataset.fullPage = String(result.items.length === result.limit);
+  $('cards').dataset.pageLimit = String(result.limit);
   $('cards').replaceChildren(...cards);
   if (restore) cards.find(c => c.dataset.version === active.dataset.version)?.querySelector(cardType)?.focus({preventScroll:true});
 }
@@ -361,18 +366,40 @@ function render() {
   }
   syncControls({search:false});
 }
-function directoryPageFilter(filters) {
-  // The catalog's list profile provides 16 results per page in either visual layout.
-  return {...filters, view:'list'};
+function fittedCatalogLimit() {
+  const cardGrid = $('cards');
+  const style = getComputedStyle(cardGrid);
+  const rowHeight = parseFloat(style.getPropertyValue('--desktop-card-row'));
+  const columns = Number(style.getPropertyValue('--desktop-card-columns'));
+  if (!rowHeight || !columns || !Array.isArray(meta?.catalog_page_limits)) return baseCatalogLimit;
+  const gridTop = cardGrid.getBoundingClientRect().top + window.scrollY;
+  const capacity = Math.floor((window.innerHeight - gridTop - 52) / rowHeight) * columns;
+  return meta.catalog_page_limits.reduce((limit, size) => size <= capacity ? Math.max(limit, size) : limit, baseCatalogLimit);
 }
-async function query({top = false, restore = null, focusResult = false} = {}) {
+function scheduleCatalogFit() {
+  clearTimeout(catalogResizeTimer);
+  catalogResizeTimer = setTimeout(() => {
+    if (!page || saving || querying || document.querySelector('dialog[open]')) return;
+    const limit = fittedCatalogLimit();
+    if (limit === page.limit) return;
+    const cards = Array.from($('cards').children);
+    const offset = window.scrollY ? Math.max(0, cards.findIndex(card => card.getBoundingClientRect().bottom > 0)) : 0;
+    const card = cards[offset];
+    const anchor = card && window.scrollY ? {id:card.dataset.version, top:card.getBoundingClientRect().top} : null;
+    filter.page = Math.floor(((page.page - 1) * page.limit + offset) / limit) + 1;
+    void query({limit, anchor});
+  }, 180);
+}
+async function query({top = false, restore = null, focusResult = false, limit = page?.limit ?? fittedCatalogLimit(), anchor = null} = {}) {
   const token = ++querySequence;
   const request = {...filter};
+  const pageFilter = {...request, view:'list'};
+  if (limit !== baseCatalogLimit) pageFilter.limit = limit;
   querying = true;
   notice('error');
   setInteractionState();
   try {
-    const result = await api('/api/resources?' + new URLSearchParams(directoryPageFilter(request)));
+    const result = await api('/api/resources?' + new URLSearchParams(pageFilter));
     if (token !== querySequence) return;
     if (meta.snapshot_id !== result.snapshot_id) {
       const next = await api('/api/meta');
@@ -384,13 +411,19 @@ async function query({top = false, restore = null, focusResult = false} = {}) {
     }
     page = result;
     renderedFilter = {...request, page:result.page};
+    renderedPageFilter = {...pageFilter, page:result.page};
     filter.page = result.page;
     sameDraft(result.draft);
     render();
     if (restore !== null) window.scrollTo(0, restore);
+    if (anchor) {
+      const keep = Array.from($('cards').children).find(card => card.dataset.version === anchor.id);
+      if (keep) window.scrollBy(0, keep.getBoundingClientRect().top - anchor.top);
+    }
     if (top) window.scrollTo(0, 0);
     if (focusResult) $('result-title').focus({preventScroll:true});
     remember();
+    scheduleCatalogFit();
   } catch {
     if (token !== querySequence) return;
     if (renderedFilter) {
@@ -743,7 +776,7 @@ for (const b of document.querySelectorAll('[data-scope]')) {
     if (!page || !renderedFilter || saving || querying || b.dataset.overLimit === 'true') return;
     const count = Number(b.dataset.count);
     confirmedAction = {action:'bulk', scope:b.dataset.scope, expected_count:count,
-      filter:directoryPageFilter(renderedFilter), snapshot_id:page.snapshot_id};
+      filter:renderedPageFilter, snapshot_id:page.snapshot_id};
     $('bulk').open = false;
     notice('confirm-text', bulkLabels[b.dataset.scope] + '，共 ' + fmt(count) + ' 项可选资料。');
     $('apply-bulk').textContent = '选中资料';
@@ -781,6 +814,8 @@ $('freeze').addEventListener('click', async () => {
   }
 });
 window.addEventListener('pagehide', remember);
+window.addEventListener('resize', scheduleCatalogFit);
+document.addEventListener('close', scheduleCatalogFit, true);
 
 async function openLinkedView() {
   const link = new URLSearchParams(location.search);
@@ -820,12 +855,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     [meta, draft] = await Promise.all([api('/api/meta'), api('/api/draft')]);
     setChoices('status', meta.statuses, '全部状态', row => resourceState({status:row.id}) || '待核对');
     setChoices('site', meta.sites, '全部来源');
-    filter = {...DEFAULT, ...draft.prefs, ...prefs()};
+    const {pageLimit, ...savedView} = prefs();
+    filter = {...DEFAULT, ...draft.prefs, ...savedView};
+    delete filter.limit;
     if (filter.category && !meta.categories.some(row => row.id === filter.category)) filter.category = '';
     paintTopics();
     loaded = true;
     syncControls();
-    await query({restore:filter.scroll});
+    const previousLimit = Number.isSafeInteger(pageLimit) && pageLimit >= baseCatalogLimit ? pageLimit : baseCatalogLimit;
+    const limit = fittedCatalogLimit();
+    if (limit !== previousLimit) filter.page = Math.floor((filter.page - 1) * previousLimit / limit) + 1;
+    await query({limit, restore:limit === previousLimit ? filter.scroll : null});
     await openLinkedView();
   } catch {
     $('cards').setAttribute('aria-busy', 'false');

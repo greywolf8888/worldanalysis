@@ -28,13 +28,14 @@ INDEX={"/":("index.html","text/html"),"/style.css":("style.css","text/css"),"/ap
 ID=re.compile(r'rv_[0-9a-f]{64}\Z')
 DEFAULT={'q':'','category':'','status':'','site':'','from':'','to':'','order':'newest','view':'grid','selected':'0','baidu':'0','page':1,'scroll':0}
 MAX_ID=5000
+CATALOG_PAGE_LIMITS=(16,20,24,28,32)
 
 class RequestError(Exception):
     def __init__(self, code, msg): self.code=code; self.msg=msg
 
 
 def filters(a, library):
-    if type(a) is not dict or a.keys()-DEFAULT.keys():raise RequestError(400,'未知筛选参数')
+    if type(a) is not dict or a.keys()-DEFAULT.keys()-{'limit'}:raise RequestError(400,'未知筛选参数')
     f={**DEFAULT,**a}
     for k in ('q','category','status','site','from','to','order','view','selected','baidu'):
         if not isinstance(f[k],str) or len(f[k])>250 or '\x00' in f[k]:raise RequestError(400,'筛选参数无效')
@@ -51,11 +52,17 @@ def filters(a, library):
             if type(f[k]) is str and f[k].isascii() and len(f[k])<=9 and f[k].isdigit():f[k]=int(f[k])
             if type(f[k]) is not int or not L<=f[k]<=H:raise ValueError()
     except (ValueError,TypeError):raise RequestError(400,'页码、滚动或日期无效') from None
+    if 'limit' in f:
+        limit=f['limit']
+        if isinstance(limit,str) and limit.isascii() and len(limit)==2 and limit.isdigit():limit=int(limit)
+        if type(limit) is not int or limit not in CATALOG_PAGE_LIMITS:
+            raise RequestError(400,'每页数量无效')
+        f['limit']=limit
     return f
 
 
 def select_page(rows,f):
-    limit=12 if f['view']=='grid' else 16
+    limit=f.get('limit',12 if f['view']=='grid' else 16)
     pages=max(1,(len(rows)+limit-1)//limit); page=min(f['page'],pages)
     return rows[(page-1)*limit:page*limit],page,pages,limit
 
@@ -313,7 +320,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(error.status, {'error': str(error)})
             if p == '/api/control' and not u.query and self.server.control is not None:
                 return self.send(200, self.server.control.overview(lib, draft.read(), local, pending, analysis.read(lib, local)))
-            if p=='/api/meta':return self.send(200,{**lib.meta,'production_integration':'v4-dsh-cutover-20261126-004','public_checkpoint_pending_sync':pending})
+            if p=='/api/meta':return self.send(200,{**lib.meta,'catalog_page_limits':CATALOG_PAGE_LIMITS,'production_integration':'v4-dsh-cutover-20261126-004','public_checkpoint_pending_sync':pending})
             if p=='/api/draft':return self.send(200,draft.show(draft.read()))
             if p=='/api/analysis-priority' and not u.query:return self.send(200,analysis.read(lib,local))
             if p=='/api/local-status' and not u.query:return self.send(200,local.overview())
