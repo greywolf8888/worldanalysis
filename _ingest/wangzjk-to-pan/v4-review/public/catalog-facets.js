@@ -48,14 +48,7 @@ const catalogFacets = (() => {
     const choices = categories.find(item => item.id === selected.category)?.subcategories || [];
 
     const fill = (field, items) => items.map(item => control(item, field, selected[field], change));
-    const categoryWasOpen = category.querySelector('details')?.open;
-    const firstTopics = categories.slice(0, 7);
-    const selectedTopic = categories.find(item => item.id === selected.category);
-    if (selectedTopic && !firstTopics.includes(selectedTopic)) firstTopics[firstTopics.length - 1] = selectedTopic;
-    const otherTopics = categories.filter(item => !firstTopics.includes(item));
-    const topicControls = fill('category', [{id: '', label: '全部业务', count}, ...firstTopics]);
-    if (otherTopics.length) topicControls.push(disclosure('更多分类', otherTopics, 'category', categoryWasOpen));
-    category.replaceChildren(...topicControls);
+    category.replaceChildren(...fill('category', [{id: '', label: '全部业务', count}, ...categories]));
     subcategory.hidden = !selected.category || !choices.length;
     subcategory.replaceChildren(...(subcategory.hidden ? [] : fill('subcategory', [{id: '', label: '全部细分'}, ...choices])));
 
@@ -81,7 +74,7 @@ const catalogFacets = (() => {
     platform.replaceChildren(...shown);
 
     if (focused?.matches('summary')) {
-      (focused.closest('#topics, #calendar-categories') ? category : platform).querySelector('summary')?.focus({preventScroll: true});
+      platform.querySelector('summary')?.focus({preventScroll: true});
     } else if (focused?.dataset.facet) {
       const candidates = [category, platform, subcategory].flatMap(node => [...node.querySelectorAll('button')]);
       candidates.find(button => button.dataset.facet === focused.dataset.facet &&

@@ -71,8 +71,7 @@ p { margin: .45rem 0; }
 .topics { display: flex; flex-wrap: wrap; gap: 0 .38rem; min-height: 39px; align-items: end; padding-top: .25rem; border-bottom: 1px solid var(--line); }
 .platform-facets, .subcategory-facets { min-height: 34px; padding-top: 0; }
 .platform-facets { position: relative; }
-#topics, #calendar-categories { position: relative; }
-.platform-facets .platform-more, #topics .platform-more, #calendar-categories .platform-more { position: static; align-self: center; }
+.platform-facets .platform-more { position: static; align-self: center; }
 .platform-more summary { min-height: 28px; padding: .17rem .46rem; font-size: .82rem; }
 .platform-more .platform-options { inset: calc(100% + 4px) auto auto 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .13rem .3rem; width: min(23rem, 100%); padding: .34rem; }
 .platform-options button.topic { border-radius: 3px; justify-content: space-between; }
@@ -82,6 +81,13 @@ button.topic {
   white-space: nowrap; border-block: 1px solid transparent; border-bottom: 2px solid transparent; border-inline: 0;
   border-radius: 4px 4px 0 0; background: transparent; color: var(--secondary); font-size: .9rem;
 }
+.category-facets { column-gap: clamp(.16rem, .5vw, .45rem); row-gap: .1rem; padding-block: .2rem; }
+.category-facets button.topic {
+  max-width: 100%; padding-inline: clamp(.3rem, .55vw, .55rem); font-size: .85rem;
+  line-height: 1.25; text-align: left; white-space: normal;
+}
+.category-facets .topic span { overflow-wrap: anywhere; }
+.category-facets .topic small { white-space: nowrap; }
 .topic small { color: var(--secondary); font-size: .72rem; font-variant-numeric: tabular-nums; }
 button.topic[aria-pressed="true"] { border-bottom-color: var(--accent); color: var(--accent-dark); font-weight: 750; }
 button.topic[aria-pressed="true"] small { color: inherit; }
