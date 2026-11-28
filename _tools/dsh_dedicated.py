@@ -18,6 +18,7 @@ import tarfile
 from threading import Thread
 import time
 from urllib.parse import urljoin, urlsplit
+from uuid import uuid4
 
 
 PROJECT = Path(__file__).resolve(strict=True).parents[1]
@@ -39,9 +40,12 @@ DISCOVERY = BRIDGE / "mcp-bridge.json"
 DESKTOP_MANIFEST = HOME_DIR / "profiles/desktop/package.json"
 DESKTOP_DISCOVERY = ROOT / "desktop-bridge/mcp-bridge.json"
 DESKTOP_READBACK_BINDING = ROOT / "desktop-session-readback.json"
+NETDISK_CREDENTIAL_RECORD = ROOT / "desktop-netdisk-credentials/access-token.dpapi"
 BROWSER_ELECTRON_VERSION = "44.10.2"
 BROWSER_ELECTRON_ROOT = ROOT / "browser-runtime" / f"electron-{BROWSER_ELECTRON_VERSION}"
 BROWSER_ELECTRON_RECORD = BROWSER_ELECTRON_ROOT.with_name(f"{BROWSER_ELECTRON_ROOT.name}.json")
+DISPATCH_LOCK = PROJECT / '.runtime/v4-dsh-control-dispatches/.active-dispatch.json'
+TRANSFER_RUNNER = PROJECT / '_ingest/wangzjk-to-pan/fast-agent.mjs'
 CHECKPOINT = ROOT / "readiness.json"
 ISOLATION_PATCH = ROOT / "config/runtime-isolation.yml"
 DESKTOP_EXE = "DeepSeek Harness.exe"
@@ -96,6 +100,20 @@ def write_json(path, value):
         json.dump(value, stream, ensure_ascii=False, indent=2)
         stream.write("\n")
     temp.replace(path)
+
+
+def create_record(path, value):
+    project_directory(path.parent)
+    temp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        with temp.open("x", encoding="utf-8") as stream:
+            json.dump(value, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def digest(path):
@@ -593,14 +611,86 @@ def intake_binding(frozen=None):
         raise ValueError('任务收件目录不可用')
     binding = {'version_id': values['version_id'], 'root': root.as_posix()}
     if frozen is not None and frozen != binding:
-        raise ValueError('任务固定收件位置与登记不一致')
+        if frozen['root'] != root.relative_to(PROJECT).as_posix():
+            raise ValueError('任务固定收件位置与登记不一致')
     return binding
 
 
 def install_v4_import_path():
     branch = PROJECT / '_ingest/wangzjk-to-pan'
-    sys.path[:0] = [str(branch), str(branch / 'v4-review')]
+    for folder in (branch, branch / 'v4-review'):
+        if str(folder) not in sys.path:
+            sys.path.insert(0, str(folder))
     return branch
+
+
+def receipt_path_matches(value, location):
+    return (isinstance(value, str) and
+            (value == location.relative_to(PROJECT).as_posix() or Path(value) == location))
+
+
+def new_readback_task(kind, transfer_request_id=None):
+    if kind not in {'dedicated_local_readback', 'dedicated_transfer_readback'}:
+        raise ValueError('仅支持专用 DSH 只读交接任务')
+    inputs = {'kind': kind}
+    if transfer_request_id is not None:
+        if kind != 'dedicated_transfer_readback':
+            raise ValueError('仅账号与目录读回可绑定转存申请')
+        _, request_ref, _ = task_file(transfer_request_id, '_exchange/control/transfer-requests')
+        inputs['transfer_request_ref'] = request_ref
+    task_id = 'dsh-readback-' + uuid4().hex
+    relative = f'_exchange/control/tasks/{task_id}.json'
+    create_record(PROJECT / relative, {
+        'schema_version': 1, 'record_type': 'control_task', 'producer': 'codex-control',
+        'plan_version': 'V4', 'state': 'ready', 'task_id': task_id, 'target_role': 'dedicated_dsh',
+        'receipt_path': f'_exchange/dsh/receipts/{task_id}.json', 'execution_allowed': False,
+        'authorization_ref': None, 'inputs': inputs,
+    })
+    return {'task_id': task_id, 'task_path': relative}
+
+
+def notify_readback(task_id):
+    preflight_task(task_id)
+    return notify_bound_task('dsh_send_dedicated_readback', {'taskId': task_id})
+
+
+def notify_transfer(task_id):
+    if not TASK_ID.fullmatch(task_id) or DEVICE_NAME.fullmatch(task_id):
+        raise ValueError('任务编号无效')
+    observed = preflight(task_id)
+    if not observed['claim_enabled'] or observed['execution_gate'] != 'ready_for_bound_task':
+        raise ValueError(f"正式派发未就绪 {observed['execution_gate']}")
+    session = read_desktop_binding()['session_id']
+    return notify_bound_task('dsh_send_message', {
+        'sessionId': session, 'taskId': task_id, 'taskPath': f'_exchange/control/tasks/{task_id}.json',
+    })
+
+
+def notify_bound_task(name, arguments):
+    bridge = exact(PROJECT / '_tools/v4-dsh-control.mjs')
+    node = shutil.which('node')
+    if node is None:
+        raise ValueError('需要本机 Node.js 运行专用交接桥')
+    frames = [
+        {'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-11-25', 'capabilities': {},
+            'clientInfo': {'name': 'worldanalysis-dedicated-readback', 'version': '1'}}},
+        {'method': 'notifications/initialized'},
+        {'id': 2, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}},
+    ]
+    command = ''.join(json.dumps({'jsonrpc': '2.0', **frame}) + '\n' for frame in frames).encode('utf-8')
+    env = {key: value for key, value in os.environ.items() if key.upper() != 'NODE_OPTIONS'}
+    try:
+        output = subprocess.run([node, str(bridge)], input=command, capture_output=True, cwd=PROJECT,
+                                timeout=30, check=True, env=env, creationflags=subprocess.CREATE_NO_WINDOW).stdout
+    except subprocess.SubprocessError as error:
+        raise ValueError('通知结果未读回，请查同一任务的尝试记录和回执') from error
+    if len(output) > 65_536:
+        raise ValueError('通知结果未读回，请查同一任务的尝试记录和回执')
+    replies = {reply['id']: reply for line in output.splitlines() if (reply := json.loads(line))}
+    result = replies[2]['result']
+    if result['isError'] is not False:
+        raise ValueError(result['structuredContent']['error'])
+    return result['structuredContent']
 
 
 def preflight_task(task_id):
@@ -618,24 +708,60 @@ def preflight_task(task_id):
     if (task.get("schema_version") != 1 or task.get("record_type") != "control_task"
             or task.get("producer") != "codex-control" or task.get("plan_version") != "V4"
             or task.get("task_id") != task_id or task.get("demo") is True
-            or not isinstance(received_path, str) or Path(received_path) != receipt_path):
+            or not receipt_path_matches(received_path, receipt_path)):
         raise ValueError("共享任务身份或回执路径不匹配")
-    install_v4_import_path()
-    planned = (task.get('inputs') or {}).get('intake_binding')
-    intake = intake_binding(planned if planned is not None else
-                            {'version_id': 'legacy', 'root': (PROJECT / '分析目标下载地址').as_posix()})
+    inputs = task.get('inputs') or {}
+    planned = inputs.get('intake_binding')
+    portable = task.get('target_role') == 'dedicated_dsh' and task.get('execution_allowed') is False
+    if not portable:
+        install_v4_import_path()
+    intake = None if portable else intake_binding(planned if planned is not None else
+                              {'version_id': 'legacy', 'root': (PROJECT / '分析目标下载地址').as_posix()})
+    expected_session = task.get('target_session_id')
+    task_sha = hashlib.sha256(raw).hexdigest()
+    attempt_recorded = False
+    if portable:
+        try:
+            attempt = read_json(DISPATCH_LOCK.parent / f'{task_id}.attempt.json')
+        except FileNotFoundError:
+            attempt = {}
+        if (attempt.get('taskId') == task_id and attempt.get('sha256') == task_sha
+                and attempt.get('kind') == inputs.get('kind')):
+            expected_session = attempt.get('sessionId')
+            attempt_recorded = bool(expected_session)
     receipt = "missing"
     if receipt_path.exists():
         row = read_json(receipt_path)
         receipt = "unmatched"
-        if (row.get("task_id") == task_id and row.get("task_sha256") == hashlib.sha256(raw).hexdigest()
-                and row.get("session_id") == task.get("target_session_id")):
+        if (row.get("task_id") == task_id and row.get("task_sha256") == task_sha
+                and expected_session and row.get("session_id") == expected_session
+                and (not portable or (row.get('producer'), row.get('record_type'), row.get('plan_version'),
+                                      row.get('schema_version'), row.get('execution_allowed'))
+                     == ('dsh', 'dsh_receipt', 'V4', 1, False))):
             receipt = "task_identity_matched"
-    return {"task_id": task_id, "state": "ready" if task.get("state") == "ready" else "not_ready",
+    try:
+        registered_session = read_desktop_binding()['session_id']
+    except (OSError, ValueError, KeyError, TypeError):
+        registered_session = None
+    result = {"task_id": task_id, "state": "ready" if task.get("state") == "ready" else "not_ready",
             "authorization": "reference_present_unverified" if task.get("authorization_ref") else "missing",
             "receipt": receipt, "intake": intake, "intake_frozen": planned is not None,
-            "dedicated_session_bound": (DESKTOP_READBACK_BINDING.is_file()
-                                        and read_json(DESKTOP_READBACK_BINDING).get('session_id') == task.get('target_session_id'))}
+            "dedicated_session_bound": bool(registered_session and (portable or registered_session == expected_session)),
+            "dispatch_session_id": expected_session}
+    if portable:
+        if receipt != 'missing':
+            result['dispatch_state'] = 'response_received' if receipt == 'task_identity_matched' else 'reconcile_required'
+        elif not attempt_recorded:
+            result['dispatch_state'] = 'awaiting_notification'
+        else:
+            try:
+                accepted = read_json(DISPATCH_LOCK.parent / f'{task_id}.accepted.json')
+            except FileNotFoundError:
+                accepted = {}
+            acknowledged = (accepted.get('accepted') is True and accepted.get('taskId') == task_id
+                            and accepted.get('sha256') == task_sha and accepted.get('sessionId') == expected_session)
+            result['dispatch_state'] = 'notification_accepted' if acknowledged else 'reconcile_required'
+    return result
 
 
 def desktop_session_summary(session, binding):
@@ -673,6 +799,70 @@ def desktop_session_summary(session, binding):
             "role_verified": role, "cursor": cursor if type(cursor) is int and cursor >= 0 else None}
 
 
+def read_desktop_binding():
+    binding = read_json(DESKTOP_READBACK_BINDING)
+    root_bound = ((binding.get('schema_version') == 1 and Path(binding['project_path']) == PROJECT)
+                  or (binding.get('schema_version') == 2 and binding.get('project_path') == '.'))
+    if (not root_bound or binding.get('purpose') != 'read_only_preflight'
+            or not re.fullmatch(DSH_UUID, binding['workspace_id'])
+            or not re.fullmatch('session-' + DSH_UUID, binding['session_id'])
+            or not isinstance(binding['title'], str) or not 0 < len(binding['title']) <= 128):
+        raise ValueError('只读会话绑定无效')
+    return binding
+
+
+@contextmanager
+def dispatch_lock(operation):
+    project_directory(DISPATCH_LOCK.parent)
+    marker = json.dumps({'operation': operation, 'pid': os.getpid()}).encode('utf-8')
+    with DISPATCH_LOCK.open('xb') as lock:
+        lock.write(marker)
+        lock.flush()
+        os.fsync(lock.fileno())
+    try:
+        yield
+    finally:
+        if read_record_bytes(DISPATCH_LOCK) != marker:
+            raise ValueError('控制锁变化，请核对未完成操作')
+        DISPATCH_LOCK.unlink()
+
+
+def rebind_desktop(session_id):
+    if not re.fullmatch('session-' + DSH_UUID, session_id):
+        raise ValueError('专用 DSH 会话编号无效')
+    with dispatch_lock('dsh_desktop_rebind'):
+        route = ROOT / 'transfer-route.json'
+        if route.exists() and read_json(route).get('mode') != 'paused':
+            raise ValueError('先关闭当前专用执行归属，再换会话')
+        existing = read_json(DESKTOP_READBACK_BINDING) if DESKTOP_READBACK_BINDING.exists() else {}
+        if existing.get('session_id') != session_id and existing.get('session_id') is not None:
+            for location in DISPATCH_LOCK.parent.glob('*.attempt.json'):
+                row = read_json(location)
+                if row.get('sessionId') != existing['session_id']:
+                    continue
+                try:
+                    _, _, receipt = task_file(row.get('taskId'), '_exchange/dsh/receipts/')
+                except FileNotFoundError:
+                    raise ValueError('原专用会话仍有无回执任务，先核对实际结果') from None
+                if (receipt.get('task_id') != row.get('taskId') or receipt.get('session_id') != row['sessionId']
+                        or receipt.get('task_sha256') != row.get('sha256') or receipt.get('producer') != 'dsh'):
+                    raise ValueError('原专用会话仍有未核对任务')
+        discovery = read_json(DESKTOP_DISCOVERY)
+        observed = bridge_probe(discovery, session_id=session_id, deadline=time.monotonic() + 3)['session']
+        binding = {'schema_version': 2, 'purpose': 'read_only_preflight', 'project_path': '.',
+                   'session_id': session_id, 'workspace_id': observed.get('workspaceId'),
+                   'title': (observed.get('projections') or {}).get('title')}
+        if (not isinstance(binding['workspace_id'], str) or not re.fullmatch(DSH_UUID, binding['workspace_id'])
+                or not isinstance(binding['title'], str) or not 0 < len(binding['title']) <= 128
+                or not desktop_session_summary(observed, binding)['read_only_ready']):
+            raise ValueError('指定会话尚未核实为当前项目中的空闲专用接收端')
+        newest = read_json(DESKTOP_DISCOVERY)
+        if any(discovery.get(key) != newest.get(key) for key in ('url', 'pid', 'instanceId', 'running')):
+            raise ValueError('专用桥接在读回期间更换，请重新核对')
+        write_json(DESKTOP_READBACK_BINDING, binding)
+        return read_desktop_binding()
+
+
 def desktop_preflight():
     bridge = {"connected": False, "observed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     session = {"state": "unconfigured", "identity_verified": False, "read_only_ready": False}
@@ -689,12 +879,7 @@ def desktop_preflight():
         session["state"] = "bridge_unavailable"
         return result
     try:
-        binding = read_json(DESKTOP_READBACK_BINDING)
-        if (binding.get("schema_version") != 1 or binding.get("purpose") != "read_only_preflight"
-                or Path(binding["project_path"]) != PROJECT or not re.fullmatch(DSH_UUID, binding["workspace_id"])
-                or not re.fullmatch("session-" + DSH_UUID, binding["session_id"])
-                or not isinstance(binding["title"], str) or not 0 < len(binding["title"]) <= 128):
-            raise ValueError("只读会话绑定无效")
+        binding = read_desktop_binding()
     except FileNotFoundError:
         return result
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
@@ -728,15 +913,207 @@ def preflight(task_id=None):
             connected = True
         except (OSError, ValueError, KeyError, TypeError, AttributeError, HTTPException):
             pass
+    desktop = desktop_preflight()
+    formal = formal_route_status(desktop, task_id)
     result = {"schema_version": 1, "profile": PROFILE, "profile_ready": profile_ready,
               "bridge": {"connected": connected, "last_verified_at": last_verified_at},
-              "desktop": desktop_preflight(),
+              "desktop": desktop,
               "profile_market_enabled": MARKET_BUNDLE in bundles,
-              "session_binding": "unbound", "netdisk_account": "unverified",
-              "production_execution": "disabled", "claim_enabled": False, "download_enabled": False}
+              "session_binding": "dedicated" if desktop['session']['identity_verified'] else "unbound",
+              **formal}
     if task_id is not None:
         result["handoff"] = preflight_task(task_id)
     return result
+
+
+def transfer_policy():
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    branch = install_v4_import_path()
+    spec = spec_from_file_location('v4_confirmed_policy', branch / 'v4-confirmed.py')
+    policy = module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    return policy
+
+
+def formal_route_status(desktop, task_id=None):
+    result = {'netdisk_account': 'unverified', 'production_execution': 'disabled',
+              'claim_enabled': False, 'download_enabled': False, 'download_state': 'awaiting_verified_runner'}
+    if not (PROJECT / '_ingest/wangzjk-to-pan/v4-confirmed.py').is_file():
+        return {**result, 'execution_gate': 'executor_unavailable'}
+    try:
+        policy = transfer_policy()
+        route = policy.execution_route()
+        result['execution_route'] = route['mode']
+        if not (policy.BRANCH / 'state/crawl_state.JSON').is_file():
+            return {**result, 'execution_gate': 'queue_unregistered'}
+        queue = policy.CrawlQueue(policy.BRANCH / 'state').status()
+        holds = {row['scope'] for row in queue['blocks'] if not row['resolved']} | {row['scope'] for row in queue['invalid']}
+        if holds & {'site', 'platform:baidu', 'platform:wangzjk'}:
+            return {**result, 'execution_gate': 'platform_hold'}
+        if route['mode'] != 'dedicated':
+            return {**result, 'execution_gate': 'dedicated_route_not_enabled'}
+        if not TRANSFER_RUNNER.is_file() or not exact(TRANSFER_RUNNER).is_file():
+            return {**result, 'execution_gate': 'transfer_runner_unavailable'}
+        if not desktop['session']['read_only_ready']:
+            return {**result, 'execution_gate': 'dedicated_session_unavailable'}
+        task_ref = route['task_ref']
+        if task_id is not None and task_ref['path'] != f'{policy.TASKS}{task_id}.json':
+            return {**result, 'execution_gate': 'another_dedicated_task_bound'}
+        # Restarts use the pinned bytes and exact user decision again.
+        _, _, _, scope = policy.build_artifacts(task_ref)
+        receipt, _ = policy.pin(route['readback_ref'], '_exchange/dsh/receipts/', 65_536)
+        proof = receipt['result']['dedicated_transfer_readback']
+        if not policy.fresh(proof, 300, datetime.now(timezone.utc)) or proof.get('account_matches') is not True:
+            return {**result, 'execution_gate': 'stale_account_readback'}
+        result['netdisk_account'] = 'verified_for_task'
+        floor = read_json(policy.BRANCH / 'state/capacity-policy.json')['minimum_free_bytes']
+        policy.revalidate_capacity(proof.get('capacity'), sum(row['bytes'] for row in scope), floor=floor)
+        result['capacity_bytes'] = proof['capacity']['remaining_bytes']
+        if queue['control_phase'] != 'paused' or queue['lease']['held'] or DISPATCH_LOCK.exists():
+            return {**result, 'execution_gate': 'dispatch_requires_reconciliation'}
+        if task_id is None:
+            task_id = Path(task_ref['path']).stem
+        if (DISPATCH_LOCK.parent / f'{task_id}.attempt.json').exists() or (PROJECT / '_exchange/dsh/receipts' / f'{task_id}.json').exists():
+            return {**result, 'execution_gate': 'task_already_dispatched'}
+        return {**result, 'production_execution': 'dedicated', 'claim_enabled': True,
+                'execution_gate': 'ready_for_bound_task'}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError):
+        return {**result, 'execution_gate': 'dedicated_execution_unverified'}
+
+
+def cutover_inspect(task_id=None):
+    policy = transfer_policy()
+    route = policy.execution_route()
+    state = policy.BRANCH / 'state'
+    queue = (policy.CrawlQueue(state).status() if (state / 'crawl_state.JSON').is_file()
+             else {'control_phase': 'unregistered', 'lease': {'held': False}, 'blocks': [], 'invalid': []})
+    blocked = {row['scope'] for row in queue['blocks'] if not row['resolved']} | {row['scope'] for row in queue['invalid']}
+    desktop = desktop_preflight()
+    holds = sorted(blocked & {'site', 'platform:baidu', 'platform:wangzjk'})
+    formal = formal_route_status(desktop, task_id)
+    try:
+        intake = intake_binding()
+    except (OSError, ValueError):
+        intake = None
+    result = {'mode': route['mode'], 'revision': route['revision'], 'legacy': {'state': 'not_managed'},
+              'desktop': desktop, 'intake': intake, 'legacy_queue': queue['control_phase'],
+              'coordinator_held': queue['lease']['held'], 'dispatch_unsettled': DISPATCH_LOCK.exists() or DISPATCH_LOCK.is_symlink(),
+              'platform_hold': bool(holds), 'hold_scopes': holds,
+              'netdisk_authorization_file_present': NETDISK_CREDENTIAL_RECORD.is_file(),
+              'target_readback': 'verified_for_task' if formal['netdisk_account'] == 'verified_for_task' else 'unverified',
+              'dedicated_task_bound': route['mode'] == 'dedicated', 'capacity_bytes': None,
+              'download_performed': False, **formal}
+    if task_id is not None:
+        result['handoff'] = preflight_task(task_id)
+    return result
+
+
+def task_file(task_id, directory):
+    if not TASK_ID.fullmatch(task_id or '') or DEVICE_NAME.fullmatch(task_id):
+        raise ValueError('任务编号无效')
+    path = PROJECT / directory / f'{task_id}.json'
+    raw = read_record_bytes(path)
+    return path, {'path': path.relative_to(PROJECT).as_posix(), 'sha256': hashlib.sha256(raw).hexdigest()}, json.loads(raw)
+
+
+def verified_readback(task_id, policy, binding, *, expected_target=None):
+    if not desktop_preflight()['session']['read_only_ready']:
+        raise ValueError('专用桌面会话未就绪')
+    _, task_ref, task = task_file(task_id, policy.TASKS)
+    receipt_path, receipt_ref, receipt = task_file(task_id, '_exchange/dsh/receipts/')
+    inputs = task.get('inputs') or {}
+    result = receipt.get('result') or {}
+    proof = result.get('dedicated_transfer_readback') or {}
+    session = binding['session_id']
+    portable = task.get('target_role') == 'dedicated_dsh' and task.get('execution_allowed') is False
+    if portable:
+        handoff = preflight_task(task_id)
+        session_matches = handoff['dispatch_session_id'] == session and handoff['receipt'] == 'task_identity_matched'
+    else:
+        session_matches = task.get('target_session_id') == session
+    request_ref = inputs.get('transfer_request_ref')
+    if request_ref is not None:
+        policy.pin(request_ref, '_exchange/control/transfer-requests/', 65_536)
+    if (not session_matches or task.get('authorization_ref') is not None
+            or task.get('demo') is True or inputs.get('kind') != 'dedicated_transfer_readback'
+            or not receipt_path_matches(task.get('receipt_path'), receipt_path) or task.get('state') != 'ready'
+            or task.get('schema_version') != 1 or task.get('task_id') != task_id or task.get('record_type') != 'control_task'
+            or task.get('plan_version') != 'V4' or task.get('producer') != 'codex-control'
+            or receipt.get('producer') != 'dsh' or receipt.get('record_type') != 'dsh_receipt'
+            or receipt.get('schema_version') != 1 or receipt.get('plan_version') != 'V4'
+            or Path(receipt.get('cwd', '')) != PROJECT
+            or receipt.get('task_id') != task_id or receipt.get('session_id') != session
+            or receipt.get('task_sha256') != task_ref['sha256'] or receipt.get('state') != 'ready_for_review'
+            or receipt.get('demo') is True or receipt.get('execution_allowed') is not False
+            or type(proof.get('cloud_submissions')) is not int or proof['cloud_submissions'] != 0
+            or proof.get('evidence_class') != 'normal_dsh_browser_readback'
+            or proof.get('account_matches') is not True or proof.get('target') != (expected_target or policy.TARGET)
+            or proof.get('transfer_request_ref') != request_ref
+            or proof.get('target_readback_verified') is not True or not policy.fresh(proof, 300, datetime.now(timezone.utc))):
+        raise ValueError('缺少专用会话当次账号及目标目录只读回执')
+    browser = proof.get('browser_binding')
+    if (type(browser) is not dict or set(browser) != {'browserSession', 'siteTab', 'panTab', 'accountTab'}
+            or any(not isinstance(item, str) or not 0 < len(item) <= 128 for item in browser.values())
+            or len({browser['siteTab'], browser['panTab'], browser['accountTab']}) != 3):
+        raise ValueError('网盘浏览器绑定不完整')
+    return receipt_ref, proof
+
+
+def change_route(action, revision, task_id=None, readback_task_id=None):
+    policy = transfer_policy()
+    state = policy.BRANCH / 'state'
+    if not (state / 'crawl_state.JSON').is_file():
+        raise ValueError('尚未登记可核对的本机转存队列')
+    queue = policy.CrawlQueue(state)
+    with dispatch_lock('dsh_cutover'):
+        with queue.lease('dsh-cutover'):
+            route = policy.execution_route()
+            live = queue.status()
+            if route['revision'] != revision or live['control_phase'] != 'paused':
+                raise ValueError('执行归属已变化或旧队列未停止，请重新检查')
+            if action == 'enable':
+                if route['mode'] != 'paused':
+                    raise ValueError('请先暂停旧入口并核对执行归属')
+                platform = {row['scope'] for row in live['blocks'] if not row['resolved']} | {row['scope'] for row in live['invalid']}
+                if platform & {'site', 'platform:baidu', 'platform:wangzjk'}:
+                    raise ValueError('平台门禁尚未解除')
+                if not TRANSFER_RUNNER.is_file() or not exact(TRANSFER_RUNNER).is_file():
+                    raise ValueError('专用转存执行器尚未在本机部署')
+                binding = read_desktop_binding()
+                _, task_ref, task = task_file(task_id, policy.TASKS)
+                _, _, readback_task = task_file(readback_task_id, policy.TASKS)
+                inputs = task.get('inputs') or {}
+                request_ref = inputs.get('transfer_request_ref')
+                if (request_ref is None or inputs.get('kind') != 'confirmed_transfer'
+                        or (readback_task.get('inputs') or {}).get('transfer_request_ref') != request_ref):
+                    raise ValueError('任务与专用读回使用不同的转存申请')
+                receipt_ref, proof = verified_readback(readback_task_id, policy, binding,
+                                                       expected_target=policy.receive_target(PROJECT))
+                if inputs.get('scope_receipt_ref') != receipt_ref:
+                    raise ValueError('网盘范围回执已变化，请重新核对并确认')
+                observed_intake = inputs.get('intake_binding')
+                if observed_intake is None or not intake_binding(observed_intake):
+                    raise ValueError('正式任务尚未锁定收件位置')
+                _, _, _, scopes = policy.build_artifacts(task_ref, expected_session=binding['session_id'])
+                minimum = int(read_json(policy.BRANCH / 'state/capacity-policy.json')['minimum_free_bytes'])
+                policy.revalidate_capacity(proof.get('capacity'), sum(scope['bytes'] for scope in scopes), floor=minimum)
+                change = {'mode': 'dedicated', 'task_ref': task_ref, 'session_id': binding['session_id'],
+                          'readback_ref': receipt_ref, 'browser_binding': proof['browser_binding'], 'intake_binding': observed_intake,
+                          'desktop_binding_ref': {'path': policy.DEDICATED_BINDING, 'sha256': digest(DESKTOP_READBACK_BINDING)}}
+            elif action == 'rollback':
+                if route['mode'] != 'dedicated':
+                    raise ValueError('目前没有已启用的专用任务')
+                change = {'mode': 'paused'}
+            else:
+                raise ValueError('不支持的执行归属操作')
+            saved = {**change, 'schema_version': 1, 'revision': revision + 1,
+                     'observed_at': datetime.now(timezone.utc).isoformat(timespec='seconds')}
+            write_json(PROJECT / policy.EXECUTOR_ROUTE, saved)
+            if policy.execution_route() != saved:
+                raise ValueError('执行归属保存未读回，请人工核对')
+            return {'mode': saved['mode'], 'revision': saved['revision'], 'legacy_queue': live['control_phase'],
+                    'task_bound': saved['mode'] == 'dedicated'}
 
 
 def main():
@@ -754,16 +1131,45 @@ def main():
     market.add_argument("state", choices=("enable", "disable"))
     check = commands.add_parser("preflight", help="只读检查专用桥接、正式派发门禁及共享任务")
     check.add_argument("--task-id")
+    rebind = commands.add_parser('rebind-desktop', help='现场核对并登记替换后的专用桌面会话')
+    rebind.add_argument('session_id')
+    readback = commands.add_parser('prepare-readback', help='持久化一项无执行授权的专用 DSH 读回任务')
+    readback.add_argument('kind', choices=('dedicated_local_readback', 'dedicated_transfer_readback'))
+    readback.add_argument('--transfer-request-id')
+    notify = commands.add_parser('notify-readback', help='通知专用 DSH 读取既有只读任务')
+    notify.add_argument('task_id')
+    transfer = commands.add_parser('notify-transfer', help='派发已切换且已授权的单份正式转存任务')
+    transfer.add_argument('task_id')
     commands.add_parser('intake-binding', help='只读取得当前收件目录及版本，供新任务保存')
+    cutover = commands.add_parser('cutover', help='核对或切换现有正式派发归属')
+    cutover.add_argument('step', choices=('inspect', 'enable', 'rollback'))
+    cutover.add_argument('--revision', type=int)
+    cutover.add_argument('--task-id')
+    cutover.add_argument('--readback-task-id')
     args = parser.parse_args()
     try:
         if args.action == "status":
             record = read_json(CHECKPOINT) if CHECKPOINT.exists() else {"production_execution": "disabled", "readback": None}
         elif args.action == "preflight":
             record = preflight(args.task_id)
+        elif args.action == 'rebind-desktop':
+            record = rebind_desktop(args.session_id)
+        elif args.action == 'prepare-readback':
+            record = new_readback_task(args.kind, args.transfer_request_id)
+        elif args.action == 'notify-readback':
+            record = notify_readback(args.task_id)
+        elif args.action == 'notify-transfer':
+            record = notify_transfer(args.task_id)
         elif args.action == 'intake-binding':
             install_v4_import_path()
             record = intake_binding()
+        elif args.action == 'cutover':
+            if args.step == 'inspect':
+                record = cutover_inspect(args.task_id)
+            else:
+                if args.revision is None or args.revision < 0:
+                    raise ValueError('请提供刚读回的执行归属版本')
+                record = change_route(args.step, args.revision, args.task_id, args.readback_task_id)
         elif args.action == "desktop":
             return start_desktop()
         else:

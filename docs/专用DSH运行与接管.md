@@ -41,13 +41,22 @@ python -B -X utf8 _tools/dsh_dedicated.py desktop
 
 `preflight` 输出版本为 `1` 的 JSON。`bridge.connected` 来自专用发现记录与本机健康端点一致的当前读回。`bridge.last_verified_at` 记录完整握手的最近成功时间。带任务编号时，检查共享任务和既有回执是否匹配任务、原执行会话及文件指纹。`handoff.authorization` 只报告授权引用是否存在，正式授权由现有 V4 门禁核验。检查过程只读取记录并访问本机健康端点。
 
-当前控制桥接和 `v4-confirmed.py` 绑定原执行会话，专用实例尚未登记正式执行会话或验证百度网盘账户。运行 `preflight` 时，领取和下载保持禁用。正式接管先以正常授权入口核对专用会话、账户、任务接收及回执。旧入口退出且读回确认后，才启用专用入口。
+正式执行初始暂停。使用正常授权入口核对当前专用会话、实际工作区、账户、容量、任务接收和回执。正式任务须绑定当前专用会话。平台验证、旧队列暂停与任务授权分别检查。遇到宿主工具发布不可用，保留已提交尝试和原回执位置，从专用宿主的授权界面恢复所需能力。
 
 V4 转存以 `_exchange/control/tasks/<任务>.json` 的指纹绑定任务。该任务须引用 `_exchange/control/decisions/` 下用户明确确认的当次范围和固定顺序，每项须引用 `_exchange/dsh/catalog/` 中按实际目录展开核实的范围。DSH 核对实时账户与容量，提交前仍须走 `_exchange/dsh/plans/` 与 `_exchange/dsh/authorizations/` 的正式门禁。下载按对应同版实际收件核对范围并交接分析。清理由独立门禁处理。
 
 读回旧 DSH 转存确认时，由部署环境以 `WORLDANALYSIS_LEGACY_DSH_SESSION_ID` 提供已核实的原执行会话。只在本机配置该值。进程缺少绑定时，保留相关待核交接，完成配置核对后再读回。
 
-公共仓库提供桌面入口、桥接预检及收件路径读回。接管命令和外部执行器由实际部署环境另行配置，绑定当前会话与授权任务。干净检出可以验证通用代码，现场账号、执行归属、转存及下载结果需要从本机实读。
+## 网页申请和正式派发
+
+1. 在网页选择确切资料及顺序，打开「核对转存」后提交范围。申请与只读任务分别写入 `_exchange/control/transfer-requests` 和 `_exchange/control/tasks`。只读任务编号以 `-scope` 结尾。
+2. 在项目根用 `python -B -X utf8 _tools/dsh_dedicated.py notify-readback <申请编号>-scope` 通知专用接收端。回执引用原申请和按顺序排列的递归清单。带任务编号调用 `preflight` 可读回尝试、接收及回执状态。
+3. 路由暂停且平台已由正常授权解除当次暂停时，操作者进入资源库代码目录，运行 `python -B -X utf8 transfer_requests.py approve <申请编号>`。看到实际文件、目录、容量和范围后，亲自输入显示的确认文字。浏览器申请和只读回执不生成用户授权。
+4. 在项目根以 `cutover inspect` 读回版本，再执行 `cutover enable --revision <当前版本> --task-id <申请编号> --readback-task-id <申请编号>-scope`。满足实时门禁后，可运行 `python -B -X utf8 _tools/dsh_dedicated.py notify-transfer <申请编号>`。在途任务先读回真实执行结果。退回暂停使用 `cutover rollback --revision <当前版本>`。
+
+项目相对路径保存只读任务、回执和新任务的收件位置。跨目录部署时重新登记宿主与实际工作区，再核当前会话与账号。换专用会话前对账已尝试的任务，随后用 `rebind-desktop <会话编号>` 读回并登记新会话。
+
+公共仓库提供桌面入口、专用派发、路径读回及正式范围校验。现场转存适配器、平台账号和下载能力由部署环境另行安装和核实。部署后的执行、下载状态由专用 DSH 的实际回执与实物确认。
 
 ## 插件与浏览器
 

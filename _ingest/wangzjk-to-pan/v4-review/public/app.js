@@ -209,7 +209,8 @@ function syncControls({search = true} = {}) {
   notice('filter-count', extraCount ? String(extraCount) : '');
   const topic = meta.categories.find(item => item.id === filter.category);
   const platform = meta.platforms?.find(item => item.id === filter.platform);
-  $('result-title').textContent = [topic?.label, platform?.label].filter(Boolean).join(' · ') || '全部资料';
+  $('result-title').textContent = [topic?.label, platform?.label].filter(Boolean).join(' · ')
+    || (filter.category ? '筛选结果' : '全部资料');
   const params = new URLSearchParams(calendarFilters.filter(key => filter[key]).map(key => [key, filter[key]]));
   if (filter.versions === 'all') params.set('versions', 'all');
   if (filter.selected === '1') params.set('selected', '1');
@@ -341,7 +342,7 @@ function card(row) {
   main.append(copy);
   const foot = el('div', null, 'card-foot');
   const metadata = el('div', null, 'card-meta');
-  const category = meta.categories.find(item => item.id === row.category);
+  const category = meta.categories.find(item => item.id === (row.business_category ?? row.category));
   if (category) {
     const topic = button(category.label, 'card-topic');
     topic.addEventListener('click', () => applyFilter({category:category.id}));
@@ -614,7 +615,7 @@ function paintDraft() {
     li.dataset.queueId = row.id;
     const details = el('div', null, 'draft-copy');
     details.append(el('strong', row.title));
-    const info = [row.category_label, row.site_label, resourceState(row), showSize(row.range_total_bytes),
+    const info = [row.business_category_label ?? row.category_label, row.site_label, resourceState(row), showSize(row.range_total_bytes),
       row.stale ? '资料已更新，请重新选择' : ''].filter(Boolean);
     if (info.length) details.append(el('p', info.join(' · '), 'muted'));
     const controls = el('div', null, 'draft-controls');
@@ -892,7 +893,7 @@ $('playbooks-open')?.addEventListener('click', () => void playbooksPanel());
 function renderReader(row) {
   $('reader-title').textContent = row.title;
   const platforms = catalogFacets.labels(row, filter.platform, Infinity);
-  notice('reader-meta', [row.site_label, shortDate(row.published_at), row.category_label,
+  notice('reader-meta', [row.site_label, shortDate(row.published_at), row.business_category_label ?? row.category_label,
     platforms.join('、'), row.version_label].filter(Boolean).join(' · '));
   notice('reader-state', resourceState(row));
   const article = $('reader-body');

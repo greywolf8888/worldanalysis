@@ -1,9 +1,37 @@
 import unittest
 
-from catalog_topics import CATEGORIES, displayed_secondary_topic, intro_preview, project_topic
+from catalog_topics import (
+    BUSINESS_CATEGORIES, CATEGORIES, browse_topic_matches, business_topic,
+    displayed_secondary_topic, intro_preview, project_topic, valid_browse_topic,
+)
 
 
 class CatalogTopicTest(unittest.TestCase):
+    def test_business_categories_track_the_primary_purpose_and_preserve_legacy_queries(self):
+        cases = [
+            ('commerce', '虚拟商品', '小红书虚拟商品课程：AI生成商品图并装修店铺', 'biz_commerce'),
+            ('media', '短视频制作', '用 AI 制作古建筑科普短视频', 'biz_ai_media'),
+            ('media', '短视频制作', '实拍和剪辑课程，AI辅助生成封面', 'biz_content'),
+            ('services', '技能接单', '剪映零基础剪辑实战课，适合自媒体起号、剪辑接单', 'biz_content'),
+            ('media', '直播运营', '直播间运营与引流实战', 'biz_growth'),
+            ('automation', '自动化工作流', '用 WorkBuddy 搭工作流，自定义技能，完成报表和视频', 'biz_technology'),
+            ('gaming', '游戏运营', '游戏交易市场运营课', 'biz_business'),
+            ('finance', '投资研究', '市场研究和资产配置', 'biz_finance'),
+            ('assets', '文档与演示模板', '可独立下载的演示模板合集', 'biz_reference'),
+            ('', '', '日入翻倍，热门项目等你来', ''),
+        ]
+        self.assertEqual(len(BUSINESS_CATEGORIES), 8)
+        for legacy, subtype, title, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(business_topic(legacy, subtype, title), expected)
+        example = {'category': 'media', 'subcategory': '短视频制作', 'business_category': 'biz_ai_media'}
+        self.assertTrue(valid_browse_topic('ai_media', '短视频制作'))
+        self.assertTrue(valid_browse_topic('biz_ai_media', ''))
+        self.assertFalse(valid_browse_topic('biz_ai_media', '短视频制作'))
+        self.assertTrue(browse_topic_matches(example, 'media', '短视频制作'))
+        self.assertTrue(browse_topic_matches(example, 'biz_ai_media', ''))
+        self.assertFalse(browse_topic_matches(example, 'biz_content', ''))
+
     def test_project_purpose_and_use_of_tools(self):
         cases = {
             'AI写小说投稿实战课': ('content', '写作与小说'),

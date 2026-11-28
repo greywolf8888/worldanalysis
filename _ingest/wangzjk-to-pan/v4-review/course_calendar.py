@@ -10,7 +10,8 @@ from types import MappingProxyType
 from urllib.parse import parse_qs
 
 from catalog_model import Library, digest
-from catalog_semantics import CATEGORIES, CATEGORY_ALIASES, PLATFORMS
+from catalog_semantics import CATEGORY_ALIASES, PLATFORMS
+from catalog_topics import valid_browse_topic
 from member_queue import DEFAULT_NON_PROJECTS, read_non_projects
 
 
@@ -42,9 +43,8 @@ def read_query(query: str, sites: set[str]) -> dict[str, str]:
         sub = params.get("subcategory", "")
         platform = params.get("platform", "")
         site = params.get("site", "")
-        if (category and category not in CATEGORIES or site and site not in sites
-                or platform and platform not in PLATFORMS
-                or sub and sub not in CATEGORIES.get(category,("",()))[1]):
+        if (not valid_browse_topic(category, sub) or site and site not in sites
+                or platform and platform not in PLATFORMS):
             raise ValueError
         day = params.get("day", "")
         if day and date.fromisoformat(day).isoformat() != day:
@@ -72,7 +72,8 @@ def summary(row: dict, share_locations: dict, selected: frozenset[str]) -> dict:
     return {
         "id": row["id"],
         **{key:row[key] for key in ("display_id","article_key","platforms","source_count","version_count",
-                                  "version_label","classification_state","category","subcategory","site_id","article_id","status")
+                                  "version_label","classification_state","category","subcategory","site_id","article_id","status",
+                                  "business_category","business_category_label")
            if key in row},
         "action_pending": action_pending,
         "requestable": not action_pending and row.get("requestable", row.get("selectable")) is True,
@@ -180,6 +181,7 @@ def course_calendar(library: Library, query: str, *, progress=None, selected_ids
         "next": revision + "." + display_key(rows[end - 1]) if end < len(rows) else None,
         "snapshot_id": library.snapshot_id,
         "categories":facets["categories"], "platforms":facets["platforms"],
-        "category_aliases":facets["category_aliases"], "project_total":facets["project_count"],
+        "category_aliases":facets["category_aliases"], "legacy_categories":facets.get("legacy_categories", {}),
+        "project_total":facets["project_count"],
         "sites": sites,
     }

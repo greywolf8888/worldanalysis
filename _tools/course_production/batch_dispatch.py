@@ -683,6 +683,15 @@ def summarize(info, categories, uncertain, *, refresh):
             "unrecognized_categories": uncertain, "next": selected_brief,
             "registered_projects": sum(row["registered"] for row in entries),
             "present_projects": sum(row["present"] for row in entries)}
+    from storage_inventory import cleanup_pressure
+
+    next_bytes = None
+    if selection.pair and selection.pair[1]["status"] == batch.PENDING:
+        next_bytes = sum(file["bytes"] for file in selection.pair[1]["metadata"])
+    try:
+        result["cleanup_pressure"] = cleanup_pressure(Path(info["root"]), next_task_bytes=next_bytes)
+    except OSError:
+        result["cleanup_pressure"] = {"read_only": True, "state": "storage_unavailable"}
     if info.get("v4_handoff"):
         result["v4_order"] = {"waiting": selection.waiting, "items": selection.plan_items,
                               "warnings": info["v4_handoff"].get("warnings", [])}

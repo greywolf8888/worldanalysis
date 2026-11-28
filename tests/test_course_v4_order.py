@@ -140,6 +140,41 @@ class V4DispatchTest(unittest.TestCase):
         row["status"] = batch.COMPLETE
         put(path, queue)
 
+    def test_dedicated_scope_binds_receive_target_without_a_legacy_session(self):
+        task_id = "isolated-transfer"
+        scope_id = task_id + "-scope"
+        session = "session-00000000-0000-4000-8000-000000000002"
+        target = "/apps/isolated/incoming"
+
+        def publish(relative, value):
+            path = self.root / relative
+            put(path, value)
+            return {"path": relative, "sha256": handoff_order.sha_bytes(path.read_bytes())}
+
+        request = publish(f"_exchange/control/transfer-requests/{task_id}.json", {
+            "record_type": "transfer_request", "record_id": task_id,
+            "execution_allowed": False, "receive_target": target})
+        scope = publish(f"_exchange/control/tasks/{scope_id}.json", {
+            "target_role": "dedicated_dsh", "execution_allowed": False, "authorization_ref": None,
+            "task_id": scope_id, "inputs": {"transfer_request_ref": request}})
+        range_ref = {"path": "_exchange/dsh/catalog/synthetic.json", "sha256": "a" * 64}
+        proof = publish(f"_exchange/dsh/receipts/{scope_id}.json", {
+            "record_type": "dsh_receipt", "producer": "dsh", "execution_allowed": False,
+            "session_id": session, "task_id": scope_id, "task_sha256": scope["sha256"], "state": "ready_for_review",
+            "result": {"dedicated_transfer_readback": {"transfer_request_ref": request,
+                                                       "range_manifests": [range_ref], "target": target}}})
+        inputs = {"transfer_request_ref": request, "scope_receipt_ref": proof, "receive_target": target}
+        decision = {**inputs, "target_session_id": session, "user_message_reference": f"local_operator_console:{task_id}"}
+        task = {"task_id": task_id, "target_role": "dedicated_dsh", "target_session_id": session, "inputs": inputs}
+        plan = {"items": [{"range_manifest_ref": range_ref, "receive_target": target}]}
+        with patch.dict(os.environ, {"WORLDANALYSIS_LEGACY_DSH_SESSION_ID": ""}):
+            handoff_order.dedicated_control_proof(self.root, task, decision, plan)
+            with self.assertRaisesRegex(ValueError, "收件目录"):
+                handoff_order.dedicated_control_proof(self.root, task, {**decision, "receive_target": "/wrong"}, plan)
+        with (patch.dict(os.environ, {"WORLDANALYSIS_LEGACY_DSH_SESSION_ID": session}),
+              self.assertRaisesRegex(ValueError, "专用 DSH")):
+            handoff_order.dedicated_control_proof(self.root, task, decision, plan)
+
     def ready_B_and_C(self):
         self.add_local("01", "00-旧存量", "old")
         self.add_local("02", "01-先于B的同分类旧件", "old-B")

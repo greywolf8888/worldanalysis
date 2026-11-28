@@ -14,11 +14,14 @@ from urllib.parse import urlsplit
 from catalog_relations import CatalogRelations
 from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, PLATFORMS as PLATFORM_LABELS
 from catalog_semantics import CatalogStore, article_key, relationship_input, reusable_classification, source_input
-from catalog_topics import TOPIC_REVISION, displayed_secondary_topic, intro_preview, project_topic
+from catalog_topics import (
+    BUSINESS_CATEGORIES, TOPIC_REVISION, browse_topic_matches, business_topic, displayed_secondary_topic,
+    intro_preview, project_topic,
+)
 from catalog_platforms import PLATFORM_REVISION, project_platforms
 from intro_inputs import choose_intro, intro_revision, legacy_intro, read_intros
 from share_locations import historical_share_locations, merge_share_locations, protected_owner_exports, read_protected_owner_export
-from workspace_paths import CLOUD_DESTINATION as TARGET, path_bindings
+from workspace_paths import CATALOG_CHECKPOINT_SCHEMA, CATALOG_DETAILS_SCHEMA, CLOUD_DESTINATION as TARGET, path_bindings
 
 ROOT = Path(__file__).absolute().parent
 CATALOG_PATH_ENV = 'WORLDANALYSIS_CATALOG_PATH_VERSION'
@@ -333,13 +336,15 @@ class Library:
                                            manual=manual, source_checked=source['coverage'] in {
                                                'complete', 'partial', 'image_only'})
         secondary = displayed_secondary_topic(category, reviewed, manual=manual)
+        business = business_topic(category, subtopic, source['title'], source['paragraphs'], source['excerpt'])
         live_platforms = project_platforms(source['title'], source['paragraphs'], source['excerpt'], reviewed,
                                            manual=manual, github_links=repository_links)
         row.update(category=category, category_label=TAXONOMY.get(category, ('', ()))[0], subcategory=subtopic,
-                   secondary_category=secondary,
+                   secondary_category=secondary, business_category=business,
+                   business_category_label=BUSINESS_CATEGORIES.get(business, ''),
                    platforms=[{'id': platform, 'label': PLATFORM_LABELS[platform]} for platform in live_platforms])
         row['_search'] = norm(' '.join([row['title'], row['site_label'], row['site_id'], row['excerpt'],
-            row['category_label'], subtopic, *(p['label'] for p in row['platforms']),
+            row['business_category_label'], row['category_label'], subtopic, *(p['label'] for p in row['platforms']),
             *row['source_categories'], *source['paragraphs']]))
 
     def attach_catalog(self, store, intros):
@@ -420,26 +425,19 @@ class Library:
         project_count = self.relations.count(valid)
         category_sets=defaultdict(list)
         platform_sets=defaultdict(list)
-        sub_sets=defaultdict(list)
         for row in valid:
-            category_sets[row['category']].append(row)
-            secondary=row.get('secondary_category')
-            if secondary:
-                category_sets[secondary].append(row)
+            category_sets[row['business_category']].append(row)
             for platform in row['platforms']:
                 platform_sets[platform['id']].append(row)
-            if row['subcategory']:
-                sub_sets[(row['category'],row['subcategory'])].append(row)
         def count(items):
             return self.relations.count(items) if items else 0
-        categories=[]
-        for key,(label,tags) in TAXONOMY.items():
-            categories.append({'id':key,'label':label,'count':count(category_sets[key]),
-                        'subcategories':[{'id':tag,'label':tag,'count':count(sub_sets[(key,tag)])}
-                                         for tag in tags if sub_sets[(key,tag)]]})
+        categories = [{'id': key, 'label': label, 'count': count(category_sets[key]), 'subcategories': []}
+                      for key, label in BUSINESS_CATEGORIES.items()]
         return {'categories':categories,'platforms':[{'id':p,'label':label,'count':count(platform_sets[p])}
                  for p,label in PLATFORM_LABELS.items() if p!='general' or platform_sets[p]],
-                'category_aliases':CATEGORY_ALIASES,'project_count':project_count}
+                'category_aliases':CATEGORY_ALIASES,
+                'legacy_categories':{key: tags for key, (_, tags) in TAXONOMY.items()},
+                'project_count':project_count}
 
     def display_detail(self,row):
         if not hasattr(self,'relations'):
@@ -486,8 +484,7 @@ class Library:
             items=[row for row in self.semantic_rows.values()
                    if (eligible is None or eligible(row))
                    and (not terms or all(term in row['_search'] for term in terms))
-                   and (not category or category in (row['category'],row.get('secondary_category')))
-                   and (not subgroup or row['category']==category and row['subcategory']==subgroup)
+                   and browse_topic_matches(row, category, subgroup)
                    and (not platform or any(p['id']==platform for p in row['platforms']))
                    and (not status or status==row['status']) and (not site or row['site_id']==site)
                    and (f.get('baidu')!='1' or (row['site_id'],row['article_id']) in self.share_locations)
@@ -517,7 +514,7 @@ def merge_codex_collection(path, articles, facts):
     doc, checksum = read_bound(path, 64*1024*1024)
     history=doc.get('history'); collection=doc.get('collection')
     rows=doc.get('articles'); details=doc.get('details')
-    if (doc.get('schema')!='wa-v4-codex-public-source.v1' or doc.get('site')!=SITE
+    if (doc.get('schema')!=CATALOG_CHECKPOINT_SCHEMA or doc.get('site')!=SITE
             or not isinstance(rows,dict) or len(rows)>60_000 or not isinstance(details,dict) or len(details)>400
             or not isinstance(history,dict) or not isinstance(collection,dict) or collection.get('read_only') is not True):
         raise ValueError('公开资料目录校验失败')
@@ -608,7 +605,7 @@ def open_index():
                    'new_articles':len(state['catalog.json']['articles'])-baseline_articles}
     if state['crawl_state.JSON'].get('phase')!='paused' or state['capacity-policy.json'].get('minimum_free_bytes')!=100_000_000_000:
         raise ValueError('未核实旧自动转存暂停或 100 GB 持久策略')
-    if facts.get('schema')!='wangzjk-v4-public-article-projection.v1' or facts.get('site_id')!=SITE:raise ValueError('详情数据契约不符')
+    if facts.get('schema')!=CATALOG_DETAILS_SCHEMA or facts.get('site_id')!=SITE:raise ValueError('详情数据契约不符')
     source=Wangzjk(state,facts); lib=Library([source]); lib.snapshot_id=digest([provenance,ref,overlay_hash,codex_hash]) if codex_hash else (digest([provenance,ref,overlay_hash]) if overlay_hash else digest([provenance,ref])); lib.discovery=discovery; lib.provenance=provenance; lib.detail_hash=ref
     if codex_hash and len(lib.sites)==1:
         lib.sites[0]['checkpoint']['site_total']=discovery.get('publisher_total')
@@ -634,7 +631,7 @@ def open_index():
               'images':len({x['url'] for r in lib.by_id.values() for x in [*(y for y in r['blocks'] if y['kind']=='image'),*([r['cover']] if r['cover'] else [])]}),
               'operations':len(source.ops),'verified':cnt['saved_root_verified'],'needs_reconcile':len(source.ops)-cnt['saved_root_verified'],
               'recycled':len(source.target_markers),'selectable':lib.selectable_count,'requestable':lib.requestable_count,
-              'baidu_linked_articles':len(lib.share_locations),'baidu_unique_links':len({link.url for links in lib.share_locations.values() for link in links})},'categories':facets['categories'],'platforms':facets['platforms'],'category_aliases':facets['category_aliases'],
+              'baidu_linked_articles':len(lib.share_locations),'baidu_unique_links':len({link.url for links in lib.share_locations.values() for link in links})},'categories':facets['categories'],'platforms':facets['platforms'],'category_aliases':facets['category_aliases'],'legacy_categories':facets['legacy_categories'],
               'statuses':[{'id':k,'label':v} for k,v in STATUS.items()],'sites':lib.sites,'minimum_free_bytes':source.floor,'execution_allowed':False,
               'observed_at':lib.observed_at,'discovery':discovery,'source_notes':facts.get('attempts',[]),'overview_note':'状态来自历史账和精确回收标记；实际容量未实时查询，本地分析与回收资格不推断。'}
     return lib

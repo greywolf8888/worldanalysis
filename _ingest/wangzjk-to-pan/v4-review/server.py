@@ -24,10 +24,12 @@ from member_queue import MAX_LIMIT, DEFAULT_NON_PROJECTS, DEFAULT_OBSERVATIONS, 
 from share_locations import MAX_BROWSER_IMPORT_BYTES, import_browser_share_locations, protected_owner_exports
 from course_calendar import PARAMETERS as CALENDAR_PARAMETERS, CalendarRequestError, course_calendar
 from pipeline_control import DEFAULT_PORT, JOBS, PipelineControl, RunBusy
-from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, PLATFORMS as PLATFORM_LABELS, KEY as ARTICLE_KEY
+from catalog_semantics import CATEGORY_ALIASES, PLATFORMS as PLATFORM_LABELS, KEY as ARTICLE_KEY
 from catalog_semantics import CatalogStore, article_key
+from catalog_topics import valid_browse_topic
 from intro_inputs import intro_revision
 from catalog_model import SEMANTIC_DB
+from transfer_requests import MAX_BATCH, request_status as transfer_status, submit_request as submit_transfer
 
 sys.path.append(str(ROOT.parent))
 from lib.manual_verification import read_status as read_verification_status
@@ -58,8 +60,7 @@ def filters(a, library):
     for k in ('q','category','subcategory','platform','status','site','from','to','order','view','selected','baidu','versions'):
         if not isinstance(f[k],str) or len(f[k])>250 or '\x00' in f[k]:raise RequestError(400,'筛选参数无效')
     category= CATEGORY_ALIASES.get(f['category'],f['category'])
-    if (category and category not in TAXONOMY
-            or f['subcategory'] and (not category or f['subcategory'] not in TAXONOMY.get(category,('',()))[1])
+    if (not valid_browse_topic(category, f['subcategory'])
             or f['platform'] and f['platform'] not in PLATFORM_LABELS
             or f['status'] and f['status'] not in STATUS
             or f['site'] and f['site'] not in {x['id'] for x in library.sites}
@@ -435,6 +436,45 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, result)
         except (OSError, ValueError, TypeError, RecursionError) as error:
             raise RequestError(422, str(error) if isinstance(error, ValueError) else '无法核对该路径') from None
+    def request_transfer_confirmation(self):
+        if not self.server.confirmation_enabled:
+            raise RequestError(403, '当前服务未连接本机转存交接。')
+        if (self.headers.get_all('Origin') != ['http://' + self.server.authority]
+                or self.headers.get_content_type() != 'application/json'
+                or self.headers.get('Sec-Fetch-Site') != 'same-origin'
+                or self.headers.get('Transfer-Encoding')):
+            raise RequestError(403, '请从本机转存页面提交。')
+        sizes = self.headers.get_all('Content-Length', [])
+        if len(sizes) != 1 or not re.fullmatch(r'[1-9][0-9]{0,3}', sizes[0]) or int(sizes[0]) > 2048:
+            raise RequestError(413, '转存请求长度无效。')
+        raw = self.rfile.read(int(sizes[0]))
+        try:
+            body = json.loads(raw.decode('utf-8'))
+        except (ValueError, UnicodeError):
+            raise RequestError(400, '转存请求数据不可解析。') from None
+        if (len(raw) != int(sizes[0]) or type(body) is not dict
+                or set(body) != {'revision', 'snapshot_id', 'order_mode'}
+                or type(body['revision']) is not int
+                or not isinstance(body['snapshot_id'], str)
+                or body['order_mode'] not in ('ready_ordered', 'strict')):
+            raise RequestError(400, '请重新核对当前资料和顺序。')
+        with self.server.snapshot.lock:
+            lib, draft, _, pending = self.server.snapshot.get()
+            if pending or body['snapshot_id'] != lib.snapshot_id:
+                raise RequestError(409, '资料目录已更新，请重新核对。')
+            choice = draft.read()
+            if choice['revision'] != body['revision']:
+                raise RequestError(409, '清单已变化，请重新核对。')
+            if not 1 <= len(choice['ids']) <= MAX_BATCH:
+                raise RequestError(422, '请选择 1 至 4 项资料。')
+            if any(lib.by_id.get(key, {}).get('demo') is True for key in choice['ids']):
+                raise RequestError(422, '请使用实际来源的资料。')
+            frozen = draft.freeze({'revision': body['revision'], 'order_mode': body['order_mode']})
+            try:
+                result = submit_transfer(self.server.path_workspace, frozen, lib.snapshot_id)
+            except ValueError as error:
+                raise RequestError(422, str(error)) from None
+            return self.send(202, result)
     def route(self,method):
         if self.headers.get_all('Host')!=[self.server.authority]:raise RequestError(403,'仅支持本机绑定地址')
         if len(self.path)>4096 or not self.path.startswith('/') or self.path.startswith('//'):raise RequestError(400,'请求路径无效')
@@ -504,7 +544,18 @@ class Handler(BaseHTTPRequestHandler):
                 if set(pr)-{'page'} or len(pr.get('page',['1']))!=1:raise RequestError(400,'无效本地分页')
                 page=filters({'page':pr.get('page',['1'])[0]},lib)['page']
                 return self.send(200,local.textbooks(page) if p=='/api/textbooks' else local.local_rows(page))
-            if p=='/api/preconfirmation' and not u.query:return self.send(200,readiness(lib,local,draft.read()))
+            if p=='/api/preconfirmation' and not u.query:
+                return self.send(200, {**readiness(lib, local, draft.read()),
+                                       'request_available': self.server.confirmation_enabled and not pending,
+                                       'maximum_request_items': MAX_BATCH})
+            if p == '/api/confirm' and self.server.confirmation_enabled:
+                match = re.fullmatch(r'request_id=(transfer-[a-f0-9]{40})', u.query)
+                if not match:
+                    raise RequestError(400, '转存请求编号无效。')
+                try:
+                    return self.send(200, transfer_status(self.server.path_workspace, match[1]))
+                except ValueError as error:
+                    raise RequestError(404, str(error)) from None
             if p=='/api/cleanup-readiness' and not u.query:return self.send(200,local.cleanup_preparation())
             if p=='/api/discovery-readiness' and not u.query:return self.send(200,{**local.discovery(),'public_checkpoint_pending_sync':pending})
             if p.startswith('/api/resource/') and ID.fullmatch(x:=p[len('/api/resource/'):]) and x in lib.by_id:
@@ -554,8 +605,8 @@ class Handler(BaseHTTPRequestHandler):
                     'page':cur,'pages':pages,'limit':limit,'index_selectable':lib.requestable_count,'page_selectable':sum(requestable(r) for r in page),'max_draft_items':MAX_ID,
                     'draft':None if requested_revision==str(d['revision']) else draft.show(d,False),
                     'hidden_selected':len(selected-visible),'query_ms':round((perf_counter()-t)*1000,3),'snapshot_id':lib.snapshot_id})
-        elif method=='POST' and p=='/api/confirm':
-            raise RequestError(403,'需要原桌面真人授权、冻结范围和现场复核；此页不会写确认回执')
+        elif method=='POST' and p=='/api/confirm' and not u.query:
+            return self.request_transfer_confirmation()
         elif method=='POST' and p=='/api/member-share-import' and not u.query:
             if (self.headers.get_all('Origin')!=['http://'+self.server.authority] or self.headers.get_content_type()!='application/json'
                     or self.headers.get('Sec-Fetch-Site')!='same-origin' or self.headers.get('Transfer-Encoding')):
@@ -611,23 +662,30 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):self.serve('POST')
 
 
-def make_server(library,db_path,port,*,local=None,watch=None,enable_control=False,catalog_db=None,path_workspace=None):
+def make_server(library,db_path,port,*,local=None,watch=None,enable_control=False,catalog_db=None,path_workspace=None,
+                enable_confirmation=False):
     from workspace_paths import BASE
 
     draft=Draft(db_path,library); state=local if local is not None else LocalProjection(library)
     http=ThreadingHTTPServer(('127.0.0.1',port),Handler)
     http.snapshot=LiveSnapshot(library,draft,state,watch,catalog_db);http.authority='127.0.0.1:'+str(http.server_port)
     http.path_workspace = BASE if path_workspace is None else path_workspace
+    http.confirmation_enabled = enable_confirmation
     http.catalog_directory = Path(catalog_db or SEMANTIC_DB).parent.as_posix()
     http.control = PipelineControl(http.server_port) if enable_control else None
     return http
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description='Worldanalysis local resource library');p.add_argument('--port',type=int,default=DEFAULT_PORT)
-    args=p.parse_args(); lib=open_index()
+    args=p.parse_args()
+    try:
+        lib=open_index()
+    except FileNotFoundError:
+        p.exit(1, '缺少本机资源库数据。请按 README 准备目录登记和公开详情后再启动。\n')
     watch = (*(SEMANTIC_DB.parent/name for name in ('discovery-head.json', 'codex-public.json', 'public-details.json')),
              *(ROOT.parent/'state'/name for name in ('catalog.json', 'journal.json', 'downloaded-project-markers.json')))
-    with make_server(lib,ROOT/'data'/'draft.sqlite3',args.port,watch=watch,enable_control=True,catalog_db=SEMANTIC_DB) as h:
+    with make_server(lib,ROOT/'data'/'draft.sqlite3',args.port,watch=watch,enable_control=True,
+                     catalog_db=SEMANTIC_DB,enable_confirmation=True) as h:
         print('Worldanalysis: http://'+h.authority+'/',flush=True)
         try:h.serve_forever()
         except KeyboardInterrupt:pass

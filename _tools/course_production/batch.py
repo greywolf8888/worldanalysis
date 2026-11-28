@@ -1132,6 +1132,13 @@ def run(args):
                 if changed and action in ("claim", "supplement", "finish", "defer", "reuse", "archive",
                                           "reopen", "alias-review", "refresh"):
                     refresh_registered_catalog(queue, path)
+                if action == "finish":
+                    from storage_inventory import cleanup_pressure
+
+                    try:
+                        result["cleanup_pressure"] = cleanup_pressure(Path(queue["source"]), stage_complete=True)
+                    except OSError:
+                        result["cleanup_pressure"] = {"read_only": True, "state": "storage_unavailable"}
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (OSError, ValueError, KeyError) as error:

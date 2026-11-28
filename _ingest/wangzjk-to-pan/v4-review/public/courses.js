@@ -260,7 +260,8 @@ function addCourses(items, multipleSites, snapshotId) {
     title.append(node('span', course.title || '查看课程详情', 'calendar-title'));
     const meta = node('span', undefined, 'calendar-meta');
     if (multipleSites && course.site_label) meta.append(node('span', course.site_label));
-    if (course.category_label) meta.append(node('span', course.category_label));
+    const category = course.business_category_label ?? course.category_label;
+    if (category) meta.append(node('span', category));
     const platforms = catalogFacets.labels(course, selections.platform);
     if (platforms.length) meta.append(node('span', platforms.join('、')));
     const relation = course.version_count > 1 ? 'versions' : course.source_count > 1 ? 'sources' : '';

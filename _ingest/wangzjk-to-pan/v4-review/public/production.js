@@ -51,7 +51,7 @@ function textbook(p,label='在 Obsidian 打开教材'){
  if(!p||typeof p.obsidian_href!=='string')return null;
  try{
   const u=new URL(p.obsidian_href),path=u.searchParams.get('path')??'';
-  if(u.protocol!=='obsidian:'||u.hostname!=='open'||u.pathname!==''||u.hash||[...u.searchParams.keys()].join()!=='path'||!/^G:\/(?:[\s\S]+)\.md$/i.test(path)||path.includes('..'))return null;
+  if(u.protocol!=='obsidian:'||u.hostname!=='open'||u.pathname!==''||u.hash||[...u.searchParams.keys()].join()!=='path'||!/^[A-Za-z]:\/[^\r\n]+\.md$/i.test(path)||path.includes('..'))return null;
   const a=el('a',label,'detail-link');a.href=u.href;a.rel='noreferrer noopener';return a;
  }catch{return null;}
 }
@@ -193,6 +193,33 @@ function localPage(area,page,endpoint='/api/local-projects'){
  area.append(body,controls);draw(page,1);
 }
 let reviewSeq=0;
+function lastTransferRequest(){
+ try{return JSON.parse(sessionStorage.getItem('worldanalysis.transfer-request'));}
+ catch{return null;}
+}
+let activeTransferRequest=lastTransferRequest();
+function renderTransferRequest(container, result){
+ const states={
+  await_dsh_scope:'已提交，等待 DSH 核对资料范围。',
+  scope_response_received:'已收到 DSH 核对结果，请在本机核对并确认。',
+  scope_needs_followup:'资料范围尚未核实，请查看 DSH 的核对结果。',
+  authorized_for_dsh:'已确认，等待专用 DSH 领取。',
+  authorization_expired:'确认已过期，更新清单后重新提交核对。',
+  execution_response_received:'已收到 DSH 回执，请查看处理进度。'
+ };
+ container.replaceChildren(el('p',states[result.state]||'请求待核对。','status-note'));
+ if(result.state==='scope_response_received'){
+  const copy=el('button','复制本机确认命令','quiet-button');
+  copy.type='button';
+  copy.addEventListener('click',async()=>{
+   try{
+    await navigator.clipboard.writeText('python -X utf8 -B transfer_requests.py approve '+result.request_id);
+    copy.textContent='已复制确认命令';
+   }catch{copy.textContent='未能复制，请从本机查看待确认交接';}
+  });
+  container.append(copy);
+ }
+}
 async function preconfirmPanel(){
  const k=++reviewSeq,box=$('preconfirm-body');box.replaceChildren(el('p','加载中…','status-note'));openDialog('preconfirmation');
  try{
@@ -207,7 +234,7 @@ async function preconfirmPanel(){
    item.append(el('span',p.title||'待核对的资料'));
    const reason=p.reasons?.includes('STALE_VERSION')?'资料已变更，请重新选择':
     p.reasons?.includes('SOURCE_SCOPE_AND_TOTAL_BYTES_UNVERIFIED')?'资料范围待核实':'';
-   if(reason)item.append(el('span',reason,'queued-review-note'));
+   if(reason)item.append(el('p',reason,'queued-review-note'));
    items.append(item);
   }
   order.append(items);
@@ -217,8 +244,47 @@ async function preconfirmPanel(){
    ['网盘可用空间',showSize(status.actual_remaining_bytes)||'待核实'],['至少保留',showSize(status.minimum_free_bytes)]
   ]));
   if(status.platform_hold_present)checks.append(el('p','网盘转存已暂停。','status-note'));
-  if(!status.execution_allowed)checks.append(el('p','核对完成后，由你确认转存。','status-note'));
-  const confirm=el('button','确认转存','primary');confirm.disabled=true;checks.append(confirm);
+  const state=el('div');state.setAttribute('role','status');
+  const checkedMode=$('mode').value;
+  const available=status.request_available&&status.ordered_items.length<=status.maximum_request_items
+    &&status.ordered_items.every(p=>!p.reasons?.includes('STALE_VERSION')&&!p.reasons?.includes('NOT_ELIGIBLE_OR_PRIOR_RESERVATION'));
+  const confirm=el('button','提交范围核对','primary');confirm.type='button';confirm.disabled=!available;
+  const active=activeTransferRequest?.revision===status.draft_revision&&activeTransferRequest?.orderMode===checkedMode
+    ?activeTransferRequest.id:null;
+  const refresh=el('button','刷新核对状态','quiet-button');
+  refresh.type='button';refresh.hidden=!active;
+  async function refreshStatus(id){
+   const reply=await api('/api/confirm?request_id='+id);
+   if(k!==reviewSeq||!$('preconfirmation').open)return;
+   renderTransferRequest(state,reply);
+  }
+  refresh.addEventListener('click',async()=>{
+   refresh.disabled=true;
+   try{await refreshStatus(activeTransferRequest.id);}
+   catch{if(k===reviewSeq&&$('preconfirmation').open)state.replaceChildren(el('p','未能读回核对结果，请再次刷新。','status-note notice'));}
+   finally{refresh.disabled=false;}
+  });
+  if(active){
+   confirm.hidden=true;
+   await refreshStatus(active);
+   if(k!==reviewSeq||!$('preconfirmation').open)return;
+  }else if(available)state.append(el('p','DSH 核对范围和容量后，由你在本机确认。','status-note'));
+  else if(status.ordered_items.length>status.maximum_request_items)state.append(el('p','每次最多核对 4 项。','status-note'));
+  confirm.addEventListener('click',async()=>{
+   confirm.disabled=true;
+   try{
+    const reply=await api('/api/confirm',{
+     revision:status.draft_revision,snapshot_id:status.snapshot_id,order_mode:checkedMode
+    });
+    activeTransferRequest={revision:status.draft_revision,id:reply.request_id,orderMode:checkedMode};
+    try{sessionStorage.setItem('worldanalysis.transfer-request',JSON.stringify(activeTransferRequest));}catch{}
+    confirm.hidden=true;refresh.hidden=false;
+    if(k===reviewSeq&&$('preconfirmation').open)renderTransferRequest(state,reply);
+   }catch(error){
+    if(k===reviewSeq&&$('preconfirmation').open)state.replaceChildren(el('p',selectionFailure(error),'status-note notice'));
+   }finally{confirm.disabled=!available;}
+  });
+  checks.append(state,confirm,refresh);
   box.append(order,checks);
  }catch{if(k===reviewSeq&&$('preconfirmation').open)box.replaceChildren(el('p','未能加载转存信息，请重试。','status-note notice'));}
 }

@@ -25,8 +25,8 @@ flowchart TD
 
 ~~~powershell
 $courseTool = '_tools/course_production/course.ps1'
-& $courseTool start 'D:\课程原件\一门课'
-& $courseTool start 'D:\课程原件\另一门课' --output 'G:\课程教材\另一门课'
+& $courseTool start '<课程原件目录>'
+& $courseTool start '<另一门课的原件目录>' --output '<独立课程包目录>'
 ~~~
 
 `start` 自动完成原件盘点、附件读取、视频转写和画音候选扫描。随后从它回报的课程包继续。重复 `start` 会核对输入和入库快照，复用可用的处理结果。拿到已有课程包时可直接从快照续作。
@@ -138,11 +138,11 @@ CrispASR 成功退出且明确报告某个输入音频没有语音时，对相�
 重新运行 `prepare` 后，转写、补查、取图及预览按同一份核验副本和原始身份运行。恢复前的原件在清单和文末保留原名，文末出处注明是恢复定位。接受整课时同时核对恢复清单和文件摘要，换副本后需要重新核验。缺失 MP4 索引可在工作副本上用工具试验，播放成功后还要核对实际像素和声音。参见 [untrunc 官方项目](https://github.com/anthwlock/untrunc)。
 
 ~~~powershell
-& $courseTool prepare $course --gpu-exe 'G:\本地运行包\crispasr.exe' --model 'G:\本地模型\sensevoice-small-q8_0.gguf'
-& $courseTool refine $course --gpu-exe 'G:\本地运行包\crispasr.exe' --model 'G:\本地模型\ggml-large-v3-turbo-q5_0.bin'
-& $courseTool refine $course --backend qwen3 --lesson 1 --range 120 162 --gpu-exe 'G:\本地运行包\crispasr.exe' --model 'G:\本地模型\qwen3-asr-0.6b-q4_k.gguf'
+& $courseTool prepare $course --gpu-exe '<CrispASR 程序>' --model '<SenseVoice 模型文件>'
+& $courseTool refine $course --gpu-exe '<CrispASR 程序>' --model '<Whisper 模型文件>'
+& $courseTool refine $course --backend qwen3 --lesson 1 --range 120 162 --gpu-exe '<CrispASR 程序>' --model '<Qwen3-ASR 模型文件>'
 & $courseTool read $course 1 --start 120 --end 162
-& $courseTool adopt $course 1 'G:\课程工作\采用决定.json'
+& $courseTool adopt $course 1 '<采用决定.json>'
 ~~~
 
 `refine` 保存第二识别路线及其时间窗记录。不给 `--range` 时从人声候选定位，给定范围也可复识原字幕或转写内部的争议。环境变量可设 `WORLDANALYSIS_COURSE_ASR_EXE`、`WORLDANALYSIS_COURSE_SENSEVOICE_MODEL`、`WORLDANALYSIS_COURSE_QWEN3_MODEL` 和 `WORLDANALYSIS_COURSE_WHISPER_MODEL`。
@@ -161,7 +161,7 @@ CrispASR 成功退出且明确报告某个输入音频没有语音时，对相�
 & $courseTool window $course 1 12.4 15.2 --label '展开菜单' --step 0.1
 & $courseTool window $course 1 12.4 15.2 --label '检查局部' --crop 100 150 960 740
 & $courseTool observe $course 1 60 120 --step 0.5 --crop 220 930 1650 1040 --ocr
-& $courseTool keep $course 'G:\课程工作\取图清单.json'
+& $courseTool keep $course '<取图清单.json>'
 ~~~
 
 `observe` 返回按原始呈现时间保存的 PNG 和核查记录。按实际画幅选字幕带，OCR 按采样点定位文字变化，连着出现的同一文字合并成时间区间。OCR 失败、难辨数值或术语回原像素复核。静音操作先查状态前后，正文只讲能确认的动作与结果。
@@ -271,7 +271,7 @@ PDF 的 URI 链接注释离线保存到提取结果的 `metadata.pdf_hyperlinks`
 确认用户在用的库及本课既有目录。更新旧课沿用库内同一项目目录，并将唯一的教材放在 `课件/<项目名>.md`。课程包独立保存原件和生产证据，日常库保留教材、配图和折叠区用到的原件。首次绑定用 `deliver`。遇到旧入口正文不一致，先确认同课、保存用户修改，再按提示提供经核对的旧正文 SHA-256 给 `--reviewed-previous`。脚本先核对是否有指向旧笔记的链接，归档旧正文，校验已有配图及原件，补齐缺件后再更新教材。用户要求仅本地时，核实目标库的同步情况。
 
 ~~~powershell
-& $courseTool deliver $course --vault 'G:\我的日常阅读库' --course-folder '一门课'
+& $courseTool deliver $course --vault '<日常阅读库路径>' --course-folder '一门课'
 & $courseTool verify-reader $course
 & $courseTool verify $course --require-vault
 ~~~
@@ -320,6 +320,8 @@ Word 字段中的链接可能和显示网址不同，核对两者及所在段落
 
 先按文件夹名自然升序盘点原件。`batch plan` 只读显示范围。`batch init` 将顺位、目录和日常库保存在本地清单。迁移已有批次时指定 `--legacy-directory`，脚本将历史回执与现存原件、课程包和日常入口核对。合并了经验证补料的历史课程用 `--supplemented <顺位>` 逐项检查原件与课程包的关系。用 `--defer-history` 可以先验证当前在做的项目、保留历史同版回执，再逐课复验原始文件。历史行明确标为「历史验收待复验」，完成全面复查后用 `batch finish` 更新。
 
+正式领取先读用户已明确提交的分析顺序。完成当前项目后，按新就绪资料优先和原顺位续作。`batch dispatch` 读回储存卷实际可用空间及下一就绪项目的原件字节下限。`batch finish` 登记阶段签收时附空间预检提醒。同版重试可读到更新的可用空间，重复调用继续复用原批次签收。
+
 ~~~powershell
 & $courseTool batch plan $sourceRoot --vault $vault
 & $courseTool batch init $sourceRoot --manifest $batchManifest --vault $vault
@@ -366,7 +368,7 @@ Word 字段中的链接可能和显示网址不同，核对两者及所在段落
 
 ~~~powershell
 $env:WORLDANALYSIS_PYTHON = '<项目 Python 3.12 的完整路径>'
-$env:WORLDANALYSIS_TEST_OBSIDIAN = 'D:\Software\Obsidian\Obsidian.exe'
+$env:WORLDANALYSIS_TEST_OBSIDIAN = '<Obsidian.exe 路径>'
 & $env:WORLDANALYSIS_PYTHON -X utf8 -B -m unittest discover -s tests -p 'test_course_production.py' -v
 ~~~
 
@@ -376,11 +378,39 @@ $env:WORLDANALYSIS_TEST_OBSIDIAN = 'D:\Software\Obsidian\Obsidian.exe'
 
 实际未收到原件与已收到但未覆盖的问题分别跟踪。外部延伸以实际来源明示，在同版候选中核定用途。生产队列仅接收经过实际文件、范围、身份及稳定性核对的来件。
 
+原件尚未收到、实收覆盖完成、教材可用和清理资格分别核对。可将核实的外部资料放到「延伸学习」，标明来源和用途，并纳入同版独立验收。原缺口沿同一项目保留，直到取得实物或复核范围。专用 DSH 任务使用当次确切资料、收件目录与范围回执。只在已确认计划和实际本地收件相符时进入正式队列。核对旧 DSH 确认回执时，从本机配置取得 `WORLDANALYSIS_LEGACY_DSH_SESSION_ID`。
+
 ## 教材盘点与配套准备
 
 `library_quality.py audit --output <本地运行目录内的报告.json>` 盘点已登记教材、可枚举的附件和现有引用。扫描发现的待核候选按原件实际用途判定。可用 `stage <批次状态.json> <序号> --file <原件相对路径> --output <隔离目录>` 准备配套。TXT、Markdown 使用完整原文，结构受支持的 DOCX 可生成文字和表格预览，保留原格式供查阅与编辑。
 
 工作稿用 `../配套资料/文件名` 指向待发布配套，在课程包的 `.course/work/配套资料` 下登记同版实际文件。索引可使用相对链接继续指向原件与阅读稿。正式签收核对沿链接可达的清单、内容指纹及阅读回执。具体清理前另在隔离原件的环境中验证所有必要素材的真实用法。
+
+大型 RAR 或 7z 先核档内目录，再按教学用途读取及提取文件。旧教材只修已定位问题。`library_quality.py stage-reader-copy` 可准备隔离阅读候选，合并到同一教材修订后按实际变化独立验收。
+
+## 冗余原件退场
+
+所选项目须有当前同版独立签收、保全成品与正式重开证据。正式原件快照保留。拟退场对象只接受符合条件且同字节、不同磁盘文件身份的 MP4 副本。检查原片有效原声、必要图片和附件、日常库引用及实际硬链接。收件副本须有完整验收。仍处于待补核心、音频恢复、静音或独立签收不足等状态的文件继续在位。
+
+`storage_inventory.py` 按磁盘分配量盘点收件副本和阅读库副本。低于默认 10% 可用空间、现有可用空间不足以容纳下一任务或阶段完成时，用下列入口预检。指定任务需要另行填写必要的取材和回退余量。
+
+~~~powershell
+$workspace = (Resolve-Path '<项目工作区>').Path
+$retire = Join-Path (Get-Location) '_tools/course_production/retire_originals.py'
+python -B -X utf8 $retire trigger $workspace '<选择.json>' --next-task-bytes <预计字节>
+python -B -X utf8 $retire plan $workspace '<选择.json>'
+~~~
+
+选择文件登记 `batch`、`sequence` 和 `copies`。`copies` 逐件记录原件相对路径 `file`，以及副本所在位置 `role`。收件路径是 `manual_download`，阅读库路径是 `reading_vault`。把预检返回的 `scope` 或完整预检输出保存到本地。总控把真实用户决定、准确范围摘要及候选列表保存到 `_exchange/control/decisions/`，并提供这次决定的路径。确认未闭合时保持预检状态。
+
+~~~powershell
+python -B -X utf8 $retire stage $workspace '<范围.json>' --decision '<当次授权.json>'
+python -B -X utf8 $retire status $workspace '<范围.json>'
+python -B -X utf8 $retire finalize $workspace '<范围.json>' --decision '<当次授权.json>' --obsidian-exe '<Obsidian.exe 路径>'
+python -B -X utf8 $retire handoff $workspace '<范围.json>'
+~~~
+
+暂存使用同一卷上的可恢复位置。正式移除开始前可用 `restore` 恢复原位。正式移除前后均在隔离 Obsidian 中重开同版并核保留件。回执分别登记候选分配量、无法计量的件数和卷可用字节净变化。中断且结果不明时用 `status` 核实路径与原记录。只有移除和读回闭合才生成 DSH 接力依据，云端账号、对象和删除授权仍由专用 DSH 按同版具体核对。
 
 ## 6. 引用的项目
 

@@ -90,7 +90,10 @@ def readiness(library,bridge,draft):
         r=library.by_id.get(k); bind=draft['bindings'].get(k); a=r or {}
         stale=not r or not isinstance(bind,dict) or any(a.get(p)!=bind.get(p) for p in ('source_id','source_revision','article_revision','site_id','article_id','scope'))
         why=['STALE_VERSION' if stale else 'SOURCE_SCOPE_AND_TOTAL_BYTES_UNVERIFIED','NO_FRESH_ACCOUNT_CAPACITY','NO_TRUSTED_DESKTOP_CONFIRMATION']
-        if not a.get('selectable'):why.append('NOT_ELIGIBLE_OR_PRIOR_RESERVATION')
+        owned_location=library.share_locations.get((a.get('site_id'),a.get('article_id')),())
+        has_bound_owner_share=(a.get('requestable') is True and not a.get('action_pending')
+                               and len(owned_location)==1 and 'owner_export' in owned_location[0].origins)
+        if not a.get('selectable') and not has_bound_owner_share:why.append('NOT_ELIGIBLE_OR_PRIOR_RESERVATION')
         ordered.append({'item_rank':rank,'resource_version_id':k,'article_id':a.get('article_id'),'title':a.get('title'),'reasons':why,'range_manifest_ref':None,'range_total_bytes':None})
     examples=[]
     for r in library.match({'order':'newest'},set()):

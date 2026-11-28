@@ -2,7 +2,7 @@
 
 资源库和课程表直接显示全部业务分类和平台选项，随屏宽换行。点「小红书」可查看适用项目，再选「电商与带货」看交集。平台识别使用项目标题和已保存的简介，识别实际经营、发布或推广渠道，支持一个项目对应多个平台。GitHub 根据实际仓库或明确的发布、使用和教学语境识别。内容不足的项目可在全部资料和搜索中查看。课程表按原站发布日期分组，详情可以展开其他来源及版本。
 
-主题按项目主要用途划分。课程里的案例、软件和赠品保留在原项目介绍里。独立软件、素材、门店经营和短剧制作各有对应类别。新闻简报在资源库的「新闻与行业资讯」浏览。
+两个页面共用八个业务大类。电商与带货、AI 图文视频、内容创作与自媒体、运营增长与营销、技术工具与自动化、商业经营与副业、财商与投资、综合参考。旧分类筛选地址仍可打开原范围。课程里的案例、软件和赠品随项目主要用途归类。新闻简报可在资源库的「综合参考」中浏览。
 
 业务分类从标题主题、原站简介中的明确目标和实际交付物提取证据。多个用途同时出现时，优先匹配主要教学目标或交付物，降低附赠内容和举例的影响。证据充分时可更新历史自动分类，人工确认仍按对应版本保留。公开内容只提供项目线索、课程资料、经验阅读或操作方法时，归入「综合参考」。站点说明仍可在资源库查阅。
 
@@ -34,7 +34,7 @@ cd _ingest/wangzjk-to-pan/v4-review
 
 使用项目内已有的 `../state/` 和 `data/public-details.json`。公开目录、转存草稿、分析顺序和运行记录也保存在 `data/`。本地进度读取已部署的正式投影，DSH 连接检查读取已安装的原 MCP 适配器。公开仓库提供通用代码和 [隔离测试](test/)，真实目录、会员分享地址、凭据和课程材料由各工作区在本机保管。
 
-正式投影需要本机登记来源及脚本指纹，专用 DSH 的桌面检查读取本机登记的工作区和会话。没有这些登记时，控制台显示待核实。实际转存、下载和接管沿用本机部署的执行适配器及用户授权。代码检出后可用隔离测试核对公开目录、选取、顺序和状态显示。
+正式投影需要本机登记来源及脚本指纹，专用 DSH 的桌面检查读取本机登记的工作区和会话。没有这些登记时，控制台显示待核实。首次部署资源库时，准备已获授权的本机目录和公开详情投影数据，再用以上入口启动。源码检出后的独立验证使用下节合成资料。
 
 ## 日常操作
 
@@ -51,7 +51,9 @@ cd _ingest/wangzjk-to-pan/v4-review
 .\ops.ps1 -Action next          # 使用正式入口查询下一项分析任务
 ```
 
-公开采集使用同一文件锁，控制台与脚本共享同一运行记录。会员资料通过用户已登录的浏览器核对并导入。选定资源后使用原有确认流程，DSH 按确认范围执行转存。下载沿用本地入口。提交分析顺序后，正式分析与独立验收各自沿用当前工作路径。清理前核对教材可独立阅读，以及原件身份和实际范围。
+公开采集使用同一文件锁，控制台与脚本共享同一运行记录。会员资料通过用户已登录的浏览器核对并导入。选定资源后在网页申请专用 DSH 核对资料和转存范围。待核对完成后，操作者从网页复制本机授权命令，在终端查看实际对象、容量和收件位置后确认。专用 DSH 执行并回传转存和下载结果。提交分析顺序后，正式分析与独立验收各自沿用当前工作路径。
+
+调整保存位置时，先核对目录、保存候选，再启用。采集目录切换要求检查点、公开详情和分类索引可读取。重启资源库让新进程使用该位置。回退后也要重启。已登记的正式收件和教材路径按原批次与验收范围办理迁移。
 
 分析 Agent 完成验收、发布和批次登记后，网站会读回同一台账。项目改名或出现多版时，具名分析 Agent 可以在正式接力里补齐站点、文章和当前资料版本的对应依据。核对单篇状态可执行以下命令。
 
@@ -70,7 +72,7 @@ cd _ingest/wangzjk-to-pan/v4-review
 ```powershell
 .\ops.ps1 -Action catalog -CatalogArguments @('inventory')
 .\ops.ps1 -Action catalog -CatalogArguments @('status')
-.\ops.ps1 -Action catalog -CatalogArguments @('audit-topics', '--category', 'news', '--sample', '8')
+.\ops.ps1 -Action catalog -CatalogArguments @('audit-topics', '--category', 'biz_reference', '--sample', '8')
 python -X utf8 -B catalog_tasks.py export --limit 20 --output data/catalog-tasks/next.jsonl
 python -X utf8 -B catalog_tasks.py import data/catalog-tasks/next-results.jsonl
 python -X utf8 -B catalog_tasks.py resume --output data/catalog-tasks/unfinished.jsonl
@@ -100,6 +102,8 @@ python -X utf8 -B collect_public.py --pages 0 --details 300 --detail-list data/c
 ```powershell
 python -B -m unittest discover -s test -p test_course_calendar.py
 python -B -m unittest discover -s test -p test_pipeline_control.py
+python -B -m unittest discover -s test -p test_workspace_paths.py
+python -B -m unittest discover -s test -p test_transfer_requests.py
 ```
 
 控制台的「检查全链路」读回目录、百度入口、转存复核、本地进度、分析顺序和清理条件。实际转存和删除需要相应项目范围、当前现场证据及用户确认。

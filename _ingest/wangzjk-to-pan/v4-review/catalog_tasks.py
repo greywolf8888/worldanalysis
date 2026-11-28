@@ -10,7 +10,7 @@ from catalog_platforms import PLATFORMS
 from catalog_relations import candidate_pairs, article_identity
 from pipeline_control import RunStore
 from catalog_semantics import CatalogStore, MAX_TASKS, atomic_jsonl, encode, parse_jsonl, relationship_input, usable
-from catalog_topics import CATEGORIES, NO_TOPIC
+from catalog_topics import BUSINESS_CATEGORIES, CATEGORIES, NO_TOPIC, browse_topic_matches
 
 
 def catalog_path(value):
@@ -61,7 +61,7 @@ def parser():
     commands.add_parser('inventory')
     commands.add_parser('status')
     audit=commands.add_parser('audit-topics',help='核对资源库分类计数和抽样')
-    audit.add_argument('--category', choices=[*CATEGORIES,NO_TOPIC])
+    audit.add_argument('--category', choices=[*BUSINESS_CATEGORIES, *CATEGORIES, NO_TOPIC])
     audit.add_argument('--sample',type=int,default=0)
     audit.add_argument('--queue-output',type=catalog_path,help='导出待补原站正文的文章号')
     export=commands.add_parser('export')
@@ -105,6 +105,8 @@ def audit_topics(library, category, sample):
     for row in raw:
         label, subtopics = CATEGORIES.get(row['category'], ('', ()))
         if (row['category'] and not label or label != row['category_label']
+                or row['business_category'] not in ('', *BUSINESS_CATEGORIES)
+                or row['business_category_label'] != BUSINESS_CATEGORIES.get(row['business_category'], '')
                 or row['subcategory'] and row['subcategory'] not in subtopics
                 or row['secondary_category'] and row['secondary_category'] not in CATEGORIES
                 or any(PLATFORMS.get(p['id']) != p['label'] for p in row['platforms'])):
@@ -121,19 +123,19 @@ def audit_topics(library, category, sample):
     for platform in platforms:
         if len(library.match({'platform': platform['id']}, set())) != platform['count']:
             raise ValueError('平台计数与实际筛选结果不一致')
-    chosen = [row for row in raw if category is None or (row['category'] or NO_TOPIC) == category
-              or row['secondary_category'] == category]
+    chosen = [row for row in raw if category is None or (category == NO_TOPIC and not row['business_category'])
+              or browse_topic_matches(row, category, '')]
     chosen.sort(key=lambda row:(row['published_at'],row['article_id']))
     count = min(sample,len(chosen))
     picked = [chosen[position * (len(chosen)-1) // max(1,count-1)] for position in range(count)]
     return {'sources':len(raw),'projects':library.meta['totals']['projects'],
-            'primary':dict(Counter(row['category'] or NO_TOPIC for row in raw)),
-            'without_topic':sum(not row['category'] for row in raw),
-            'without_subcategory':sum(bool(row['category']) and not row['subcategory'] for row in raw),
+            'primary':dict(Counter(row['business_category'] or NO_TOPIC for row in raw)),
+            'without_topic':sum(not row['business_category'] for row in raw),
             'introduction_coverage':dict(Counter(row['coverage'] for row in raw)),
             'categories':facets,'platforms':platforms,
             'sample':[{'site':row['site_id'],'article':row['article_id'],'title':row['title'],
-                       'category':row['category_label'],'subcategory':row['subcategory']} for row in picked]}
+                       'category':row['business_category_label'],'previous_category':row['category_label'],
+                       'subcategory':row['subcategory']} for row in picked]}
 
 
 def main():

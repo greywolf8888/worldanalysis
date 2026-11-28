@@ -102,10 +102,12 @@ def cleanup_status(workspace, package, state, vault, entry, approval):
     current = installed_derivative(package, vault, entry, state["sha256"], sha(entry))
     if not current:
         return {"state": "no_verified_preservation", "candidate": None}
+    if current["status"] != "独立成品已重开":
+        return {"state": "pending_formal_reader", "candidate": None}
     try:
         scope = cleanup_plan(package)
-    except ValueError:
-        return {"state": "pending_formal_reader", "candidate": None}
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        return {"state": "cleanup_preflight_blocked", "candidate": None, "detail": str(error).splitlines()[0]}
     phase = current["source_storage"]
     selected = scope["candidate"]
     result = {"candidate": selected, "scope_sha256": scope["scope_sha256"], "observed": phase}
@@ -216,19 +218,21 @@ def inventory(workspace, package, *, focus=(), limit=12, maximum_hash_bytes=512 
         observed = group_observations(roots, names, size)
         group_state, used, verified = classify_group(fingerprint, size, observed, remaining)
         remaining -= used
-        candidates = []
+        candidates = {"manual_download": 0, "reading_vault": 0}
         retained_identity = {physical(files[0]) for files in verified
                              if any(file["role"] == "package_original" for file in files)}
         if retained_identity and group_state == "exact_duplicate":
             for files in verified:
                 first = files[0]
-                if (len(files) == 1 and first["role"] == "reading_vault" and first["hardlinks"] == 1
+                if (len(files) == 1 and first["role"] in candidates and first["hardlinks"] == 1
                         and physical(first) not in retained_identity and first["allocated_bytes"] is not None):
-                    candidates.append(first["allocated_bytes"])
+                    candidates[first["role"]] += first["allocated_bytes"]
         items.append({"sha256_in_intake": fingerprint, "file_bytes": size, "relative_names": names,
                       "state": group_state, "locations": observed, "verified_physical_copies": len(verified),
-                      "same_content_reading_vault_allocated_bytes": sum(candidates)})
-    items.sort(key=lambda group: (-group["same_content_reading_vault_allocated_bytes"],
+                      "same_content_reading_vault_allocated_bytes": candidates["reading_vault"],
+                      "same_content_manual_download_allocated_bytes": candidates["manual_download"]})
+    items.sort(key=lambda group: (-group["same_content_reading_vault_allocated_bytes"]
+                                  - group["same_content_manual_download_allocated_bytes"],
                                   group["state"] != "exact_duplicate", -group["file_bytes"]))
     if sha(intake_path) != intake_digest:
         raise ValueError("盘点期间课程台账发生变化")
@@ -238,6 +242,8 @@ def inventory(workspace, package, *, focus=(), limit=12, maximum_hash_bytes=512 
             "hash_bytes_read_at_most": maximum_hash_bytes - remaining,
             "possible_duplicate_reading_vault_allocated_bytes": sum(
                 row["same_content_reading_vault_allocated_bytes"] for row in items),
+            "possible_duplicate_manual_download_allocated_bytes": sum(
+                row["same_content_manual_download_allocated_bytes"] for row in items),
             "actual_volume_released_bytes": None, "cleanup_approval": cleanup, "items": items}
 
 

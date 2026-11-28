@@ -1,13 +1,14 @@
 """Read current path bindings and version the destinations of future work."""
 
 from argparse import ArgumentParser
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import os
 from pathlib import Path
 from shutil import disk_usage
+import sqlite3
 import stat
 import sys
 from tempfile import NamedTemporaryFile
@@ -69,6 +70,8 @@ FORMAL_FIXED_ROLES = {
     "delivery_vault": "正式批次仍使用已签收的教材位置，请先核对并登记迁移范围。",
 }
 CATALOG_REQUIRED_FILES = ("codex-public.json", "public-details.json", "pipeline-runs.sqlite3")
+CATALOG_CHECKPOINT_SCHEMA = "wa-v4-codex-public-source.v1"
+CATALOG_DETAILS_SCHEMA = "wangzjk-v4-public-article-projection.v1"
 
 
 def digest(value):
@@ -128,10 +131,10 @@ def observed(workspace, value, kind):
         return path, "unverified"
 
 
-def read_object(path):
+def read_object(path, limit=READ_LIMIT):
     with path.open("rb") as stream:
-        raw = stream.read(READ_LIMIT + 1)
-    if len(raw) > READ_LIMIT:
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
         raise ValueError("正式登记表超出读取范围")
     value = json.loads(raw.decode("utf-8-sig"))
     if not isinstance(value, dict):
@@ -143,6 +146,20 @@ def overlaps(left, right):
     return left.is_relative_to(right) or right.is_relative_to(left)
 
 
+def configured_cloud_root(config):
+    value = config.get("cloud_destination", CLOUD_DESTINATION)
+    if (not isinstance(value, str) or not value.startswith("/") or len(value) > 768
+            or any(ord(char) < 32 or char in "%\\:" for char in value)
+            or any(not part or part in (".", "..") or part != part.strip() or part.endswith(".")
+                   for part in value[1:].split("/"))):
+        raise ValueError("网盘收件目录需填写完整且唯一的实际路径")
+    return value
+
+
+def cloud_destination(workspace=BASE):
+    return configured_cloud_root(read_path_config(Path(workspace).absolute()))
+
+
 def read_path_config(workspace):
     file = workspace / PATH_CONFIG
     if inspect_path(file, "file")[0] == "missing":
@@ -151,6 +168,7 @@ def read_path_config(workspace):
     if (config.get("schema_version") != 1 or config.get("workspace") != workspace.as_posix()
             or not isinstance(config.get("versions"), dict) or not isinstance(config.get("switches"), list)):
         raise ValueError("保存位置版本记录无法核实")
+    configured_cloud_root(config)
     versions = config["versions"]
     known = {LEGACY_VERSION}
     for version_id, version in versions.items():
@@ -392,6 +410,30 @@ def collection_files_ready(workspace, directory):
     return True
 
 
+def verify_catalog_candidate(workspace, directory):
+    """Reject partially copied catalogs before persisting a version switch."""
+    directory = normalize_path(workspace, directory)
+    checkpoint, details, database = (directory / filename for filename in CATALOG_REQUIRED_FILES)
+    if not collection_files_ready(workspace, directory):
+        raise ValueError("请先准备采集目录、简介和分类索引，再启用采集位置。")
+    try:
+        listing = read_object(checkpoint, 64 * 1024 * 1024)
+        public_details = read_object(details, 24 * 1024 * 1024)
+        collection = listing.get("collection")
+        site = listing.get("site")
+        if (listing.get("schema") != CATALOG_CHECKPOINT_SCHEMA or site != "wangzjk.com"
+                or not all(isinstance(listing.get(key), dict) for key in ("articles", "details", "history"))
+                or not isinstance(collection, dict) or collection.get("read_only") is not True
+                or public_details.get("schema") != CATALOG_DETAILS_SCHEMA or public_details.get("site_id") != site
+                or not isinstance(public_details.get("articles"), dict)):
+            raise ValueError("采集目录与简介的数据格式不匹配")
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=3)) as indexes:
+            if indexes.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
+                raise ValueError("分类索引读回失败")
+    except (OSError, ValueError, RecursionError, sqlite3.Error) as error:
+        raise ValueError("拟用采集目录中的采集记录、简介或分类索引无法完整读取，请检查后再切换。") from error
+
+
 def formal_path_blocks(workspace, version):
     if workspace != BASE:
         return {}
@@ -431,7 +473,7 @@ def _snapshot(workspace, config):
     details = {
         "schema_version": 1, "workspace": workspace.as_posix(), "paths": rows,
         "categories": categories, "registry_state": registry_state,
-        "cloud_destination": {"path": CLOUD_DESTINATION, "state": "configured"}, "activation": "versioned",
+        "cloud_destination": {"path": configured_cloud_root(config), "state": "configured"}, "activation": "versioned",
         "proposal_roles": [{"key": key, "label": label} for key, label in PROPOSAL_ROLES.items()],
     }
     return with_path_config(workspace, details, config)
@@ -566,6 +608,8 @@ def _switch_version(workspace, revision, action, version_id=None):
             rows = validated_paths(version["overrides"], workspace, current, config, version["minimum_free_bytes"])
             if any(row["state"] != "observed" for row in rows):
                 raise ValueError("请先准备并核对全部拟用目录，再切换保存位置")
+            if (catalog_data := version["overrides"].get("catalog_data")) and workspace == BASE:
+                verify_catalog_candidate(workspace, catalog_data)
         elif current["registry_state"] != "observed" or any(row["state"] != "observed" for row in current["categories"]):
             raise ValueError("原正式目录尚未核实，暂不能恢复")
         config["switches"].append({"action": action, "from_version_id": active, "version_id": version_id,

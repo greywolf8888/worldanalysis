@@ -31,12 +31,16 @@ const catalogFacets = (() => {
     const categories = (meta.categories || []).filter(item => item.label && item.id !== 'unsorted');
     const platforms = meta.platforms || [];
     const aliases = meta.category_aliases || {};
-    const category = aliases[values.category] || values.category;
+    const category = Object.hasOwn(aliases, values.category) ? aliases[values.category] : values.category;
     const choice = categories.find(item => item.id === category);
+    const legacy = meta.legacy_categories || {};
+    const historical = Object.hasOwn(legacy, category);
+    const supportsSubcategory = choice?.subcategories?.some(item => item.id === values.subcategory)
+      || (historical && legacy[category].includes(values.subcategory));
     return {
       ...values,
-      category: choice?.id || '',
-      subcategory: choice?.subcategories?.some(item => item.id === values.subcategory) ? values.subcategory : '',
+      category: choice?.id || (historical ? category : ''),
+      subcategory: supportsSubcategory ? values.subcategory : '',
       platform: platforms.some(item => item.id === values.platform) ? values.platform : '',
     };
   }

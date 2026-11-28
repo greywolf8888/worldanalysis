@@ -1,6 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 import json
 from pathlib import Path
+import sqlite3
 import stat
 from tempfile import TemporaryDirectory
 from threading import Barrier
@@ -9,7 +11,8 @@ import unittest
 from unittest.mock import patch
 
 from workspace_paths import (
-    INPUT, LEGACY_VERSION, PATH_CONFIG, REGISTRY, activate_version, job_target, path_bindings,
+    CATALOG_CHECKPOINT_SCHEMA, CATALOG_DETAILS_SCHEMA, CLOUD_DESTINATION, INPUT, LEGACY_VERSION,
+    PATH_CONFIG, REGISTRY, activate_version, cloud_destination, job_target, path_bindings,
     preflight, reader_roots, rollback_version, save_version, snapshot,
 )
 
@@ -148,6 +151,50 @@ class WorkspacePathsTest(unittest.TestCase):
             (target / "pipeline-runs.sqlite3").write_bytes(b"")
             with self.assertRaisesRegex(ValueError, "请先准备采集目录"):
                 activate_version(version, workspace=self.workspace, revision=saved["revision"])
+
+    def test_catalog_activation_rejects_header_only_data_and_uses_readable_copy(self):
+        target = self.workspace / "候选采集目录"
+        target.mkdir()
+        checkpoint = target / "codex-public.json"
+        details = target / "public-details.json"
+        database = target / "pipeline-runs.sqlite3"
+        checkpoint.write_text("{", encoding="utf-8")
+        details.write_text(json.dumps({"schema": CATALOG_DETAILS_SCHEMA, "site_id": "wangzjk.com",
+                                       "articles": {}}), encoding="utf-8")
+        with closing(sqlite3.connect(database)) as db, db:
+            db.execute("CREATE TABLE fixture (id INTEGER PRIMARY KEY)")
+        with patch("workspace_paths.BASE", self.workspace):
+            proposal = {"catalog_data": str(target)}
+            preview = self.verify(proposal)
+            saved = save_version(proposal, workspace=self.workspace, revision=preview["revision"],
+                                 proposal_id=preview["proposal_id"])
+            version = saved["saved_version_id"]
+            config = self.workspace / PATH_CONFIG
+            before = config.read_bytes()
+            with self.assertRaisesRegex(ValueError, "无法完整读取"):
+                activate_version(version, workspace=self.workspace, revision=saved["revision"])
+            self.assertEqual(config.read_bytes(), before)
+            checkpoint.write_text(json.dumps({"schema": CATALOG_CHECKPOINT_SCHEMA, "site": "wangzjk.com",
+                                               "articles": {}, "details": {}, "history": {},
+                                               "collection": {"read_only": True}}), encoding="utf-8")
+            active = activate_version(version, workspace=self.workspace, revision=saved["revision"])
+            self.assertEqual(path_bindings(workspace=self.workspace)["paths"]["catalog_data"], target.as_posix())
+            self.assertEqual(rollback_version(workspace=self.workspace, revision=active["revision"])
+                             ["path_config"]["active_version_id"], LEGACY_VERSION)
+
+    def test_new_cloud_requests_read_one_configured_root(self):
+        self.assertEqual(cloud_destination(self.workspace), CLOUD_DESTINATION)
+        path = self.workspace / PATH_CONFIG
+        path.parent.mkdir(parents=True, exist_ok=True)
+        candidate = {"schema_version": 1, "workspace": self.workspace.as_posix(), "versions": {},
+                     "switches": [], "cloud_destination": "/apps/Worldanalysis/统一收件"}
+        path.write_text(json.dumps(candidate), encoding="utf-8")
+        self.assertEqual(cloud_destination(self.workspace), candidate["cloud_destination"])
+        self.assertEqual(snapshot(self.workspace)["cloud_destination"]["path"], candidate["cloud_destination"])
+        for unsafe in ("/", "/apps//收件", "/apps/../收件", "/apps/%2e%2e/收件", "/apps/收件/"):
+            with self.subTest(unsafe=unsafe), self.assertRaisesRegex(ValueError, "唯一的实际路径"):
+                path.write_text(json.dumps({**candidate, "cloud_destination": unsafe}), encoding="utf-8")
+                cloud_destination(self.workspace)
 
     def test_competing_save_and_failed_replace_preserve_consistent_versions(self):
         revision = snapshot(self.workspace)["revision"]

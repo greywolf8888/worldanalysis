@@ -5,7 +5,17 @@ from unicodedata import normalize
 from catalog_topic_refinement import CONTEXT_TOPICS, REFINED_TOPICS, reference_topic
 
 
-TOPIC_REVISION = 'project-topics-6'
+TOPIC_REVISION = 'project-topics-7'
+BUSINESS_CATEGORIES = {
+    'biz_commerce': '电商与带货',
+    'biz_ai_media': 'AI 图文视频',
+    'biz_content': '内容创作与自媒体',
+    'biz_growth': '运营增长与营销',
+    'biz_technology': '技术工具与自动化',
+    'biz_business': '商业经营与副业',
+    'biz_finance': '财商与投资',
+    'biz_reference': '综合参考',
+}
 CATEGORIES = {
     'commerce': ('电商与带货', ('商品经营', '店铺运营', '虚拟商品', '联盟带货', '本地团购')),
     'crossborder': ('跨境电商与外贸', ('跨境店铺', '海外带货', '外贸获客')),
@@ -31,6 +41,46 @@ CATEGORIES = {
 # These fields remain valid in old results, but have no reader-facing facet.
 NO_TOPIC = 'unsorted'
 CATEGORY_ALIASES = {'ai_media': 'media', 'tools': 'software', NO_TOPIC: ''}
+
+_LEGACY_BUSINESS = {
+    'commerce': 'biz_commerce', 'crossborder': 'biz_commerce',
+    'local_business': 'biz_business', 'growth': 'biz_growth',
+    'media': 'biz_content', 'content': 'biz_content', 'screen': 'biz_content', 'design': 'biz_content',
+    'automation': 'biz_technology', 'technical': 'biz_technology', 'office': 'biz_technology', 'software': 'biz_technology',
+    'business': 'biz_business', 'services': 'biz_business', 'gaming': 'biz_business', 'finance': 'biz_finance',
+    'assets': 'biz_reference', 'news': 'biz_reference', 'life': 'biz_reference', 'reference': 'biz_reference',
+}
+_CONTENT_TOPICS = {'media', 'content', 'screen', 'design'}
+_GENERATOR = r'(?:(?<![a-z])(?:ai|aigc)(?![a-z])|人工智能|生成式|文生图|图生视频|文生视频)'
+_ARTIFACT = r'(?:图文|贴图|图像|图片|文案|网文|小说|视频|短片|短剧|漫剧|动画|绘本|配音|分镜|生图|科普|表情包|写真|数字人|插画|漫画|壁纸|音乐|歌曲|写作|海报|内容创作)'
+_GENERATIVE_CREATION = re.compile(rf'{_GENERATOR}[^。；;，,!?！？\n]{{0,8}}{_ARTIFACT}', re.I)
+_PRIMARY_GENERATION = re.compile(
+    rf'(?:用|使用|通过|利用|基于|教你用)\s*{_GENERATOR}[^。；;，,!?！？\n]{{0,18}}'
+    rf'(?:制作|创作|生成|写作|产出|完成)[^。；;，,!?！？\n]{{0,12}}{_ARTIFACT}', re.I,
+)
+_AI_AUXILIARY = re.compile(rf'(?:{_GENERATOR}\s*(?:只用于|辅助|协助|配合)|(?:辅以|可用|附赠|选用)\s*{_GENERATOR})', re.I)
+_TOOL_SCOPE = re.compile(r'开源|软件安装|客户端|工具合集|工具大全|插件|工具对比|全功能|工作流搭建|智能体搭建|配置教程|自动化', re.I)
+_GROWTH_GOAL = re.compile(r'获客|引流|投流|涨粉|品牌营销|私域转化|拉新|账号运营|直播间运营|起号')
+_CREATIVE_LESSON = re.compile(r'(?:拍摄|剪辑|配音|绘画|写作|视频制作|图文创作).{0,6}(?:实战|课程|教学|全流程|训练|教程)')
+_SERVICE_GOAL = re.compile(r'接单|外包|服务商|客户交付|副业项目')
+
+
+def valid_browse_topic(category, subcategory):
+    category = CATEGORY_ALIASES.get(category, category)
+    if category in BUSINESS_CATEGORIES:
+        return not subcategory
+    return (not category and not subcategory
+            or category in CATEGORIES and (not subcategory or subcategory in CATEGORIES[category][1]))
+
+
+def browse_topic_matches(row, category, subcategory):
+    if not category:
+        return not subcategory
+    if category in BUSINESS_CATEGORIES:
+        return row.get('business_category') == category
+    if subcategory:
+        return row['category'] == category and row.get('subcategory') == subcategory
+    return category in (row['category'], row.get('secondary_category'))
 
 _RULES = (
     ('finance','投资研究',10,r'量化交[易割]|EA量化|智投|证券投资|股票投资|股市|期货|基金定投|投资组合|价值投资|证券分析|加密货币|虚拟币交易'),
@@ -207,6 +257,36 @@ def purpose_text(parts):
         if not ancillary and not _BODY_ASIDE.match(heading):
             kept.append(_TITLE_NOISE.sub('', _TITLE_EXTRAS.sub('', part)))
     return '\n'.join(kept)
+
+
+def business_topic(category, subcategory, title, paragraphs=(), excerpt=''):
+    """Project one business purpose from the current source evidence."""
+    base = _LEGACY_BUSINESS.get(category, '')
+    if category == 'gaming':
+        return {'游戏开发': 'biz_technology', '游戏推广': 'biz_growth',
+                '游戏资料': 'biz_reference'}.get(subcategory, base)
+    if category == 'local_business' and subcategory == '团购与外卖':
+        return 'biz_commerce'
+    if category not in _CONTENT_TOPICS | {'local_business', 'automation', 'services'}:
+        return base
+
+    headline = _TITLE_NOISE.sub('', _TITLE_EXTRAS.sub('', title_text(title)))
+    if category == 'services':
+        lead = _LEAD_END.split(headline, maxsplit=1)[0]
+        if not _CREATIVE_LESSON.search(lead) or _SERVICE_GOAL.search(lead):
+            return base
+        base = 'biz_content'
+    if category == 'local_business' or subcategory in {'直播运营', '发行与推广'}:
+        return 'biz_growth' if _GROWTH_GOAL.search(headline) else base
+    intro = purpose_text(introduction_text(title, paragraphs, excerpt))
+    goals = (_GOAL_EXAMPLES.sub('', part) for part in re.split('[。！？\n]', intro)
+             if _TEACHING_DELIVERABLE.search(part[:52]))
+    if category == 'automation' and _TOOL_SCOPE.search(headline):
+        return base
+    if ((_GENERATIVE_CREATION.search(headline) and not _AI_AUXILIARY.search(headline))
+            or any(_PRIMARY_GENERATION.search(goal) and not _AI_AUXILIARY.search(goal) for goal in goals)):
+        return 'biz_ai_media'
+    return base
 
 
 def topic_scores(title, head, intro, goal_text):

@@ -206,8 +206,13 @@ class CourseBatchTest(unittest.TestCase):
         self.assertEqual(row["status"], batch.COMPLETE)
         self.assertEqual(row["publication"]["entry"], str(target))
         self.assertEqual(row["publication"]["sha256"], sha(target))
+        pressure = row.pop("cleanup_pressure")
+        self.assertTrue(pressure["read_only"])
+        self.assertTrue(pressure["stage_complete"])
         saved = self.state.read_bytes()
-        self.assertEqual(self.command("finish", self.state, 1, package), row)
+        retried = self.command("finish", self.state, 1, package)
+        self.assertTrue(retried.pop("cleanup_pressure")["read_only"])
+        self.assertEqual(retried, row)
         self.assertEqual(self.state.read_bytes(), saved)
 
     def test_cannot_finish_into_wrong_vault_or_different_course_folder(self):

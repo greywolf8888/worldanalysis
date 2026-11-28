@@ -1,8 +1,10 @@
 """Install an independently reviewed portable edition at its existing reader entry."""
 import argparse
+from contextlib import contextmanager
 from datetime import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -348,7 +350,8 @@ def approved_decision(workspace, decision, scope):
     return event, hashlib.sha256(raw).hexdigest()
 
 
-def remove_exact_windows_file(candidate):
+@contextmanager
+def locked_windows_candidate(candidate):
     """Pin identity with a Windows handle that excludes writes and renames."""
     if os.name != "nt":
         raise ValueError("此清理执行器只支持 Windows 文件身份")
@@ -383,9 +386,32 @@ def remove_exact_windows_file(candidate):
         expected = tuple(candidate[key] for key in ("volume_id", "file_id", "hardlinks", "bytes"))
         if identity != expected or hashlib.file_digest(stream, "sha256").hexdigest() != candidate["sha256"]:
             raise ValueError("锁定后的文件身份或指纹与已授权对象不符")
+        yield kernel, handle
+
+
+def remove_exact_windows_file(candidate):
+    import ctypes
+
+    with locked_windows_candidate(candidate) as (kernel, handle):
         delete_file = ctypes.c_ubyte(1)
-        file_disposition_info = 4
-        if not set_info(handle, file_disposition_info, ctypes.byref(delete_file), ctypes.sizeof(delete_file)):
+        if not kernel.SetFileInformationByHandle(handle, 4, ctypes.byref(delete_file), ctypes.sizeof(delete_file)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
+def move_exact_windows_file(candidate, destination):
+    import ctypes
+    from ctypes import wintypes
+
+    target = str(destination).encode("utf-16-le")
+
+    class RenameInfo(ctypes.Structure):
+        _fields_ = [("flags", wintypes.DWORD), ("root", wintypes.HANDLE),
+                    ("length", wintypes.DWORD), ("name", ctypes.c_char * (len(target) + 2))]
+
+    rename = RenameInfo(length=len(target))
+    ctypes.memmove(ctypes.addressof(rename) + RenameInfo.name.offset, target, len(target))
+    with locked_windows_candidate(candidate) as (kernel, handle):
+        if not kernel.SetFileInformationByHandle(handle, 3, ctypes.byref(rename), ctypes.sizeof(rename)):
             raise ctypes.WinError(ctypes.get_last_error())
 
 

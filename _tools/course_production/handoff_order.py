@@ -17,7 +17,9 @@ MAX_RECORD_BYTES = 32 * 1024 * 1024
 DSH_SESSION = re.compile(r"session-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
 CONTROL_DECISIONS = ("_exchange", "control", "decisions")
 CONTROL_TASKS = ("_exchange", "control", "tasks")
+CONTROL_REQUESTS = ("_exchange", "control", "transfer-requests")
 DSH_AUTHORIZATIONS = ("_exchange", "dsh", "authorizations")
+DSH_RECEIPTS = ("_exchange", "dsh", "receipts")
 COMMON = {
     "schema_version", "record_type", "record_id", "producer", "revision",
     "observed_at", "state", "execution_allowed",
@@ -204,13 +206,17 @@ def validate_plan(plan):
     items = plan["items"]
     require(isinstance(items, list) and items, "确认计划没有资料")
     for item in items:
-        fields(item, ITEM_FIELDS, {"previous_cloud_root_id", "article_revision"})
+        fields(item, ITEM_FIELDS, {"previous_cloud_root_id", "article_revision", "receive_target"})
         for key in ITEM_FIELDS - {"source_revision", "range_manifest_ref", "item_rank"}:
             identifier(item[key])
         if "previous_cloud_root_id" in item:
             identifier(item["previous_cloud_root_id"])
         if "article_revision" in item:
             identity_revision(item["article_revision"])
+        if "receive_target" in item:
+            require(isinstance(item["receive_target"], str) and item["receive_target"].startswith("/"),
+                    "确认收件目录无效")
+            relative(item["receive_target"][1:])
         identity_revision(item["source_revision"])
         positive(item["item_rank"])
         reference(item["range_manifest_ref"])
@@ -221,6 +227,49 @@ def validate_plan(plan):
     require(plan["selection_sha256"] == selection_sha(items), "冻结选择范围的摘要不一致")
     if "confirmation_task_ref" in plan:
         protocol_reference(plan["confirmation_task_ref"], CONTROL_TASKS)
+
+
+def dedicated_control_proof(workspace, task, decision, plan):
+    inputs = task["inputs"]
+    request_ref = inputs.get("transfer_request_ref")
+    receipt_ref = inputs.get("scope_receipt_ref")
+    session = task.get("target_session_id")
+    legacy_session = os.environ.get("WORLDANALYSIS_LEGACY_DSH_SESSION_ID")
+    require(task.get("target_role") == "dedicated_dsh" and isinstance(session, str)
+            and DSH_SESSION.fullmatch(session) and session != legacy_session and session == decision.get("target_session_id")
+            and decision.get("user_message_reference") == "local_operator_console:" + task["task_id"]
+            and request_ref == decision.get("transfer_request_ref")
+            and receipt_ref == decision.get("scope_receipt_ref"),
+            "专用 DSH 与本机当次授权未正确绑定")
+    protocol_reference(request_ref, CONTROL_REQUESTS)
+    protocol_reference(receipt_ref, DSH_RECEIPTS)
+    request = read_json(workspace_file(workspace, request_ref["path"]), request_ref)
+    receipt = read_json(workspace_file(workspace, receipt_ref["path"]), receipt_ref)
+    require(isinstance(request, dict) and isinstance(receipt, dict), "专用 DSH 当次申请或回执格式无效")
+    scope_id = task["task_id"] + "-scope"
+    scope_path = "/".join((*CONTROL_TASKS, scope_id + ".json"))
+    scope_ref = {"path": scope_path, "sha256": receipt.get("task_sha256")}
+    protocol_reference(scope_ref, CONTROL_TASKS)
+    scope = read_json(workspace_file(workspace, scope_path), scope_ref)
+    result = receipt.get("result")
+    require(isinstance(scope, dict) and isinstance(result, dict), "专用 DSH 当次范围任务或结果格式无效")
+    scope_inputs = scope.get("inputs")
+    proof = result.get("dedicated_transfer_readback")
+    require(isinstance(scope_inputs, dict) and isinstance(proof, dict)
+            and scope.get("target_role") == "dedicated_dsh" and scope.get("execution_allowed") is False
+            and scope.get("authorization_ref") is None and scope.get("task_id") == scope_id
+            and scope.get("target_session_id", session) == session and scope_inputs.get("transfer_request_ref") == request_ref
+            and receipt.get("record_type") == "dsh_receipt" and receipt.get("producer") == "dsh"
+            and receipt.get("execution_allowed") is False and receipt.get("session_id") == session
+            and receipt.get("task_id") == scope_id and receipt.get("state") == "ready_for_review"
+            and request.get("record_type") == "transfer_request" and request.get("record_id") == task["task_id"]
+            and request.get("execution_allowed") is False and proof.get("transfer_request_ref") == request_ref
+            and proof.get("range_manifests") == [item["range_manifest_ref"] for item in plan["items"]],
+            "专用 DSH 当次范围回执不一致")
+    target = request.get("receive_target")
+    require(isinstance(target, str) and target == inputs.get("receive_target") == decision.get("receive_target")
+            == proof.get("target") and all(item.get("receive_target") == target for item in plan["items"]),
+            "专用 DSH 当次收件目录不一致")
 
 
 def control_proof(workspace, plan, confirmation):
@@ -235,11 +284,9 @@ def control_proof(workspace, plan, confirmation):
     task = read_json(workspace_file(workspace, task_ref["path"]), task_ref)
     decision = read_json(workspace_file(workspace, decision_ref["path"]), decision_ref)
     task_id = PurePosixPath(task_ref["path"]).stem
-    expected_session = legacy_dsh_session()
     require(isinstance(task, dict) and task.get("schema_version") == 1
             and task.get("record_type") == "control_task" and task.get("producer") == "codex-control"
             and task.get("state") == "ready" and task.get("plan_version") == "V4"
-            and task.get("target_session_id") == expected_session
             and task.get("task_id") == task_id and task.get("demo", False) is False
             and task.get("execution_allowed", True) is True
             and task.get("authorization_ref") == decision_ref
@@ -253,6 +300,12 @@ def control_proof(workspace, plan, confirmation):
             and isinstance(decision.get("user_message_reference"), str)
             and 1 <= len(decision["user_message_reference"].strip()) <= 250,
             "原始用户决定没有授权当前任务")
+    if task["inputs"].get("kind") == "confirmed_transfer":
+        dedicated_control_proof(workspace, task, decision, plan)
+    else:
+        require(task.get("target_session_id") == legacy_dsh_session()
+                and all("receive_target" not in item for item in plan["items"]),
+                "旧执行任务与历史 DSH 绑定不一致")
     keys = ("batch_id", "confirmation_seq", "confirmed_at", "order_mode", "order_revision",
             "selection_sha256", "ordered_items_sha256", "batch_rank", "global_order_locked")
     require(all(confirmation.get(key) == decision.get(key) for key in keys)
@@ -355,6 +408,7 @@ def validate_dsh_range(item, manifest):
     destination = manifest["destination"]
     require(isinstance(destination, str) and destination.startswith("/"), "DSH 目标路径无效")
     relative(destination[1:])
+    require("receive_target" not in item or destination == item["receive_target"], "DSH 范围与确认收件目录不一致")
     roots = manifest["roots"]
     require(isinstance(roots, list) and 1 <= len(roots) <= 20
             and type(manifest.get("root_count")) is int and manifest["root_count"] == len(roots),
