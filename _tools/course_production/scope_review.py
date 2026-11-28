@@ -3,7 +3,7 @@
 from pathlib import Path
 import re
 
-from project import local_child, read
+from project import ReceivedCoverageError, local_child, read
 from source_coverage import (CLAIMS_VERSION, SCOPE_BLOCK, SCOPE_END, SCOPE_START, citation_syntax, cite_tokens,
                              claim_blocks, document_locator_valid, intersects, substantive_note,
                              unit_matches, video_covers)
@@ -88,8 +88,7 @@ def reader_source(source):
     return md_text(source.replace(" · ", "；定位："))
 
 
-def scope_summary(declaration):
-    validate_declaration(declaration)
+def legacy_scope_summary(declaration):
     status = declaration["scope_status"]
     lines = [SCOPE_START, f"> **验收范围：{status}**"]
     if declaration["scope_gaps"]:
@@ -109,6 +108,17 @@ def scope_summary(declaration):
     return "\n".join(lines)
 
 
+def scope_summary(declaration):
+    validate_declaration(declaration)
+    lines = [SCOPE_START]
+    if declaration["scope_gaps"]:
+        lines.append("> 可先学习正文中已收录的部分。以下资料目前暂缺：")
+        for gap in declaration["scope_gaps"]:
+            lines.append(f"> - **{md_text(gap['item'])}**。{md_text(gap['impact'])}")
+    lines.append(SCOPE_END)
+    return "\n".join(lines)
+
+
 def add_scope_summary(body, declaration):
     if SCOPE_START in body or SCOPE_END in body:
         raise ValueError("验收范围说明由出版程序生成，工作稿不得自带范围控制标记")
@@ -119,8 +129,10 @@ def add_scope_summary(body, declaration):
 
 
 def validate_visible_summary(body, declaration):
+    summaries = SCOPE_BLOCK.findall(body)
     if (body.count(SCOPE_START) != 1 or body.count(SCOPE_END) != 1
-            or SCOPE_BLOCK.findall(body) != [scope_summary(declaration)]):
+            or len(summaries) != 1
+            or summaries[0] not in (scope_summary(declaration), legacy_scope_summary(declaration))):
         raise ValueError("正文缺少同版范围状态或明示缺件边界，须重新预览")
 
 
@@ -189,7 +201,8 @@ def validate_scope_review(body, review):
     for gap in review["scope_gaps"]:
         item = gap["item"].replace("\\", "/").casefold()
         if item in received:
-            raise ValueError(f"已收到的原件不能重报为外部未收到缺件 {gap['item']}")
+            raise ReceivedCoverageError("received_reported_missing", gap["item"],
+                                        f"已收到的原件不能重报为外部未收到缺件 {gap['item']}")
         source_token(scope, gap["source"])
     current = {row["item"].strip().casefold(): row for row in review["scope_gaps"]}
     resolutions = {row["item"].strip().casefold(): row for row in review.get("scope_resolutions", [])}

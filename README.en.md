@@ -42,6 +42,8 @@
 Browse the resource library by topic, or use the course calendar to read projects by publication date, scroll through older entries, and jump to a date. A course title opens its existing resource detail.
 
 The console brings public collection, member link intake, transfer review, local downloads, analysis, independent acceptance, and cleanup together. It can run public collection and workflow checks and retains the existing approvals for transfer and cleanup. See the [operator guide](_ingest/wangzjk-to-pan/v4-review/README.md) for setup, repeatable commands, and local data requirements.
+
+See the [workflow and acceptance guide](docs/全链路升级实施与验收.md) for course production, role handoffs, and deployment checks.
 <!-- worldanalysis-library-end -->
 
 ## ✨ Overview

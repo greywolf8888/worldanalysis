@@ -1,5 +1,6 @@
 """Optional local GPU transcription and independent candidate review."""
-from contextlib import closing
+from contextlib import ExitStack, closing, contextmanager
+import errno
 import hashlib
 from itertools import islice
 import json
@@ -8,15 +9,37 @@ import re
 import shutil
 import subprocess
 from tempfile import TemporaryDirectory
+from time import monotonic, sleep
 import wave
 
-from project import local_child, media_source, original_media_path, put, read, sha
+from project import file_lock, local_child, media_source, original_media_path, put, read, sha
 from asr_exact_cache import digest as exact_digest, pcm_digest, read_record, valid_part, write_record
 from _tools.course_no_subtitles.speech import AUDIO_DECODE_REVISION, RATE, RUNTIME, audio_windows
 
 
 GPU_BATCH_CHUNKS = 20
 GPU_STREAM_REVISION = 1
+
+
+@contextmanager
+def gpu_slot(device, *, wait_seconds=600):
+    """Allow one project process to load a recognizer on each shared device."""
+    path = local_child(RUNTIME, f"tmp/course-asr-gpu-{device}.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = monotonic() + wait_seconds
+    with ExitStack() as stack:
+        while True:
+            try:
+                stack.enter_context(file_lock(path))
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EAGAIN) and getattr(error, "winerror", None) != 33:
+                    raise
+                if monotonic() >= deadline:
+                    raise RuntimeError("GPU 正在处理另一项目。已保存的取材可从原工作区接续") from error
+                sleep(min(0.5, max(0, deadline - monotonic())))
+            else:
+                break
+        yield
 
 
 def select_device(executable, requested=None):
@@ -159,11 +182,12 @@ class VulkanASR:
             backend = (["--backend", self.backend, "--strict-pipeline", "--chunk-seconds", "30",
                         "--chunk-overlap", "0"] if self.backend in {"sensevoice", "qwen3"} else ["-nf", "-mc", "0"])
             seconds = sum(length if length is not None else duration for _, length, _, _ in windows)
-            process = subprocess.run([str(self.executable), *backend, "--gpu-backend", "vulkan",
-                                      "-dev", str(self.device["index"]),
-                                      "-m", str(self.model), "-l", language, "-t", "4", "-bs", "1", "-bo", "1",
-                                      "-oj", *outfile_args], cwd=folder, check=True, capture_output=True,
-                                     timeout=max(180, seconds * 2))
+            with gpu_slot(self.device["index"]):
+                process = subprocess.run([str(self.executable), *backend, "--gpu-backend", "vulkan",
+                                          "-dev", str(self.device["index"]),
+                                          "-m", str(self.model), "-l", language, "-t", "4", "-bs", "1", "-bo", "1",
+                                          "-oj", *outfile_args], cwd=folder, check=True, capture_output=True,
+                                         timeout=max(180, seconds * 2))
             log = process.stderr.decode("utf-8", "replace")
             no_speech = set(re.findall(r"(?m)^crispasr: warning: no speech detected in '([^'\r\n]+)'\s*$", log))
             transcripts = []

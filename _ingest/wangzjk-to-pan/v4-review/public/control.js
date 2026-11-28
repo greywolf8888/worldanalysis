@@ -20,6 +20,7 @@ const actionsAllowed = new Set([
 ]);
 const recentActivity = new Set(['running', 'queued', 'pending']);
 const view = {data: null, rendered: '', read: null, action: null, fresh: false, timer: null, budget: 0};
+const verificationView = {holds: [], rendered: '', request: null, timer: null, suspended: false};
 
 function element(tag, css, text) {
   const node = document.createElement(tag);
@@ -36,6 +37,77 @@ function message(id, text) {
   const node = byId(id);
   node.textContent = text;
   node.hidden = !text;
+}
+
+function showVerification(holds) {
+  if (holds !== null) verificationView.holds = holds;
+  const visible = verificationView.holds;
+  const key = visible.length ? JSON.stringify([visible, holds !== null]) : '';
+  if (verificationView.rendered === key) return;
+  verificationView.rendered = key;
+  const region = byId('control-verification');
+  if (!visible.length) {
+    region.replaceChildren();
+    return;
+  }
+  const notice = element('p', 'control-notice');
+  const status = holds === null ? '最新状态暂未核实。' : '';
+  if (visible.every(hold => hold.general === true)) {
+    notice.append(element('strong', '', '转存已暂停。'),
+      ` ${status}请在专用 DSH 的「Worldanalysis 网盘交接」核对原因。`);
+  } else {
+    const detail = visible.map(hold => hold.label + hold.message).join(' ');
+    notice.append(element('strong', '', '需要验证。'),
+      ` ${detail}${status} 请在专用 DSH 的官方页面完成验证，然后在「Worldanalysis 网盘交接」发送「验证完成，继续」。`);
+  }
+  region.replaceChildren(notice);
+}
+
+function stopVerificationPoll() {
+  window.clearTimeout(verificationView.timer);
+  verificationView.timer = null;
+  const request = verificationView.request;
+  verificationView.request = null;
+  request?.abort();
+}
+
+async function readVerification() {
+  if (document.hidden || verificationView.suspended || verificationView.request) return;
+  window.clearTimeout(verificationView.timer);
+  const request = new AbortController();
+  verificationView.request = request;
+  try {
+    const options = {
+      headers: {'Accept': 'application/json'}, cache: 'no-store',
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(5000)]),
+    };
+    const response = await fetch('/api/verification-status', options);
+    if (response.status === 404) {
+      const priorResponse = await fetch('/api/preconfirmation', options);
+      if (!priorResponse.ok) throw new Error();
+      const prior = await priorResponse.json();
+      if (typeof prior?.platform_hold_present !== 'boolean') throw new Error();
+      const holds = prior.platform_hold_present ? [{id: 'platform-hold', general: true}] : [];
+      if (verificationView.request === request) showVerification(holds);
+      return;
+    }
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    if (data?.available !== true || !Array.isArray(data.holds)) throw new Error();
+    const holds = data.holds.map(hold => ({id: phrase(hold?.id, 100),
+      label: phrase(hold?.label, 50), message: phrase(hold?.message, 160)}));
+    if (holds.some(hold => !hold.id || !hold.label || !hold.message)) throw new Error();
+    if (verificationView.request === request) showVerification(holds);
+  } catch {
+    if (verificationView.request === request) showVerification(null);
+  } finally {
+    if (verificationView.request === request) {
+      verificationView.request = null;
+      if (!document.hidden && !verificationView.suspended) {
+        verificationView.timer = window.setTimeout(readVerification, 15000);
+      }
+    }
+  }
 }
 
 function recordTime(value) {
@@ -277,14 +349,180 @@ async function perform(action, label) {
 
 byId('control-refresh').addEventListener('click', () => {
   message('control-feedback', '');
+  void readVerification();
   void refresh();
 });
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) clearPoll();
-  else if (!view.action && hasActiveRun()) void refresh();
+
+const pathPanel = byId('control-paths');
+const pathForm = byId('control-path-form');
+const pathVersion = byId('control-path-version');
+const pathSave = byId('control-path-save');
+const pathActivate = byId('control-path-activate');
+const pathRollback = byId('control-path-rollback');
+let pathData = null;
+let pathPreview = null;
+let pathBusy = false;
+let pathRequest = 0;
+
+function pathRows(list, values) {
+  list.replaceChildren(...values.flatMap(item => {
+    const label = phrase(item.label);
+    const path = phrase(item.path, 520);
+    return label && path ? [element('dt', '', label), element('dd', '', path)] : [];
+  }));
+  return list.childElementCount > 0;
+}
+
+function showPathCandidate() {
+  const config = pathData?.path_config;
+  const candidate = config?.versions.find(item => item.version_id === pathVersion.value);
+  const blockers = Object.values(candidate?.blocked_roles || {});
+  const isCurrent = candidate?.version_id === config?.active_version_id;
+  const isStale = candidate && !isCurrent && candidate.base_version_id !== config.active_version_id;
+  pathActivate.disabled = pathBusy || !candidate || isCurrent || isStale || blockers.length > 0;
+  message('control-path-blocker', blockers.join(' ') || (isStale ? '请根据目前使用的位置重新核对并保存。' : ''));
+  const differing = (pathData?.proposal_roles || []).flatMap(({key, label}) => {
+    const value = candidate?.paths[key];
+    return value && value !== config.paths[key] ? [{label, path:value}] : [];
+  });
+  const list = byId('control-path-candidate');
+  list.hidden = !pathRows(list, differing);
+}
+
+function showPaths(data, selectedVersion) {
+  pathData = data;
+  pathPreview = null;
+  pathSave.hidden = true;
+  const config = data.path_config;
+  const roles = data.proposal_roles || [];
+  const values = config ? roles.map(({key, label}) => ({
+    label:phrase(label).replace(/^未来/, ''), path:config.paths[key],
+  })) : [...data.paths];
+  if (data.cloud_destination?.path) values.push({label:'已设网盘目录', path:data.cloud_destination.path});
+  const visible = pathRows(byId('control-path-list'), values);
+  const versioned = data.activation === 'versioned' && config;
+  byId('control-path-fields').replaceChildren(...roles.map(({key, label}) => {
+    const field = element('label', '', phrase(label));
+    const input = element('input');
+    input.name = key;
+    input.maxLength = 520;
+    input.placeholder = phrase(config?.paths[key], 520);
+    field.append(input);
+    return field;
+  }));
+  pathForm.hidden = !versioned || !roles.length || !data.revision;
+  const versions = config?.versions || [];
+  pathVersion.replaceChildren(...versions.map(version => {
+    const time = recordTime(version.created_at)?.textContent || '保存的位置';
+    const active = version.version_id === config.active_version_id;
+    const option = element('option', '', active ? time + ' · 使用中' : time);
+    option.value = version.version_id;
+    return option;
+  }));
+  if (selectedVersion) pathVersion.value = selectedVersion;
+  byId('control-path-versions').hidden = !versions.length;
+  pathRollback.hidden = !config?.previous_version_id;
+  const catalogPending = config?.paths.catalog_data && data.catalog_in_use
+    && config.paths.catalog_data !== data.catalog_in_use;
+  message('control-path-status', catalogPending ? '采集位置已切换。请重新启动资源库以读取新目录。'
+    : visible ? '' : '暂时无法核对当前保存位置。');
+  showPathCandidate();
+}
+
+pathPanel.addEventListener('toggle', async () => {
+  const sequence = ++pathRequest;
+  if (!pathPanel.open) return;
+  pathData = null;
+  pathForm.hidden = true;
+  byId('control-path-versions').hidden = true;
+  byId('control-path-candidate').hidden = true;
+  message('control-path-blocker', '');
+  message('control-path-status', '正在读取保存位置…');
+  message('control-path-feedback', '');
+  try {
+    const response = await fetch('/api/workspace-paths', {cache: 'no-store'});
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    if (!pathPanel.open || sequence !== pathRequest) return;
+    showPaths(data);
+  } catch {
+    if (sequence === pathRequest) message('control-path-status', '未能读取保存位置，请重新打开。');
+  }
 });
-window.addEventListener('pagehide', clearPoll);
+
+async function pathOperation(action, fields, onSuccess, messageOnSuccess) {
+  if (!pathData?.revision || pathBusy) return;
+  const sequence = pathRequest;
+  pathBusy = true;
+  for (const input of pathPanel.querySelectorAll('input, select, button')) input.disabled = true;
+  message('control-path-feedback', '正在处理保存位置…');
+  try {
+    const response = await fetch('/api/workspace-paths', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action, ...fields, revision: pathData.revision}),
+    });
+    const data = await response.json();
+    if (sequence !== pathRequest) return;
+    if (response.ok) onSuccess(data);
+    message('control-path-feedback', response.ok ? (phrase(data.message, 200) || messageOnSuccess)
+      : (phrase(data.error, 200) || '路径未通过核对，请检查后重试。'));
+  } catch {
+    if (sequence === pathRequest) message('control-path-feedback', '结果未返回，请重新打开保存位置核对。');
+  } finally {
+    pathBusy = false;
+    for (const input of pathPanel.querySelectorAll('input, select, button')) input.disabled = false;
+    showPathCandidate();
+  }
+}
+
+pathForm.addEventListener('input', () => {
+  pathPreview = null;
+  pathSave.hidden = true;
+});
+pathForm.addEventListener('submit', event => {
+  event.preventDefault();
+  const proposal = Object.fromEntries([...new FormData(pathForm)].map(([key, value]) => [key, value.trim()])
+    .filter(([, value]) => value));
+  if (!Object.keys(proposal).length) {
+    message('control-path-feedback', '请填写需要调整的路径。');
+    return;
+  }
+  void pathOperation('preview', {proposal}, data => {
+    pathPreview = {proposal, proposal_id:data.proposal_id};
+    pathSave.hidden = !data.proposal_id;
+  }, '路径已核对，可以保存。');
+});
+pathVersion.addEventListener('change', showPathCandidate);
+pathSave.addEventListener('click', () => {
+  if (pathPreview) void pathOperation('save', pathPreview, data => showPaths(data, data.saved_version_id),
+    '位置已保存，切换后供新任务使用。');
+});
+pathActivate.addEventListener('click', () => {
+  void pathOperation('activate', {version_id:pathVersion.value}, data => showPaths(data, data.path_config.active_version_id),
+    '已切换保存位置。');
+});
+pathRollback.addEventListener('click', () => {
+  void pathOperation('rollback', {}, data => showPaths(data, data.path_config.active_version_id), '已恢复上一次保存位置。');
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    clearPoll();
+    stopVerificationPoll();
+  } else {
+    void readVerification();
+    if (!view.action && hasActiveRun()) void refresh();
+  }
+});
+window.addEventListener('focus', () => void readVerification());
+window.addEventListener('pagehide', () => {
+  clearPoll();
+  verificationView.suspended = true;
+  stopVerificationPoll();
+});
 window.addEventListener('pageshow', event => {
+  verificationView.suspended = false;
+  if (event.persisted) void readVerification();
   if (event.persisted && !view.action) void refresh();
 });
+void readVerification();
 void refresh();

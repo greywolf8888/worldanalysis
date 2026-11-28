@@ -11,10 +11,12 @@ from urllib.parse import quote
 
 from catalog_model import open_index
 from catalog_relations import article_identity
-from production_bridge import BASE, LocalProjection, exact_map, file_inside
+from course_completion import completion_fields
+from course_followups import CourseFollowups, binding_for
+from production_bridge import BASE, LocalProjection, exact_map, file_inside, formal_review_stage
+from workspace_paths import reader_roots
 
 
-FORMAL_VAULT = BASE / '分析目标下载地址' / '02_短视频与自媒体' / '分析结果'
 _NUMBER = re.compile(r'^[(【\[]\s*\d{4,7}\s*期\s*[)】\]]\s*')
 _FOLDER_PREFIX = re.compile(r'^(?:\d{3}-\d{8}|\d{4}-\d{2}-\d{2})[-_ ]+')
 _PUBLISHER = re.compile(
@@ -24,7 +26,7 @@ _PUBLISHER = re.compile(
 _AUTHORITATIVE_BOOK = {'registered_edition_matches', 'registered_independent_derivative_matches'}
 _ACCEPTED = {'historical_same_edition', 'scope_accepted'}
 _SCOPES = {'核心待补', '配套待补', '完整验收'}
-_INCOMPLETE = {'queued', 'in_progress', 'awaiting_originals', 'archive_only'}
+_INCOMPLETE = {'queued', 'in_progress', 'awaiting_originals', 'awaiting_acceptance', 'archive_only'}
 
 
 def title_key(title, *, folder=False):
@@ -96,8 +98,10 @@ class CatalogProgress:
     def __init__(self, library, local):
         self.library = library
         self.local = local
+        attached = getattr(local, 'followups', None)
+        self.followups = attached if isinstance(attached, CourseFollowups) else CourseFollowups(BASE)
         self.lock = Lock()
-        self.last_observation = self.last_index = None
+        self.last_observation = self.last_followups = self.last_index = None
         self.public_titles = defaultdict(set)
         self.rows = getattr(library, 'semantic_rows', library.by_id)
         for row in self.rows.values():
@@ -107,16 +111,12 @@ class CatalogProgress:
     def read(self):
         with self.lock:
             observation = self.local.get()
-            if observation is self.last_observation:
+            followups = self.followups.read()
+            if observation is self.last_observation and followups is self.last_followups:
                 return self.last_index
             current = observation.get('sync_state') in ('live', 'partial')
             data = (observation.get('data') or {}) if current else {}
-            roots = set(self.local.roots(data))
-            try:
-                if FORMAL_VAULT.is_dir() and FORMAL_VAULT.resolve(strict=True) == FORMAL_VAULT:
-                    roots.add(FORMAL_VAULT)
-            except OSError:
-                pass
+            roots = reader_roots(self.followups.workspace, self.local.roots(data))
             names = defaultdict(set)
             notes = present_notes(roots)
             projects = defaultdict(list)
@@ -124,6 +124,7 @@ class CatalogProgress:
                 if key := title_key(name, folder=True):
                     names[key].add(path)
             for project in data.get('projects', ()):
+                project = formal_review_stage(project, data)
                 projects[project['local_project_id']].append(project)
                 book = project.get('textbook') or {}
                 path = Path(book['entry']) if book.get('entry') else None
@@ -134,9 +135,10 @@ class CatalogProgress:
                     if key := title_key(title, folder=True):
                         names[key].add(path)
             self.last_observation = observation
+            self.last_followups = followups
             self.last_index = (
                 observation.get('sync_state'), exact_map(data.get('legacy_links') or ()),
-                projects, names, roots,
+                projects, names, roots, followups if current else {},
             )
             return self.last_index
 
@@ -148,12 +150,14 @@ class CatalogProgress:
         result = {'transfer_state': transfer} if transfer else {}
         if row.get('action_pending') or row.get('demo'):
             return result
-        _, exact, projects, names, roots = index
+        _, exact, projects, names, roots, followups = index
         # The formal link applies to the particular source version only.
         ids = set()
         if exact and scope == 'selected_roots_only':
             pairs, _, _ = self.local.exact_targets(row)
             ids = {exact[pair] for pair in pairs if pair in exact}
+        if binding := binding_for(followups, row):
+            ids.add(binding['local_project_id'])
         if len(ids) > 1:
             return result
         if ids:
@@ -163,6 +167,8 @@ class CatalogProgress:
             project = matches[0]
             analyzed = exact_analysis(project)
             result.update(analyzed)
+            if include_book and (completion := completion_fields(project, BASE)):
+                result['course_completion'] = completion
             if include_book and analyzed.get('analysis_state') in {
                     'completed', 'completed_received_scope', 'same_source_reuse', 'awaiting_re_review'}:
                 book = file_inside((project.get('textbook') or {}).get('entry'), roots)

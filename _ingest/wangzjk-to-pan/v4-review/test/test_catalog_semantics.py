@@ -1,7 +1,10 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from types import SimpleNamespace
 
+from catalog_decisions import cross_author_playbooks
+from catalog_relations import CatalogRelations
 from catalog_semantics import CatalogStore, parse_jsonl, relationship_input, source_input
 
 
@@ -22,7 +25,7 @@ def answer(task,result):
 
 class CatalogTaskTests(unittest.TestCase):
     def setUp(self):
-        temp=TemporaryDirectory()
+        temp=TemporaryDirectory(dir=Path(__file__).parent)
         self.addCleanup(temp.cleanup)
         self.root=Path(temp.name)
         self.out=self.root/'tasks.jsonl'
@@ -97,3 +100,74 @@ class CatalogTaskTests(unittest.TestCase):
         outcome=self.store.import_results([answer(task,result)],{source['article_key']:source})
         self.assertEqual(len(outcome['rejected']),1)
         self.assertEqual(self.store.revision(),0)
+
+    def test_playbooks_require_current_related_evidence_and_distinct_public_attribution(self):
+        title = 'AI 古建筑科普图文创作'
+        left = item('501', title=title,
+                    text='作者：陈兰\n第2版\n用 AI 绘制古建筑，逐图编写解说词。\n工具订阅每月20元。\n课程目录\n1. 绘制古建筑草图\n2. 逐图编写解说词')
+        right = item('502', title=title,
+                     text='主讲人：林江\n用 AI 绘制古建筑，按朝代组织选题。\n作品通过广告分成结算。\n宣传收益5000元。\n课程目录\n1. 绘制古建筑草图\n2. 按朝代组织选题')
+        uncredited = item('503', title=title, text='用 AI 绘制古建筑，再制作科普配图。')
+        same_author = item('504', title=title, text='作者：陈兰\n用 AI 绘制古建筑，给模型准备草图。')
+        older = item('505', title=title + ' 第1版',
+                     text='作者：陈兰\n第1版\n用 AI 绘制古建筑。\n课程目录\n1. 绘制古建筑草图\n2. 扫描手绘线稿')
+        inputs = {row['article_key']: row for row in (left, right, uncredited, same_author, older)}
+        current = {'analysis_state':'completed_received_scope', 'analysis_scope':'配套待补',
+                   'textbook_href':'obsidian://open?path=G%3A%2Fverified.md',
+                   'course_completion':{'received_analysis':'accepted_for_edition'}}
+        local_name = {'analysis_state':'local_result_available', 'textbook_href':'obsidian://open?path=G%3A%2Fguess.md'}
+        textbooks = {'501':current, '502':local_name}
+
+        def project():
+            classified, relations, _ = self.store.read(inputs, include_suppressed=True)
+            rows = {key: {**relationship_input(row, classified.get(key, ('', None))[1]),
+                          'id':f"rv_{row['article_id']}", 'site_label':'原站'}
+                    for key, row in inputs.items()}
+            model = CatalogRelations(rows.values(), relations)
+            return cross_author_playbooks(SimpleNamespace(semantic_rows=rows, semantic_relations=relations,
+                                                          relations=model),
+                                          progress_for=lambda row: textbooks.get(row['article_id'], {}))
+
+        relation = {'relation':'related', 'reason':'两篇原文都讲按图制作古建筑解说',
+                    'evidence':[{'side':side, 'field':'paragraphs', 'text':'用 AI 绘制古建筑'}
+                                for side in ('left', 'right')]}
+        self.assertEqual(project(), [])
+        self.store.correct_relation(left, uncredited, relation)
+        self.store.correct_relation(left, same_author, relation)
+        self.store.correct_relation(left, right, {**relation, 'relation':'contains'})
+        self.assertEqual(project(), [])
+        pair_key = self.store.correct_relation(left, right, relation)
+        group, = project()
+        pair = group['entries']
+        self.assertEqual(group['theme'], title)
+        self.assertEqual({row['article_key'] for row in pair}, {left['article_key'], right['article_key']})
+        ours, other = [next(row for row in pair if row['author']==name) for name in ('陈兰', '林江')]
+        self.assertEqual(ours['costs'], ['工具订阅每月20元。'])
+        self.assertTrue(ours['formal']['received'])
+        self.assertEqual(ours['recommendation']['action'], '先读教材，再核对补件')
+        self.assertEqual(other['monetization'], ['作品通过广告分成结算。'])
+        self.assertNotIn('formal', other)
+        self.assertNotIn('textbook_href', other)
+        self.assertEqual(other['recommendation']['action'], '可安排完整分析')
+        comparison, = group['comparisons']
+        self.assertTrue(all(quotes == ['用 AI 绘制古建筑'] for quotes in comparison['evidence'].values()))
+        self.assertEqual(comparison['comparison']['shared_outline_count'], 1)
+        for version, row in (('第2版', left), ('第1版', older)):
+            self.store.correct(row, {**classification(row), 'edition':version, 'author':'陈兰',
+                'evidence':[{'field':'paragraphs','text':text} for text in (version, '陈兰')]})
+        pair_key = self.store.correct_relation(left, right, relation)
+        self.store.correct_relation(left, older, {**relation, 'relation':'different_version',
+                                                  'same_scope':True, 'newer':'left'})
+        textbooks['505'] = textbooks.pop('501')
+        group, = project()
+        updated = next(row for row in group['entries'] if row['author']=='陈兰')
+        history, = updated['lineage']
+        self.assertEqual(history['relation'], 'older')
+        self.assertEqual(history['comparison']['peer_only']['examples'], ['2. 扫描手绘线稿'])
+        self.assertNotIn('formal', updated)
+        self.assertEqual(updated['recommendation']['action'], '核对后增量分析')
+        inputs[right['article_key']] = item('502', title=title, text='作者：林江\n新版采用自然场景拍摄。')
+        self.assertEqual(project(), [])
+        inputs[right['article_key']] = right
+        self.store.undo(pair_key)
+        self.assertEqual(project(), [])

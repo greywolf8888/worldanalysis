@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 
-from project import VIDEO_EXTENSIONS, local_child, read, sha
+from project import ReceivedCoverageError, VIDEO_EXTENSIONS, local_child, read, sha
 from reader_review import IMAGE, markdown_segments
 
 
@@ -59,6 +59,10 @@ PROJECT_LINK = re.compile(
 COMMENTS = re.compile(r"<!--([\s\S]*?)-->")
 PARAGRAPH_SOURCE = re.compile(r"<!-- 段落出处 ([^\n]+?) -->")
 EXTERNAL_SOURCE = re.compile(r"<!-- 外部出处 ([^\n]+?) -->")
+LEARNING_SUPPLEMENT = re.compile(r"^[ \t]*<!-- 学习补充 ([^\r\n]+?) -->[ \t]*$", re.MULTILINE)
+LEARNING_LABEL = "**延伸学习。**"
+LEARNING_LINK = re.compile(r"(?<!!)\[[^\]\n]+\]\((https?://[^)\s<>]+)\)|<(https?://[^\s<>]+)>")
+INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 SCOPE_START = "<!-- Worldanalysis:scope-review:start -->"
 SCOPE_END = "<!-- Worldanalysis:scope-review:end -->"
 SCOPE_BLOCK = re.compile(re.escape(SCOPE_START) + r"[\s\S]*?" + re.escape(SCOPE_END))
@@ -373,7 +377,7 @@ def build_source_manifest(project):
     return scope, evidence
 
 
-def claim_details(body):
+def prose_blocks(body):
     # The scope summary is independently reviewed against its own structured manifest.
     for is_code, part in markdown_segments(COLLAPSED.sub("", SCOPE_BLOCK.sub("", body))):
         if is_code:
@@ -382,8 +386,35 @@ def claim_details(body):
             prose = IMAGE.sub("", COMMENTS.sub("", block))
             prose = " ".join(line.strip() for line in prose.splitlines()
                              if line.strip() and not line.lstrip().startswith("#"))
-            if prose:
-                yield prose, PARAGRAPH_SOURCE.findall(block), EXTERNAL_SOURCE.findall(block)
+            yield block, prose
+
+
+def claim_details(body):
+    for block, prose in prose_blocks(body):
+        if prose:
+            yield prose, PARAGRAPH_SOURCE.findall(block), EXTERNAL_SOURCE.findall(block)
+
+
+def validate_learning_supplements(body, scope_gaps, *, allow_unmarked=False):
+    """Keep outside learning material attached to a known gap and outside original coverage."""
+    gaps = {row["item"] for row in scope_gaps if isinstance(row, dict) and isinstance(row.get("item"), str)}
+    for is_code, part in markdown_segments(body):
+        if not is_code and any("<!-- 学习补充" in hidden.group() for hidden in COLLAPSED.finditer(part)):
+            raise ValueError("延伸学习应置于可见正文，不能放在折叠资料中")
+    for block, prose in prose_blocks(body):
+        markers = LEARNING_SUPPLEMENT.findall(block)
+        marker_count = block.count("<!-- 学习补充")
+        labeled = prose.startswith(LEARNING_LABEL)
+        if not marker_count and (not labeled or allow_unmarked):
+            continue
+        if not labeled or len(markers) != 1 or marker_count != 1 or unescape(markers[0]) not in gaps:
+            raise ValueError("延伸学习须在同段注明实际仍缺的课程资料")
+        if PARAGRAPH_SOURCE.search(block):
+            raise ValueError("延伸学习只引用外部资料，原课内容请另写一段并标注出处")
+        sources = {unescape(value) for value in EXTERNAL_SOURCE.findall(block)}
+        links = {unescape(markdown or autolink) for markdown, autolink in LEARNING_LINK.findall(INLINE_CODE.sub("", prose))}
+        if not sources or links != sources:
+            raise ValueError("延伸学习须在同段明确列出可打开的外部来源链接")
 
 
 def claim_blocks(body):
@@ -580,7 +611,7 @@ def validate_outcome(row, label):
     if row.get("outcome") not in OUTCOMES or not substantive_note(row.get("note")):
         raise ValueError(f"需要按实际检查写明来源取材和归属 {label}")
     if row["outcome"] == "原件缺口":
-        raise ValueError(f"原件仍有待核内容 {label}：{row['note']}")
+        raise ReceivedCoverageError("received_unresolved", label, f"已收到的内容仍待核对 {label}：{row['note']}")
 
 
 def validate_fact_checks(actual, expected, prose, outcome, syntax):
@@ -644,7 +675,9 @@ def validate_source_coverage(body, scope, review, *, allow_legacy=False):
             and not (allow_legacy and coverage.get("claims_version") == 2)):
         raise ValueError("新稿需使用完整正文指纹及关键事实复核模板")
     if scope["unreadable"]:
-        raise ValueError(f"原片仍有待恢复取材 {scope['unreadable'][0]}")
+        location = scope["unreadable"][0]
+        raise ReceivedCoverageError("received_unreadable", location, f"已收到的原片仍待恢复取材 {location}")
+    validate_learning_supplements(body, review.get("scope_gaps") or (), allow_unmarked=allow_legacy)
     syntax = citation_syntax(scope["documents"])
     blocks = [(text, [token for note in sources for token in cite_tokens(note, syntax)])
               for text, sources in claim_blocks(body)]
@@ -655,7 +688,8 @@ def validate_source_coverage(body, scope, review, *, allow_legacy=False):
         points = [point for point in episode.get("source_points", []) if point.get("anchor")]
         for point in points:
             if not any(point["anchor"] in text and video_covers(cites, number, point["range_s"]) for text, cites in blocks):
-                raise ValueError(f"第 {number} 讲的原片要点需对应可见正文和同段原片区间 {point['anchor']}")
+                raise ReceivedCoverageError("received_coverage_missing", f"第 {number} 讲 {point['range_s']}",
+                                            f"第 {number} 讲的原片要点需对应可见正文和同段原片区间 {point['anchor']}")
         mapped = [point["range_s"] for point in points]
         excluded = []
         for part in episode["watched"]:
@@ -673,7 +707,8 @@ def validate_source_coverage(body, scope, review, *, allow_legacy=False):
             if has_content != (window["outcome"] == "正文已覆盖"):
                 raise ValueError(f"原片时窗用途与实际来源要点不一致 {label}")
             if missing := first_uncovered(base["range_s"], accounted):
-                raise ValueError(f"第 {number} 讲 {missing[0]:g}–{missing[1]:g} 秒未对应正文或具体非教学观察")
+                label = f"第 {number} 讲 {missing[0]:g}–{missing[1]:g} 秒"
+                raise ReceivedCoverageError("received_coverage_missing", label, f"{label}未对应正文或具体非教学观察")
         teaching = [part["range_s"] for part in episode["watched"] if part["kind"] not in NON_TEACHING]
         if any(intersects(part, boundary) for part in teaching for boundary in excluded):
             raise ValueError(f"第 {number} 讲同一时段被同时标为教学和非教学")
@@ -711,7 +746,7 @@ def validate_source_coverage(body, scope, review, *, allow_legacy=False):
             if checked["outcome"] == "正文已覆盖":
                 anchor = checked.get("anchor")
                 if not populated(anchor) or not any(anchor in text and match(cites) for text, cites in blocks):
-                    raise ValueError(f"附件独立内容缺可见正文及同段原件出处 {label}")
+                    raise ReceivedCoverageError("received_coverage_missing", label, f"附件独立内容缺可见正文及同段原件出处 {label}")
             if not isinstance(checked.get("channels"), list):
                 raise ValueError(f"附件需登记实际查到的作者渠道 {label}")
             for finding in checked["channels"]:

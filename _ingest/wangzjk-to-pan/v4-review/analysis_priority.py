@@ -6,12 +6,22 @@ from pathlib import Path
 import re
 import sqlite3
 
+from catalog_progress import exact_analysis
+from catalog_semantics import article_key
+from course_followups import CourseFollowups, binding_for
+from production_bridge import LocalProjection, formal_review_stage
+
 
 LOCAL_ID = re.compile(r"[0-9a-f]{64}")
 RESOURCE_ID = re.compile(r"rv_[0-9a-f]{64}")
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 MAX_ENTRIES = 500
 TABLE = "analysis_priority"
+SUBMISSIONS = "analysis_priority_submissions"
+SCHEMA_VERSION = 2
+FINISHED_STATES = {"completed", "completed_received_scope", "same_source_reuse"}
+FINISHED_MESSAGE = "已有同版教材，可直接打开"
+SOURCE_FIELDS = ("source_sha256", "metadata_sha256")
 
 
 class AnalysisPriorityError(ValueError):
@@ -32,12 +42,15 @@ def valid(pattern, value):
 
 def project_rows(local):
     projection = local.get()
-    rows = (projection.get("data") or {}).get("projects", [])
+    if projection.get("sync_state") not in ("live", "partial"):
+        return projection.get("sync_state"), {}
+    data = projection.get("data") or {}
+    rows = data.get("projects", [])
     counts = {}
     for row in rows:
         key = row.get("local_project_id")
         if valid(LOCAL_ID, key):
-            counts.setdefault(key, []).append(row)
+            counts.setdefault(key, []).append(formal_review_stage(row, data))
     return projection.get("sync_state"), {key: group[0] for key, group in counts.items() if len(group) == 1}
 
 
@@ -56,6 +69,31 @@ def title_of(row):
     return " ".join(str(row.get("title") or "").split())[:500]
 
 
+def ensure_needs_analysis(row):
+    status = exact_analysis(row).get("analysis_state")
+    if status in FINISHED_STATES:
+        raise AnalysisPriorityError(422, FINISHED_MESSAGE)
+    if status in ("archive_only", "awaiting_re_review", "awaiting_acceptance"):
+        raise AnalysisPriorityError(422, "该项目需要按现有记录接续处理")
+
+
+def ensure_article_needs_analysis(row, local):
+    if not isinstance(local, LocalProjection):
+        return
+    link = binding_for(local.followups.read(), row)
+    if link:
+        _, projects = project_rows(local)
+        project = projects.get(link["local_project_id"])
+        if project:
+            ensure_needs_analysis(project)
+    linked = local.detail(row).get("linked_project") or {}
+    if (linked.get("project_id") and link and linked["project_id"] != link["local_project_id"]):
+        raise AnalysisPriorityError(422, "资料归属待核实，未加入分析顺序")
+    if (linked.get("analysis_state") in FINISHED_STATES
+            and linked.get("textbook_integrity") in ("same_registered_bytes", "same_verified_independent_derivative")):
+        raise AnalysisPriorityError(422, FINISHED_MESSAGE)
+
+
 def anchor(target, library, local):
     if not isinstance(target, dict):
         raise AnalysisPriorityError(400, "请选择具体项目")
@@ -69,18 +107,25 @@ def anchor(target, library, local):
         row = rows.get(key)
         if row is None:
             raise AnalysisPriorityError(422, "本地项目尚未注册或身份有冲突")
-        return {**target, "key": "local:" + key, "title": title_of(row)}
+        ensure_needs_analysis(row)
+        try:
+            source = local.analysis_anchor(key)
+        except (OSError, ValueError):
+            raise AnalysisPriorityError(422, "本地原件尚未就绪或已有变化，请核对后再安排") from None
+        if not isinstance(source, dict) or not all(valid(LOCAL_ID, source.get(k)) for k in SOURCE_FIELDS):
+            raise AnalysisPriorityError(422, "本地原件尚未就绪或已有变化，请核对后再安排")
+        return {**target, **{k: source[k] for k in SOURCE_FIELDS}, "key": "local:" + key, "title": title_of(row)}
     required = {"kind", "resource_id", "site_id", "article_id"}
     if set(target) == required and target["kind"] == "article":
         resource_id, site_id, article_id = (target[field] for field in ("resource_id", "site_id", "article_id"))
         if not valid(RESOURCE_ID, resource_id) or not all(valid(IDENTIFIER, v) for v in (site_id, article_id)):
             raise AnalysisPriorityError(400, "来源项目标识无效")
         source = article_source(library, resource_id, site_id, article_id)
-        if hasattr(library,'semantic_rows'):
-            from catalog_semantics import article_key
-            exact=library.exact_article(resource_id,article_key(site_id,article_id))
+        if hasattr(library, "semantic_rows"):
+            exact = library.exact_article(resource_id, article_key(site_id, article_id))
             if exact is None or exact.get('action_pending'):
                 raise AnalysisPriorityError(422, "资料归属待核实，未加入分析顺序")
+            ensure_article_needs_analysis(exact, local)
         if source is None:
             raise AnalysisPriorityError(422, "未能匹配当前来源项目，请重开该条资源")
         return {**target, "key": f"article:{site_id}:{article_id}",
@@ -88,18 +133,35 @@ def anchor(target, library, local):
     raise AnalysisPriorityError(400, "分析顺位仅接受本地项目或已识别的来源项目")
 
 
-def show_entries(entries, library, rows):
+def show_entries(entries, library, rows, bindings, waiting=()):
     rendered = []
     for rank, item in enumerate(entries, 1):
         if item["kind"] == "local":
             row = rows.get(item["project_id"])
-            state = (row.get("analysis") or {}).get("state") if row else None
+            state = exact_analysis(row).get("analysis_state") if row else None
+            observed = (row.get("source_version") or {}).get("source_sha256") if row else None
+            if observed and item.get("source_sha256") and item["source_sha256"] != observed:
+                state = "source_changed"
             display = {"state": state or "pending_sync", "title": title_of(row) if row else item["title"]}
         else:
             source = article_source(library, item["resource_id"], item["site_id"], item["article_id"])
-            state = ("awaiting_intake" if source and source["article_revision"] == item["article_revision"]
-                     else "source_changed")
-            display = {"state": state, "title": title_of(source) if source else item["title"]}
+            token = article_key(item["site_id"], item["article_id"])
+            current = getattr(library, "semantic_rows", {}).get(token)
+            if current is None and source:
+                current = {**source, "id": item["resource_id"]}
+            display = {"state": "source_changed", "title": title_of(current) if current else item["title"]}
+            if current and not current.get("action_pending") and current["article_revision"] == item["article_revision"]:
+                binding = binding_for(bindings, current)
+                anchored = binding_for(bindings, {**current, "id": item["resource_id"]})
+                same_binding = binding is not None and binding == anchored
+                if current["id"] == item["resource_id"] or same_binding:
+                    display["state"] = "awaiting_intake"
+                    if same_binding and (project := rows.get(binding["local_project_id"])):
+                        display["state"] = exact_analysis(project).get("analysis_state", "pending_sync")
+                    if current["id"] != item["resource_id"]:
+                        display["current_resource_id"] = current["id"]
+        if item["key"] in waiting and display["state"] in ("queued", "pending_sync", "awaiting_intake"):
+            display["state"] = "waiting_for_readiness"
         rendered.append({**item, **display, "rank": rank})
     return rendered
 
@@ -119,6 +181,8 @@ class AnalysisPriority:
         connection.execute(f"CREATE TABLE IF NOT EXISTS {TABLE} ("
                            "singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL,"
                            "draft TEXT NOT NULL, submitted TEXT)")
+        connection.execute(f"CREATE TABLE IF NOT EXISTS {SUBMISSIONS} ("
+                           "revision INTEGER PRIMARY KEY, event_id TEXT NOT NULL UNIQUE, body TEXT NOT NULL)")
         return connection
 
     @staticmethod
@@ -129,10 +193,20 @@ class AnalysisPriority:
     @staticmethod
     def _render(revision, entries, submitted, library, local):
         known = [*entries, *(submitted or {}).get("entries", [])]
-        rows = project_rows(local)[1] if any(item["kind"] == "local" for item in known) else {}
-        snapshot = ({**submitted, "entries": show_entries(submitted["entries"], library, rows)}
+        followups = getattr(local, "followups", None)
+        bindings = (followups.read() if isinstance(followups, CourseFollowups)
+                    and any(item["kind"] == "article" for item in known) else {})
+        sync, rows = project_rows(local) if bindings or any(item["kind"] == "local" for item in known) else (None, {})
+        if sync not in ("live", "partial"):
+            bindings = {}
+        matches = bool(submitted and submitted.get("schema_version") == SCHEMA_VERSION and submitted["entries"] == entries)
+        waiting = followups.waiting_for(submitted) if isinstance(followups, CourseFollowups) and submitted else ()
+        snapshot = ({**submitted, "entries": show_entries(submitted["entries"], library, rows, bindings, waiting)}
                     if submitted is not None else None)
-        return {"revision": revision, "entries": show_entries(entries, library, rows), "submitted": snapshot}
+        return {
+            "revision": revision, "entries": show_entries(entries, library, rows, bindings, waiting if matches else ()),
+            "submitted": snapshot, "draft_matches_submission": matches,
+        }
 
     def read(self, library, local):
         if not self.path.is_file():
@@ -159,6 +233,11 @@ class AnalysisPriority:
         try:
             connection.execute("BEGIN IMMEDIATE")
             revision, items, submitted = self._load(connection)
+            repeated = (action == "submit" and submitted and submitted.get("schema_version") == SCHEMA_VERSION
+                        and submitted["entries"] == items and 0 <= body["revision"] <= revision)
+            if repeated:
+                connection.rollback()
+                return self._render(revision, items, submitted, library, local)
             if body["revision"] != revision:
                 raise AnalysisPriorityError(409, "分析顺位已变动，请重新读取")
             if action in ("add", "move", "remove"):
@@ -167,9 +246,10 @@ class AnalysisPriority:
                 if action != "add" and current is None:
                     raise AnalysisPriorityError(422, "该项目当前不在分析顺位表中")
                 if action == "add" and current and any(current.get(field) != entry.get(field)
-                                                        for field in ("resource_id", "article_revision")):
+                                                        for field in ("resource_id", "article_revision", *SOURCE_FIELDS)):
                     raise AnalysisPriorityError(409, "资料版本已变化，请移除旧项目后重新加入")
                 if action == "add" and current and "position" not in body:
+                    connection.rollback()
                     return self._render(revision, items, submitted, library, local)
                 if action == "move" and "position" not in body:
                     raise AnalysisPriorityError(400, "移动时须指定位置")
@@ -183,10 +263,15 @@ class AnalysisPriority:
                     items.insert(index, entry or current)
             revision += 1
             if action == "submit":
-                submitted = {"schema_version": 1, "record_type": "analysis_priority_submission",
+                if any(item["kind"] == "local" and not all(valid(LOCAL_ID, item.get(k)) for k in SOURCE_FIELDS)
+                       for item in items):
+                    raise AnalysisPriorityError(422, "请移除旧的本地项目并重新安排")
+                submitted = {"schema_version": SCHEMA_VERSION, "record_type": "analysis_priority_submission",
                              "origin": "local_resource_library", "revision": revision,
                              "submitted_at": datetime.now(timezone.utc).isoformat(), "entries": items}
                 submitted["event_id"] = hashlib.sha256(json_bytes(submitted)).hexdigest()
+                connection.execute(f"INSERT INTO {SUBMISSIONS} VALUES(?,?,?)",
+                                   (revision, submitted["event_id"], json_bytes(submitted).decode()))
             connection.execute(f"INSERT OR REPLACE INTO {TABLE} VALUES(1,?,?,?)",
                                (revision, json_bytes(items).decode(),
                                 json_bytes(submitted).decode() if submitted is not None else None))

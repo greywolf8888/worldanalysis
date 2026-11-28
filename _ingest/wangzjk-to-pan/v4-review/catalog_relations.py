@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from calendar import monthrange
 from collections import Counter, defaultdict
-from datetime import date
+from datetime import date, datetime
 from hashlib import sha256
+import json
+from itertools import combinations
 from math import log1p
 import re
 from unicodedata import normalize
@@ -262,6 +264,44 @@ def _version_label(row):
     return None
 
 
+def _literal(value):
+    return " ".join(normalize("NFC", value).split()) if isinstance(value, str) else ""
+
+
+def _complete_intro_fingerprint(row):
+    """Hash full publisher text without erasing version numbers, letters or punctuation."""
+    if row.get("coverage") != "complete":
+        return None
+    title = _literal(row.get("title"))
+    paragraphs = tuple(text for paragraph in row.get("paragraphs") or () if (text := _literal(paragraph)))
+    if len(title) < 6 or not paragraphs:
+        return None
+    material = "".join(character for paragraph in paragraphs for character in paragraph if character.isalnum())
+    if len(material) < 120 or len(set(material)) < 24:
+        return None
+    return sha256(json.dumps((title, paragraphs), ensure_ascii=False, separators=(",", ":")).encode("utf-8")).digest()
+
+
+def _explicit_intro_conflict(left, right):
+    if _known_conflict(left, right, same_version=True):
+        return True
+    a, b = _analysis(left), _analysis(right)
+    for field in ("series", "edition"):
+        first, second = _literal(a.get(field)), _literal(b.get(field))
+        if first and second and first != second:
+            if field != "edition" or not _edition(first) or _edition(first) != _edition(second):
+                return True
+    return False
+
+
+def _first_seen(value):
+    try:
+        seen = datetime.fromisoformat(value)
+        return seen.timestamp() if seen.tzinfo is not None else float("inf")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return float("inf")
+
+
 class _Groups:
     """Merge components with a stable anchor from the first confirmed join."""
     def __init__(self, members):
@@ -269,11 +309,11 @@ class _Groups:
         self.members = {key: {key} for key in members}
         self.first = {}
 
-    def join(self, a, b, order):
+    def join(self, a, b, order, *, anchor=None):
         a, b = self.anchor[a], self.anchor[b]
         if a == b:
             return
-        winner, removed = sorted((a, b), key=lambda key: (self.first.get(key, order), key))
+        winner, removed = sorted((a, b), key=lambda key: (key != anchor, self.first.get(key, order), key))
         self.first[winner] = min(self.first.get(winner, order), self.first.pop(removed, order))
         moved = self.members.pop(removed)
         self.members[winner].update(moved)
@@ -282,13 +322,16 @@ class _Groups:
 
 class CatalogRelations:
     """A snapshot of confirmed relationships. Legacy resource bindings are left in place."""
-    def __init__(self, rows, relationships):
+    def __init__(self, rows, relationships, *, first_seen=None):
         self.rows = {}
         for row in rows:
             key = article_identity(row)
             if key in self.rows:
                 raise ValueError("目录来源文章身份重复")
             self.rows[key] = row
+        first_seen = first_seen or {}
+        self.intake_order = {key: (_first_seen(first_seen.get(row.get("article_key"))), position)
+                             for position, (key, row) in enumerate(self.rows.items())}
         id_counts = Counter(row.get("id") for row in self.rows.values())
         self.ambiguous = {key for key, row in self.rows.items()
                           if row.get("action_pending") is True or id_counts[row.get("id")] > 1}
@@ -349,6 +392,8 @@ class CatalogRelations:
                 continue
             self.versions.join(a, b, current[a, b][0])
 
+        self.exact_groups = self._fold_complete_intros(current, approved_same)
+
         for key, group in self.versions.members.items():
             for member in sorted(group - {key}):
                 self.series.join(key, member, self.versions.first[key])
@@ -378,6 +423,37 @@ class CatalogRelations:
         self.display_ids = {key: _key_hash("cv_", key) for key in self.versions.members}
         self.series_ids = {key: _key_hash("cs_", key) for key in self.series.members}
 
+    def _fold_complete_intros(self, current, approved_same):
+        """Fold presentation only when complete text matches across independent sources."""
+        if len({site for site, _ in self.rows}) < 2:
+            return {}
+        buckets = defaultdict(list)
+        for key, row in self.rows.items():
+            if key not in self.ambiguous and (fingerprint := _complete_intro_fingerprint(row)):
+                buckets[fingerprint].append(key)
+        exact = {}
+        for order, members in enumerate(buckets.values(), len(current)):
+            if not 2 <= len(members) <= 32 or len({site for site, _ in members}) < 2:
+                continue
+            group = set(members)
+            anchors = {self.versions.anchor[key] for key in members}
+            if len(anchors) < 2 or any(self.versions.members[key] - group for key in anchors):
+                # Never pull an unverified member through an existing same-version group.
+                continue
+            if any(((left, right) in current and (left, right) not in approved_same)
+                   or _explicit_intro_conflict(self.rows[left], self.rows[right])
+                   for left, right in combinations(sorted(members), 2)):
+                continue
+            # An explicit group already has an externally visible ID. Keep its anchor.
+            established = [key for key in anchors if len(self.versions.members[key]) > 1]
+            if len(established) > 1:
+                continue
+            anchor = established[0] if established else min(anchors, key=self.intake_order.__getitem__)
+            for key in anchors - {anchor}:
+                self.versions.join(anchor, key, order, anchor=anchor)
+            exact[anchor] = len(anchors) - 1
+        return exact
+
     def _ref(self, key):
         row = self.rows[key]
         return {**{field: row.get(field) for field in ("id", "article_key", "article_revision", "title",
@@ -389,6 +465,9 @@ class CatalogRelations:
     def _rep(self, members, preferred=()):
         if len(members) == 1:
             return next(iter(members))
+        if self.versions.anchor[next(iter(members))] in self.exact_groups:
+            matching = members.intersection(preferred)
+            return min(matching or members, key=self.intake_order.__getitem__)
 
         def score(key):
             row = self.rows[key]
@@ -481,10 +560,10 @@ class CatalogRelations:
         groups, preferred = self._matched(matching_rows)
         return len(self._visible(groups, preferred))
 
-    def project(self, matching_rows, *, keep_selected=()):
+    def project(self, matching_rows, *, keep_selected=(), all_versions=False):
         """Choose representatives and older versions strictly within the caller's matched set."""
         groups, preferred = self._matched(matching_rows, keep_selected)
-        visible = self._visible(groups, preferred)
+        visible = groups.keys() if all_versions else self._visible(groups, preferred)
         return [self._display(self._rep(group, preferred), groups=groups)
                 for key, group in groups.items() if key in visible]
 
@@ -498,4 +577,5 @@ class CatalogRelations:
                 "confirmed_series": sum(len(versions) > 1 for versions in self.family_versions.values()),
                 "hidden_older_versions": len(self.versions.members) - displayed,
                 "displayed_projects": displayed,
-                "folded_sources": len(self.rows) - len(self.versions.members)}
+                "folded_sources": len(self.rows) - len(self.versions.members),
+                "exact_intro_folds": sum(self.exact_groups.values())}

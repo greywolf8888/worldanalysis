@@ -121,13 +121,24 @@ def media_source(raw, work, record, *, verify_original=False):
     return original
 
 
+class ReceivedCoverageError(ValueError):
+    """A content gate found an issue in material already received."""
+
+    def __init__(self, state, location, message):
+        super().__init__(message)
+        self.state = state
+        self.location = location
+
+
 def require_readable_videos(media):
     if unreadable := media.get("unreadable"):
         files = "、".join(row["source"] for row in unreadable)
-        raise ValueError(f"原视频仍有取材缺口，补查后才能完成整课验收。待补原件 {files}")
+        raise ReceivedCoverageError("received_unreadable", unreadable[0]["source"],
+                                    f"原视频仍有取材缺口。已收到的视频须恢复可读后继续核对 {files}")
     if unresolved := media.get("routing_unresolved"):
         files = "、".join(row["source"] for row in unresolved[:8])
-        raise ValueError(f"{len(unresolved)} 项媒体或档内内容仍待核对。见 media-inventory.json 和媒体归类.json。{files}")
+        raise ReceivedCoverageError("received_unresolved", unresolved[0]["source"],
+                                    f"{len(unresolved)} 项媒体或档内内容仍待核对。见 media-inventory.json 和媒体归类.json。{files}")
 
 
 def inventory_files(root):

@@ -10,8 +10,8 @@ function el(tag, value = '', className = '') {
 const numberFormat = new Intl.NumberFormat('zh-CN');
 const fmt = value => numberFormat.format(value);
 const amountFormat = new Intl.NumberFormat('zh-CN', {maximumFractionDigits: 2});
-const DEFAULT = {q:'', category:'', subcategory:'', platform:'', status:'', site:'', from:'', to:'', order:'newest', view:'grid', selected:'0', baidu:'0', page:1, scroll:0};
-const urlFilters = ['q','category','subcategory','platform','status','site','from','to','order','selected','baidu','page'];
+const DEFAULT = {q:'', category:'', subcategory:'', platform:'', status:'', site:'', from:'', to:'', order:'newest', view:'grid', selected:'0', baidu:'0', versions:'latest', page:1, scroll:0};
+const urlFilters = ['q','category','subcategory','platform','status','site','from','to','order','selected','baidu','versions','page'];
 const calendarFilters = ['q','category','subcategory','platform','site'];
 const selection = window.worldanalysisSelection;
 const facetTargets = {category:$('topics'), platform:$('platforms'), subcategory:$('subcategories')};
@@ -167,6 +167,7 @@ function readLocationFilters() {
     }
   }
   if (!['newest','oldest','title'].includes(result.order)) result.order = DEFAULT.order;
+  if (result.versions !== 'all') result.versions = DEFAULT.versions;
   for (const key of ['selected','baidu']) if (result[key] !== '1') result[key] = '0';
   if (result.site && !meta.sites.some(item => item.id === result.site)) result.site = '';
   if (result.status && !resourceStates[result.status]) result.status = '';
@@ -194,8 +195,11 @@ function setPressed(id, pressed) {
   $(id).setAttribute('aria-pressed', String(pressed));
 }
 function syncControls({search = true} = {}) {
+  const fullVersions = meta.catalog_version_filter === true;
+  $('versions').disabled = !fullVersions;
+  if (!fullVersions) filter.versions = DEFAULT.versions;
   if (search) $('q').value = filter.q;
-  for (const id of ['status','site','from','to','order']) $(id).value = filter[id];
+  for (const id of ['status','site','from','to','order','versions']) $(id).value = filter[id];
   setPressed('grid', filter.view === 'grid');
   setPressed('list', filter.view === 'list');
   setPressed('available', filter.baidu === '1');
@@ -207,6 +211,7 @@ function syncControls({search = true} = {}) {
   const platform = meta.platforms?.find(item => item.id === filter.platform);
   $('result-title').textContent = [topic?.label, platform?.label].filter(Boolean).join(' · ') || '全部资料';
   const params = new URLSearchParams(calendarFilters.filter(key => filter[key]).map(key => [key, filter[key]]));
+  if (filter.versions === 'all') params.set('versions', 'all');
   if (filter.selected === '1') params.set('selected', '1');
   if (filter.to) params.set('day', filter.to);
   $('catalog-calendar-link').href = '/courses' + (params.size ? '?' + params : '');
@@ -431,7 +436,7 @@ function renderSelection() {
 function render() {
   cardsFrom(page);
   $('empty').hidden = page.total > 0;
-  const tally = [fmt(page.total) + ' 个项目'];
+  const tally = [fmt(page.total) + (filter.versions === 'all' ? ' 个版本' : ' 个项目')];
   if (Number.isSafeInteger(page.version_total) && page.version_total > page.total) tally.push(fmt(page.version_total) + ' 个版本');
   if (Number.isSafeInteger(page.source_total) && page.source_total > page.total) tally.push(fmt(page.source_total) + ' 篇来源');
   $('result-count').textContent = tally.join(' · ');
@@ -486,6 +491,7 @@ async function query({top = false, restore = null, focusResult = false, limit = 
   queryController = controller;
   const request = {...filter};
   const pageFilter = {...request, view:'list'};
+  if (pageFilter.versions === DEFAULT.versions) delete pageFilter.versions;
   if (limit !== baseCatalogLimit) pageFilter.limit = limit;
   querying = true;
   notice('error');
@@ -723,6 +729,166 @@ function relatedSection(kind, label, entries) {
   details.append(list);
   return details;
 }
+const decisionRelations = {
+  same_edition_source:'同版来源', different_version:'不同版本', newer:'较新版本', older:'较早版本',
+  related:'同类玩法', contains:'内容范围相关', topic_candidate:'同类玩法线索',
+};
+function decisionEvidence(version) {
+  const join = values => Array.isArray(values) ? values.join('、') : '';
+  const coverage = version.analysis_scope || ({
+    completed:'已有同版教材', completed_received_scope:'已有实收教材',
+    same_source_reuse:'已有同源教材', local_result_available:'已有本地分析',
+  })[version.analysis_state];
+  return factTable([
+    ['简介', version.introduction],
+    ['简介署名', version.author],
+    ['学习方向', version.objective],
+    ['简介所列方法', join(version.methods)],
+    ['简介所提工具', join(version.tools)],
+    ['简介所述条件', join(version.conditions)],
+    ['已有教材', coverage],
+  ]);
+}
+function decisionDifference(record, focus = '当前版', peer = '对照版') {
+  const difference = record.comparison || {};
+  const describe = part => part?.count ? [`${part.count} 项`, ...part.examples].join(' · ') : '';
+  return factTable([
+    ['共同列出的课程条目', difference.shared_outline_count],
+    [focus + '目录独列', describe(difference.focus_only)],
+    [peer + '目录独列', describe(difference.peer_only)],
+    [focus + '简介独提工具', difference.focus_tools?.join('、')],
+    [peer + '简介独提工具', difference.peer_tools?.join('、')],
+    [focus + '简介独列条件', difference.focus_conditions?.join('、')],
+    [peer + '简介独列条件', difference.peer_conditions?.join('、')],
+    [focus + '简介独列变现方式', difference.focus_monetization?.join('；')],
+    [peer + '简介独列变现方式', difference.peer_monetization?.join('；')],
+    [focus + '简介独列费用与投入', difference.focus_costs?.join('；')],
+    [peer + '简介独列费用与投入', difference.peer_costs?.join('；')],
+    [focus + '简介独列配套线索', difference.focus_materials?.join('；')],
+    [peer + '简介独列配套线索', difference.peer_materials?.join('；')],
+  ]);
+}
+function decisionSection(decision) {
+  if (!decision?.focus) return null;
+  const panel = el('details', null, 'article-relations');
+  panel.dataset.relation = 'decision';
+  panel.append(el('summary', '选择分析版本'));
+  if (decision.advice) panel.append(el('p', decision.advice));
+  panel.append(decisionEvidence(decision.focus));
+  const choice = decision.comparisons || [];
+  if (choice.length) {
+    const list = el('ul');
+    for (const record of choice) {
+      const version = record.version;
+      if (!version || !resourceIdPattern.test(version.id) || !articleKeyPattern.test(version.article_key)) continue;
+      const entry = el('li');
+      const route = button(version.title, 'relation-title');
+      route.addEventListener('click', () => void openReader(version));
+      entry.append(route);
+      const attribution = record.author_relation === 'different' ? '公开介绍署名不同'
+        : record.author_relation === 'same' ? '公开介绍署名相同' : '';
+      const label = [decisionRelations[record.relation], version.version_label, version.site_label,
+        shortDate(version.published_at), attribution].filter(Boolean).join(' · ');
+      if (label) entry.append(el('span', label, 'muted'));
+      entry.append(decisionEvidence(version));
+      if (record.comparison) entry.append(decisionDifference(record));
+      const openBook = textbook({obsidian_href:version.textbook_href});
+      if (openBook) entry.append(openBook);
+      list.append(entry);
+    }
+    if (list.children.length) panel.append(list);
+  }
+  return panel;
+}
+function playbookRoute(entry) {
+  const title = button(entry.title, 'relation-title');
+  title.addEventListener('click', () => {
+    closeDialog($('playbooks'));
+    void openReader(entry, $('playbooks-open'));
+  });
+  return title;
+}
+function playbookProfile(entry) {
+  const row = el('li');
+  const release = shortDate(entry.published_at);
+  const caption = [entry.site_label, release ? '原站发布 ' + release : '', entry.version_label];
+  const join = values => Array.isArray(values) ? values.join('；') : '';
+  row.append(playbookRoute(entry), el('small', caption.filter(Boolean).join(' · '), 'muted'), decisionEvidence(entry));
+  row.append(factTable([
+    ['适用平台', join(entry.platforms)], ['原文所列版次时间', join(entry.version_dates)],
+    ['简介所述变现方式', join(entry.monetization)], ['简介所述费用与投入', join(entry.costs)],
+    ['简介所列独有配套线索', join(entry.materials)], ['待核实', join(entry.pending)],
+  ]));
+  if (entry.formal) {
+    if (entry.formal.received) row.append(el('p', '同版实收资料已验收。', 'muted'));
+    const book = textbook({obsidian_href:entry.formal.href});
+    if (book) row.append(book);
+  }
+  if (entry.lineage?.length) {
+    const history = el('details', null, 'article-relations');
+    history.append(el('summary', '同系列版本与同课来源'));
+    for (const record of entry.lineage) {
+      const version = record.version;
+      history.append(playbookRoute(version));
+      const label = [decisionRelations[record.relation], version.version_label, shortDate(version.published_at)];
+      history.append(el('small', label.filter(Boolean).join(' · '), 'muted'));
+      if (record.comparison) history.append(decisionDifference(record, '当前版', record.relation === 'older' ? '旧版' : '对照版'));
+      const book = textbook({obsidian_href:version.textbook_href});
+      if (book) history.append(book);
+    }
+    row.append(history);
+  }
+  if (entry.recommendation) {
+    row.append(factTable([['分析建议', entry.recommendation.action], ['依据', entry.recommendation.reason]]));
+  }
+  for (const quote of entry.quotes || []) row.append(el('blockquote', quote));
+  return row;
+}
+function playbookGroup(group) {
+  const section = el(group.theme ? 'details' : 'section', null, 'article-relations');
+  if (group.theme) section.append(el('summary', group.theme));
+  const entries = new Map(group.entries.map(entry => [entry.article_key, entry]));
+  const list = el('ul', null, 'playbook-pair');
+  list.setAttribute('aria-label', '专题项目，按原站发布日期排列');
+  for (const entry of group.entries) list.append(playbookProfile(entry));
+  section.append(list);
+  if (group.comparisons?.length) {
+    const details = el('details', null, 'article-relations');
+    details.append(el('summary', '玩法变化与原文依据'));
+    for (const comparison of group.comparisons) {
+      const pair = el('div', null, 'playbook-pair');
+      // The titles on each side identify the introduction that each quote describes.
+      for (const side of ['left', 'right']) {
+        const source = entries.get(comparison[side]);
+        if (!source) continue;
+        pair.append(playbookRoute(source));
+        for (const quote of comparison.evidence?.[side] || []) pair.append(el('blockquote', quote));
+      }
+      if (comparison.reason) pair.append(el('p', comparison.reason));
+      pair.append(decisionDifference(comparison, '前列项目', '后列项目'));
+      details.append(pair);
+    }
+    section.append(details);
+  }
+  return section;
+}
+async function playbooksPanel() {
+  const content = $('playbooks-body');
+  content.replaceChildren(el('p', '加载中…', 'muted'));
+  openDialog('playbooks');
+  try {
+    const {items} = await api('/api/playbooks');
+    const groups = el('div');
+    for (const group of items) groups.append(playbookGroup(Array.isArray(group) ? {entries:group} : group));
+    content.replaceChildren(items.length ? groups : el('p', '暂无可比较的玩法。', 'muted'));
+  } catch {
+    const retry = button('重新加载');
+    retry.addEventListener('click', () => void playbooksPanel());
+    content.replaceChildren(el('p', '未能加载玩法专题。', 'notice'), retry);
+  }
+}
+$('playbooks-open')?.addEventListener('click', () => void playbooksPanel());
+
 function renderReader(row) {
   $('reader-title').textContent = row.title;
   const platforms = catalogFacets.labels(row, filter.platform, Infinity);
@@ -746,10 +912,24 @@ function renderReader(row) {
     if (analysis) actions.append(analysis);
     article.append(actions);
   }
-  const sources = relatedSection('sources', '其他来源', row.other_sources);
-  const versions = relatedSection('versions', '其他版本', row.other_versions);
+  const followups = row.related_followups || [];
+  const sources = relatedSection('sources',
+    followups.some(entry => entry.relation === 'same_edition_source') ? '可核对的其他来源' : '其他来源',
+    row.other_sources);
+  const versions = relatedSection('versions',
+    followups.some(entry => entry.relation === 'different_edition') ? '可对照的其他版本' : '其他版本',
+    row.other_versions);
   if (sources) article.append(sources);
   if (versions) article.append(versions);
+  if (row.relationship_pending === true) article.append(el('p', '版本关系待核实', 'muted'));
+  const decision = decisionSection(row.analysis_decision);
+  if (decision) article.append(decision);
+  const completion = courseCompletionRows(row);
+  if (completion.length) {
+    const details = el('details', null, 'article-relations');
+    details.append(el('summary', '分析与资料'), factTable(completion));
+    article.append(details);
+  }
   const blocks = row.blocks || [];
   if (row.excerpt && !blocks.some(block => block.kind === 'text' && (block.text === row.excerpt || block.text.startsWith(row.excerpt)))) {
     article.append(el('p', row.excerpt, 'article-excerpt'));
@@ -903,6 +1083,7 @@ $('empty-reset').addEventListener('click', resetFilters);
 $('available').addEventListener('click', () => applyFilter({baidu:filter.baidu === '1' ? '0' : '1'}));
 $('selected').addEventListener('click', () => applyFilter({selected:filter.selected === '1' ? '0' : '1'}));
 $('order').addEventListener('change', () => applyFilter({order:$('order').value}));
+$('versions').addEventListener('change', () => applyFilter({versions:$('versions').value}));
 for (const view of ['grid','list']) $(view).addEventListener('click', () => {
   if (!loaded || filter.view === view) return;
   filter = {...filter, view};
@@ -1029,6 +1210,7 @@ async function openLinkedView() {
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     [meta] = await Promise.all([api('/api/meta'), selection.load()]);
+    if ($('playbooks-open')) $('playbooks-open').hidden = meta.playbooks !== true;
     setChoices('status', meta.statuses.filter(row => resourceStates[row.id]), '全部状态', row => resourceStates[row.id]);
     setChoices('site', meta.sites, '全部来源');
     const {pageLimit, ...savedView} = prefs();

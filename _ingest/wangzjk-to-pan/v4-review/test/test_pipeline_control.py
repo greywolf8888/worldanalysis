@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
@@ -8,7 +10,8 @@ from unittest.mock import MagicMock, patch
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from pipeline_control import RunBusy, RunStore, collect_catalog, current_discovery, verify_pipeline, worker
+from pipeline_control import PipelineControl, RunBusy, RunStore, check_dsh, collect_catalog, current_discovery, verify_pipeline, worker
+from dsh_health import dedicated_dsh_status
 
 
 class PipelineControlTests(unittest.TestCase):
@@ -28,6 +31,53 @@ class PipelineControlTests(unittest.TestCase):
         recovered = RunStore(self.store.path).recent()[0]
         self.assertEqual((recovered['state'], recovered['summary']), ('complete', '已读回'))
         self.store.reserve('collect')
+
+    def test_dedicated_connection_requires_current_desktop_identity(self):
+        row = {'schema_version': 1, 'profile_ready': True, 'netdisk_account': 'unverified',
+               'bridge': {'connected': True, 'last_verified_at': 'past'},
+               'desktop': {'profile_ready': True,
+                           'bridge': {'connected': True, 'observed_at': 'now', 'authenticated_readback': True},
+                           'session': {'identity_verified': True}},
+               'claim_enabled': False, 'download_enabled': False}
+        with patch('dsh_health.subprocess.run') as run:
+            run.return_value.stdout = json.dumps(row).encode()
+            self.assertEqual(dedicated_dsh_status(), {
+                'connected': True, 'verified_at': 'now', 'awaiting_account': True, 'execution_enabled': False,
+            })
+            row['desktop']['session']['identity_verified'] = False
+            run.return_value.stdout = json.dumps(row).encode()
+            self.assertEqual(dedicated_dsh_status(), {
+                'connected': False, 'verified_at': None, 'awaiting_account': True, 'execution_enabled': False,
+            })
+
+    def test_check_dsh_desktop_connection_does_not_claim_netdisk_authorization(self):
+        with patch('pipeline_control.dedicated_dsh_status',
+                   return_value={'connected': True, 'awaiting_account': True}), \
+                patch('pipeline_control.probe_dsh') as old:
+            self.assertEqual(check_dsh(8772), ('complete', '专用 DSH 已连接。百度网盘账号待核对。'))
+            old.assert_not_called()
+
+    def test_synced_local_inventory_does_not_show_download_as_ready(self):
+        library = SimpleNamespace(discovery={}, meta={'totals': {'articles': 0}})
+        local = SimpleNamespace(
+            overview=lambda: {'sync_state': 'live', 'counts': {'registered_projects': 166}},
+            cleanup_preparation=lambda: {},
+        )
+        preflight = {'ordered_items': [], 'eligible_for_confirmation': 0, 'platform_hold_present': True}
+        control = PipelineControl(8772, store=self.store)
+        with patch('pipeline_control.build_worklist', return_value={'counts': {'missing_direct_url': 0, 'known_direct_url': 0}}), \
+                patch('pipeline_control.read_observations', return_value={}), \
+                patch('pipeline_control.read_non_projects', return_value={}), \
+                patch('pipeline_control.dedicated_dsh_status', return_value=None), \
+                patch('pipeline_control.readiness', return_value=preflight):
+            stages = {row['id']: row for row in control.overview(library, {}, local, False, {})['stages']}
+            self.assertEqual(stages['transfer']['state'], 'paused')
+            self.assertEqual(stages['download']['state'], 'waiting')
+            self.assertEqual(stages['download']['metrics'], [{'label': '本地登记项目', 'value': 166}])
+            preflight['platform_hold_present'] = False
+            stages = {row['id']: row for row in control.overview(library, {}, local, False, {})['stages']}
+            self.assertEqual(stages['transfer']['state'], 'waiting')
+            self.assertEqual(stages['download']['state'], 'waiting')
 
     def test_disconnected_worker_does_not_look_complete_or_retry_automatically(self):
         key = self.store.reserve('collect')

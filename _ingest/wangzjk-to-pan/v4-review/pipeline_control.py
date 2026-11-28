@@ -17,19 +17,20 @@ from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 from uuid import uuid4
 
-from catalog_model import ROOT, now
+from catalog_model import CATALOG_PATH_ENV, CATALOG_PATH_VERSION, ROOT, SEMANTIC_DB, now
 from collect_public import (HOME_TZ, REGULAR_DETAIL_BUDGET, REGULAR_PAGES, STATE, collect,
                             collector_lock, load, local_clock)
 from confirm_gate import readiness
-from dsh_health import BRIDGE, probe_dsh
+from dsh_health import BRIDGE, dedicated_dsh_status, probe_dsh
 from member_queue import (
     DEFAULT_NON_PROJECTS, DEFAULT_OBSERVATIONS, build_worklist, read_non_projects, read_observations,
 )
 
+DEFAULT_PORT = 8772
 JOBS = {'collect': '采集公开目录', 'verify': '检查全链路', 'check_dsh': '检查 DSH 连接'}
 CATALOG_RUNS = {'catalog_export': '导出简介识别', 'catalog_import': '保存简介识别', 'catalog_resume': '恢复简介任务'}
 RUN_ID = re.compile(r'[a-f0-9]{32}\Z')
-DB_PATH = ROOT / 'data' / 'pipeline-runs.sqlite3'
+DB_PATH = SEMANTIC_DB
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -226,6 +227,11 @@ def verify_pipeline(port):
 
 
 def check_dsh(_port):
+    dedicated = dedicated_dsh_status()
+    if dedicated and dedicated['connected']:
+        if dedicated['awaiting_account']:
+            return 'complete', '专用 DSH 已连接。百度网盘账号待核对。'
+        return 'complete', '专用 DSH 已连接。'
     return {
         'ready': ('complete', '已核实 DSH 原会话可接收交接。'),
         'busy': ('waiting', 'DSH 原会话正在处理，请稍后查看。'),
@@ -269,6 +275,7 @@ class PipelineControl:
         try:
             subprocess.Popen([sys.executable, '-X', 'utf8', '-B', str(Path(__file__).absolute()),
                               '--port', str(self.port), '_worker', key], cwd=ROOT,
+                             env={**os.environ, CATALOG_PATH_ENV: CATALOG_PATH_VERSION},
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
                              start_new_session=os.name != 'nt')
@@ -292,8 +299,17 @@ class PipelineControl:
         preservation = progress.get('local_preservation') or {}
         local_counts = progress.get('counts') or {}
         last_dsh_check = next((row for row in runs if row['action'] == 'check_dsh' and row['finished_at']), None)
+        dedicated = dedicated_dsh_status()
+        transfer_note = '请按顺序确认所选项目，由 DSH 核对范围与网盘容量。'
+        if dedicated and dedicated['connected'] and not dedicated['execution_enabled']:
+            transfer_note += '专用 DSH 已连接。'
+            if dedicated['awaiting_account']:
+                transfer_note += '百度网盘账号待核对。'
         discovery = public.get('last_discovery') or {}
         collection_waiting = pending or public.get('discovery_status') == 'incomplete' or not public.get('observed_at')
+        transfer_state = 'blocked' if preflight['ordered_items'] else 'waiting'
+        if preflight['platform_hold_present']:
+            transfer_state = 'paused'
         stages = [
             stage('collection', '公开采集', 'running' if active == 'collect' else
                   'blocked' if public.get('stop_reason') else 'waiting' if collection_waiting else 'ready',
@@ -304,14 +320,15 @@ class PipelineControl:
                   '在已登录的原站浏览器核对资料入口。', None,
                   {'已收录百度入口': member['known_direct_url'], '待补百度入口': member['missing_direct_url']},
                   links={'/member-import': '继续补录'}),
-            stage('transfer', '选择与转存', 'blocked' if preflight['ordered_items'] else 'waiting',
-                  '请按顺序确认所选项目，由 DSH 核对范围与网盘容量。',
-                  last_dsh_check['finished_at'] if last_dsh_check else None,
+            stage('transfer', '选择与转存', transfer_state,
+                  transfer_note,
+                  (dedicated and dedicated['verified_at'])
+                  or (last_dsh_check['finished_at'] if last_dsh_check else None),
                   {'清单项目': len(preflight['ordered_items']), '可确认': preflight['eligible_for_confirmation']},
                   links={'/?panel=transfer': '打开转存清单', '/?panel=confirmation': '转存复核'},
                   actions=[job_action('check_dsh')] if not active and BRIDGE.is_file() else []),
-            stage('download', '本地下载', 'ready' if ready else 'waiting',
-                  '按原流程手动下载，核对收件项目与实际文件。', progress.get('observed_at'),
+            stage('download', '本地下载', 'waiting',
+                  '等待专用 DSH 核对可下载的资料与收件位置。', progress.get('observed_at'),
                   {'本地登记项目': local_counts.get('registered_projects')} if ready else {},
                   links={'/?panel=progress': '查看处理进度'}),
             stage('analysis', '分析与独立验收', 'running' if ready and current else 'waiting',
@@ -339,7 +356,7 @@ def stage(key, label, state, summary, at, metrics, *, links=None, actions=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--port', type=int, default=8767)
+    parser.add_argument('--port', type=int, default=DEFAULT_PORT)
     parser.add_argument('action', choices=['status', *JOBS, 'collect-scheduled', '_worker'])
     parser.add_argument('key', nargs='?')
     args = parser.parse_args()

@@ -7,8 +7,9 @@ from pathlib import Path
 import re
 from urllib.parse import quote, unquote
 
+from course_companions import ORIGINALS, PREVIEW_MANIFEST, companion_assets, course_file_references
 from frames import diagram_source, document_image, nearby_requests, orig, orig_many
-from project import ENTRY, copy_file, local_child, read, require_readable_videos, sha, write
+from project import ENTRY, copy_file, local_child, put, read, require_readable_videos, sha, write
 from reader_review import markdown_segments
 from transcript import stamp
 from PIL import Image, ImageChops
@@ -18,7 +19,6 @@ REF = re.compile(r"\{\{(D?\d+)\|([^{}]+)\}\}")
 REF_RUN = re.compile(rf"(?:\*对照\*[ \t\u00a0]*)?{REF.pattern}(?:[ \t\u00a0]*{REF.pattern})*")
 ART = re.compile(r"\{\{img:([^{}|]+)\|(\d+)\}\}")
 WIKILINK = re.compile(r"\[\[([^\]]+)\]\]")
-LOCAL_LINK = re.compile(r"\]\(((?:\.\./|file:///)[^)]+)\)")
 LOCAL_IMAGE = re.compile(r"!\[[^\]\n]+\]\(([^)\n]+)\)")
 # Obsidian does not resolve encoded commas or at signs in local image paths.
 LOCAL_PATH_SAFE = "/+@,&"
@@ -93,7 +93,7 @@ def check_video_figures(course, selected, *, ledger, art_root):
         check_figure(course, info, ledger=ledger, art_root=art_root, native=native)
 
 
-def verify_links(course, deliver, *, art_root):
+def verify_links(course, deliver, *, art_root, companion_draft=None):
     count = 0
     for file, text in deliver.items():
         for value in WIKILINK.findall(text):
@@ -116,14 +116,12 @@ def verify_links(course, deliver, *, art_root):
                 if target_body is None or not re.search(prefix + re.escape(anchor) + r"\s*$", target_body):
                     raise ValueError(f"{file} 的标题或块定位不存在 {value}")
             count += 1
-        for raw in LOCAL_LINK.findall(text):
-            if raw.startswith("file:///"):
-                raise ValueError("课程包里的原件出处使用可携带的相对链接")
-            file_path = ((course / file).parent / unquote(raw)).resolve()
-            allowed = course / "原始资料"
-            if not file_path.is_relative_to(allowed) or not file_path.is_file():
-                raise ValueError(f"{file} 的资料入口不可用 {raw}")
+        for name in course_file_references(text):
+            if (Path(file).parent != ENTRY.parent
+                    or name.startswith(f"{ORIGINALS}/") and not local_child(course, name).is_file()):
+                raise ValueError(f"{file} 的资料入口不可用 {name}")
             count += 1
+        companion_assets(course, text, draft=companion_draft)
         for raw in LOCAL_IMAGE.findall(text):
             asset = ((art_root / file).parent / unquote(raw)).resolve()
             if not asset.is_relative_to(art_root / "课件/原图") or not asset.is_file():
@@ -242,7 +240,7 @@ def compile_textbook(course, work, ledger, *, art_root, order):
     if re.search(r"(?m)^>\s*\[!info\][+-]?\s*原课与配套资料\s*$", body):
         raise ValueError("原课入口由编译器统一放在文末")
     deliver = {ENTRY.as_posix(): body + "\n\n" + "\n".join(index) + "\n"}
-    verify_links(course, deliver, art_root=art_root)
+    verify_links(course, deliver, art_root=art_root, companion_draft=work)
     images = [info for stem, info in figures.items() if stem in used_figures]
     expected = {Path(info["name"]).relative_to("课件").as_posix() for info in images}
     if {unquote(raw) for raw in LOCAL_IMAGE.findall(body)} != expected:
@@ -266,9 +264,17 @@ def compile_textbook(course, work, ledger, *, art_root, order):
     return deliver, {"document_refs": sorted(cited_docs)}, images
 
 
-def render_preview(preview, deliver, images, art_root):
+def render_preview(preview, deliver, images, art_root, *, companion_draft=None, companion_fallback=None):
+    assets = {}
+    for body in deliver.values():
+        assets.update(companion_assets(companion_fallback or preview, body, draft=companion_draft))
     for info in images:
         source = local_child(art_root, info["name"])
         copy_file(source, local_child(preview, info["name"]), sha(source))
+    for name, (source, fingerprint) in assets.items():
+        copy_file(source, local_child(preview, name), fingerprint)
+    manifest = local_child(preview, PREVIEW_MANIFEST)
+    if assets or manifest.is_file():
+        put(manifest, {"schema": 1, "companions": {name: digest for name, (_, digest) in assets.items()}})
     for filename, body in deliver.items():
         write(local_child(preview, filename), body)

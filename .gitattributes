@@ -3,3 +3,6 @@ worldanalysis/derived_publication.py text eol=lf
 
 # Frame capture receipts verify the original browser helper bytes.
 _tools/browser-source-frame.js text eol=lf
+
+# The local resource catalog verifies the projection script bytes.
+_tools/v4-local-status-preservation.py text eol=lf

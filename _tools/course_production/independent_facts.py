@@ -29,6 +29,9 @@ def identity(body, review):
     facts = required_facts(review)
     result = {"schema": SCHEMA, "body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
               "scope_sha256": fingerprint(review["source_scope"]), "facts_sha256": fingerprint(facts)}
+    companions = review.get("snapshot", {}).get("companions")
+    if companions:
+        result["companions"] = companions
     if review.get("scope_review_schema") == SCOPE_REVIEW_SCHEMA:
         result["scope_review_sha256"] = fingerprint({k: review[k] for k in SCOPE_FIELDS})
         # Scope approval covers the received items even if no explicit critical facts exist.
@@ -39,13 +42,33 @@ def identity(body, review):
 
 
 def needs_receipt(review):
-    return bool(required_facts(review) or review.get("scope_review_schema") == SCOPE_REVIEW_SCHEMA)
+    return bool(required_facts(review) or review.get("scope_review_schema") == SCOPE_REVIEW_SCHEMA
+                or review.get("snapshot", {}).get("companions"))
+
+
+def review_runtime():
+    default_runtime = ROOT.parent if ROOT.parent.name == ".runtime" else ROOT / ".runtime"
+    return Path(os.environ.get("WORLDANALYSIS_COURSE_RUNTIME", default_runtime)).resolve()
+
+
+def configured_reviewer(*, workspace=None):
+    runtime = review_runtime()
+    state = (workspace if workspace is not None else runtime.parent) / "整理结果/生产控制/上线状态.json"
+    if not state.is_file():
+        if workspace is not None or ROOT.parent.name == ".runtime" and runtime == ROOT.parent:
+            raise ValueError(f"正式出版需有效的分析与测试角色配置 {state}")
+        return None
+    roles = read(state)
+    tester = roles.get("test_thread") if isinstance(roles, dict) else None
+    analyst = roles.get("analysis_thread") if isinstance(roles, dict) else None
+    if not substantive_note(tester) or not substantive_note(analyst) or tester == analyst:
+        raise ValueError(f"分析与独立测试角色配置必须为不同会话 {state}")
+    return tester
 
 
 def receipt_path(body, review):
     current = identity(body, review)
-    runtime = Path(os.environ.get("WORLDANALYSIS_COURSE_RUNTIME", ROOT / ".runtime")).resolve()
-    directory = local_child(runtime, "independent-fact-reviews")
+    directory = local_child(review_runtime(), "independent-fact-reviews")
     return local_child(directory, f"{fingerprint(current)}.json")
 
 
@@ -55,6 +78,8 @@ def review_request(body, review):
                "reviewer": {"role": "", "thread_id": "", "reviewed_at": ""}, "decision": "",
                "facts": [{**row, "decision": "", "observation": "", "evidence": "", "evidence_files": []}
                          for row in required_facts(review)]}
+    if reviewer := configured_reviewer():
+        request["expected_reviewer_thread_id"] = reviewer
     if review.get("scope_review_schema") == SCOPE_REVIEW_SCHEMA:
         request["scope_acceptance"] = {"scope_status": review["scope_status"], "prior_scope": review["scope_prior"], "decision": "",
             "coverage_observation": "", "gaps": [{**row, "decision": "", "review_observation": ""}
@@ -64,7 +89,7 @@ def review_request(body, review):
     return request
 
 
-def validate_independent_receipt(body, review, receipt):
+def validate_independent_receipt(body, review, receipt, *, expected_reviewer=None):
     """Require a version-bound independent review of each fact, including attribution."""
     expected = required_facts(review)
     if not needs_receipt(review) and receipt is None:
@@ -75,6 +100,8 @@ def validate_independent_receipt(body, review, receipt):
     if (not isinstance(reviewer, dict) or reviewer.get("role") != "测试agent"
             or not substantive_note(reviewer.get("thread_id")) or receipt.get("decision") != "通过"):
         raise ValueError("独立事实核验未获测试 agent 明确签收")
+    if expected_reviewer is not None and reviewer["thread_id"] != expected_reviewer:
+        raise ValueError("独立事实核验回执须由当前指定的测试 agent 签收")
     try:
         if datetime.fromisoformat(reviewer["reviewed_at"]).utcoffset() is None:
             raise ValueError("missing timezone")
@@ -120,7 +147,7 @@ def load_independent_receipt(body, review):
             raise ValueError(f"当前关键事实或范围待独立测试 agent 复核，回执应写入 {path}")
         return None
     receipt = read(path)
-    validate_independent_receipt(body, review, receipt)
+    validate_independent_receipt(body, review, receipt, expected_reviewer=configured_reviewer())
     # Optional attachments refer to the Worldanalysis directory, not the system disk.
     root = path.parent.parent.parent
     for row in receipt["facts"]:

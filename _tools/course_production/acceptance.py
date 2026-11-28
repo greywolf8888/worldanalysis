@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 from urllib.parse import unquote
 
+from course_companions import companion_hashes, verify_published_companions
 from embedded_media import DIRECTORY as EMBEDDED_MEDIA_DIR
 from independent_facts import load_independent_receipt, validate_independent_receipt
 from project import ENTRY, RECOVERY_DIR, copy_file, local_child, put, read, recovery_files, sha, write
@@ -47,6 +48,14 @@ def source_ranges(section, display_number):
     return [[timecode(left), timecode(right)] for comment in PARAGRAPH_SOURCE.findall(section)
             for number, left, right in VIDEO_RANGE.findall(comment)
             if int(number) == display_number and right and timecode(left) < timecode(right)]
+
+
+def edition_snapshot(root, body):
+    result = snapshot(root, body)
+    companions = companion_hashes(root, body)
+    if companions:
+        result["companions"] = companions
+    return result
 
 
 def prepare_review(project, body, ordered, receipt, *, scope_declaration=None):
@@ -128,7 +137,7 @@ def prepare_review(project, body, ordered, receipt, *, scope_declaration=None):
                     "scope_prior": previous_scope_context(project, body, evidence_from),
                     "scope_document_candidates": document_teaching_candidates(project)}
     return {
-        "schema": 2, "snapshot": {**snapshot(project.preview, body), "evidence": evidence,
+        "schema": 2, "snapshot": {**edition_snapshot(project.preview, body), "evidence": evidence,
                                   "source_scope_sha256": source_scope_digest(source_scope)},
         **declared,
         "source_scope": source_scope,
@@ -153,26 +162,31 @@ def clip_range(raw, duration):
     return start, end
 
 
-def nearby_figures(text, anchor, *, source=None):
-    text = COMMENT.sub(lambda match: match[0].replace("\n", " "), text)
-    blocks = re.split(r"\n[ \t]*\n", text)
-    visible = [COMMENT.sub("", block) for block in blocks]
-    matches = [index for index, block in enumerate(visible) if anchor in block]
-    if not matches:
+def nearby_figures(text, anchor, *, source):
+    display_number, start, end = source
+    has_anchor = False
+    for is_code, part in markdown_segments(text):
+        if is_code:
+            continue
+        part = COMMENT.sub(lambda match: match[0].replace("\n", " "), part)
+        blocks = re.split(r"\n[ \t]*\n", part)
+        visible = [COMMENT.sub("", block) for block in blocks]
+        for index, block in enumerate(visible):
+            if anchor not in block:
+                continue
+            has_anchor = True
+            if not any(left <= start + .05 and end <= right + .05
+                       for left, right in source_ranges(blocks[index], display_number)):
+                continue
+            found = figure_names(block)
+            for following in visible[index + 1:]:
+                if following.strip() and re.sub(IMAGE, "", following).strip():
+                    break
+                found.update(figure_names(following))
+            return found
+    if not has_anchor:
         raise ValueError(f"关键步骤无法定位到教材的可见文字 {anchor}")
-    index = matches[0]
-    if source:
-        display_number, start, end = source
-        index = next((candidate for candidate in matches if any(
-            left <= start + .05 and end <= right + .05
-            for left, right in source_ranges(blocks[candidate], display_number)
-        )), index)
-    found = figure_names(visible[index])
-    for following in visible[index + 1:]:
-        if following.strip() and re.sub(IMAGE, "", following).strip():
-            break
-        found.update(figure_names(following))
-    return found
+    raise ValueError(f"第 {display_number} 讲的关键步骤缺同段原片出处 {start:g}–{end:g} 秒 {anchor}")
 
 
 def validate_points(actual, expected, text):
@@ -405,15 +419,28 @@ def validate_scope_against_template(body, review, template):
     validate_scope_review(body, review)
 
 
-def check_render(render, digest):
+def check_render(render, digest, *, companions=None, require_companion_reading=False):
     checks = render.get("checks", [])
     if len(checks) != 1:
         raise ValueError("需要这一篇教材的 Obsidian 阅读回执")
     view = checks[0]
     if not (view["document_sha256"] == digest and view["mode"] == "preview" and view["reachedBottom"]
             and not view["horizontalOverflow"] and not view["visibleCitations"]
-            and "原课与配套资料" in view["closedAppendices"]):
+            and "原课与配套资料" in view["closedAppendices"]
+            and render.get("companions", {}) == (companions or {})):
         raise ValueError("Obsidian 回执与当前教材或阅读要求不一致")
+    if require_companion_reading or "companion_reading" in render:
+        expected = {name: sha for name, sha in (companions or {}).items() if Path(name).suffix.casefold() == ".md"}
+        proofs = render.get("companion_reading", {})
+        if not isinstance(proofs, dict) or proofs.keys() != expected.keys():
+            raise ValueError("Obsidian 回执缺当前版配套阅读页，请逐篇重开并读到文末")
+        for name, fingerprint in expected.items():
+            proof = proofs[name]
+            if (not isinstance(proof, dict) or proof.get("document_sha256") != fingerprint
+                    or proof.get("mode") != "preview" or proof.get("reopened") is not True
+                    or proof.get("reachedBottom") is not True or proof.get("horizontalOverflow") is not False
+                    or proof.get("missingRawLinks") != []):
+                raise ValueError(f"配套阅读页的阅读回执与当前版不符 {name}")
 
 
 def publication_receipt(project):
@@ -472,12 +499,17 @@ def verify_publication(project, *, raw_verified=False):
             or inputs["evidence"]["ledger/intake.json"] != sha(project.intake)
             or snapshot(project.folder, entry.read_text(encoding="utf-8"))["images"] != inputs["images"]):
         raise ValueError("原件、配图或正文和已审核版本不一致")
+    companions = verify_published_companions(project.folder, record)
     for relative, fingerprint in inputs["evidence"].items():
         if relative.startswith((f"work/{RECOVERY_DIR}/", f"work/{EMBEDDED_MEDIA_DIR}/", "ledger/publications/")):
             if sha(local_child(project.state, relative)) != fingerprint:
                 raise ValueError(f"验收使用的媒体资料或上次范围回执已变动 {relative}")
     edition_scope = publication_scope(record)
-    if review.get("schema") == 2:
+    from historical_companions import FIELD as HISTORICAL_ATTACHMENTS, verify_revision
+
+    if HISTORICAL_ATTACHMENTS in record:
+        verify_revision(project, record, digest)
+    elif review.get("schema") == 2:
         scope = review.get("source_scope")
         if (not scope or inputs.get("source_scope_sha256") != source_scope_digest(scope)
                 or scope.get("intake_sha256") != inputs["evidence"]["ledger/intake.json"]):
@@ -489,7 +521,7 @@ def verify_publication(project, *, raw_verified=False):
             validate_scope_review(record["body"], review)
         elif review["source_coverage"].get("claims_version") == CLAIMS_VERSION:
             validate_independent_receipt(record["body"], review, review.get("independent_fact_review"))
-    check_render(record["obsidian"], digest)
+    check_render(record["obsidian"], digest, companions=companions)
     return record
 
 
@@ -503,25 +535,33 @@ def commit(project, body, figures, review, render):
     if load_independent_receipt(body, review) != review.get("independent_fact_review"):
         raise ValueError("发布前独立事实核验回执已变更，请重新读取测试 agent 的验收结果")
     digest = sha(project.preview / ENTRY)
-    check_render(render, digest)
+    check_render(render, digest, companions=review["snapshot"].get("companions"), require_companion_reading=True)
     if project.entry.exists():
         publication_receipt(project)
     if set(project.entry.parent.rglob("*.md")) - {project.entry}:
         raise ValueError("课件目录中有未登记的其他 Markdown，请保留并检查它们")
+    current_snapshot = edition_snapshot(project.preview, body)
+    if any(current_snapshot.get(key) != review["snapshot"].get(key)
+           for key in ("text_sha256", "images", "companions")) or digest != current_snapshot["text_sha256"]:
+        raise ValueError("发布前正文、配图或配套资料已变更，请重新验收")
+    receipt = local_child(project.ledger, f"publications/{digest}.json")
+    previous = read(receipt) if receipt.is_file() else None
+    if previous is not None and previous["review"]["snapshot"].get("companions", {}) != current_snapshot.get("companions", {}):
+        raise ValueError("现有正文版次已绑定配套资料，请为新资料使用不同的文件名和正文链接")
     files = {info["name"]: sha(local_child(project.preview, info["name"])) for info in figures}
-    for relative, image_sha in files.items():
+    files.update(current_snapshot.get("companions", {}))
+    for relative, fingerprint in files.items():
         target = local_child(project.folder, relative)
-        if target.exists() and sha(target) != image_sha:
-            raise ValueError(f"已有发布原图同名但不同，请用新图名 {relative}")
-    for relative, image_sha in files.items():
-        copy_file(local_child(project.preview, relative), local_child(project.folder, relative), image_sha)
+        if target.exists() and (not target.is_file() or sha(target) != fingerprint):
+            raise ValueError(f"已有发布文件同名但不同，请用新的文件名和链接 {relative}")
+    for relative, fingerprint in files.items():
+        copy_file(local_child(project.preview, relative), local_child(project.folder, relative), fingerprint)
     record = {"schema": 1, "body": body, "outputs": {ENTRY.as_posix(): digest, **files},
               "scope_status": review["scope_status"], "scope_gaps": review["scope_gaps"],
               "scope_resolutions": review["scope_resolutions"],
               "review": review, "obsidian": render}
-    receipt = local_child(project.ledger, f"publications/{digest}.json")
-    if receipt.is_file():
-        previous = read(receipt)
+    verify_published_companions(project.folder, record)
+    if previous is not None:
         if previous.get("analysis_completed_at"):
             record["analysis_completed_at"] = previous["analysis_completed_at"]
     else:

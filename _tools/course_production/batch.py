@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import sys
 
+import handoff_order as handoff
 from project import CourseProject, file_lock, inventory_files, local_child, named_entry, put, read, sha
 
 
@@ -207,7 +208,23 @@ def project_origin(project):
     return Path(read(project.state / "project.json")["origin"])
 
 
+def require_staged_edition(project, row=None):
+    marker = local_child(project.work, "增量取材.json")
+    if not marker.is_file():
+        return
+    stage = read(marker)
+    if not isinstance(stage, dict):
+        raise ValueError("增量取材记录格式无效")
+    if stage.get("stage_kind") != "new_edition":
+        return
+    if row is None:
+        raise ValueError("独立新版工作包应绑定新版项目，不能作为同版补件")
+    if stage.get("comparison_project_id") == row["id"]:
+        raise ValueError("该项目是旧版比较依据，请为新版使用另一个正式项目身份")
+
+
 def verify_identity(project, source, originals, row):
+    require_staged_edition(project, row)
     origin = project_origin(project)
     supplemented = row.get("supplemented_origin")
     if origin != (Path(supplemented) if supplemented else source):
@@ -248,7 +265,10 @@ def current_delivery(queue, project, folder, legacy_sha256=None):
     result = {key: verified[key] for key in ("entry", "uri", "sha256", "method")}
     scope = publication_scope(publication)
     if scope["scope_status"] is None:
-        if state["sha256"] != legacy_sha256:
+        from historical_companions import FIELD as HISTORICAL_ATTACHMENTS
+
+        historical_parent = publication.get(HISTORICAL_ATTACHMENTS, {}).get("parent_body_sha256")
+        if state["sha256"] != legacy_sha256 and not (historical_parent and historical_parent == legacy_sha256):
             raise ValueError("新验收版次缺明确范围签收状态，须按当前流程复核")
         result["legacy_scope_unclassified"] = True
         return result
@@ -267,27 +287,33 @@ def review_priority(row):
     return review.get("priority_rank") if review.get("state") == "待复审" else None
 
 
-def next_row(queue):
-    rows = queue["projects"]
-    active = next((row for row in rows if row["status"] == ACTIVE), None)
-    if active is not None:
-        return active
-    pending = [row for row in rows if eligible_pending(row)]
-    priority = [row for row in pending if review_priority(row) is not None]
-    if priority:
-        return min(priority, key=review_priority)
-    arrivals = [row for row in pending if row.get("arrival_at")]
-    if arrivals:
-        newest = max(row["arrival_at"] for row in arrivals)
-        return min((row for row in arrivals if row["arrival_at"] == newest),
-                   key=lambda row: natural(row["name"]))
-    return min(pending, key=lambda row: natural(row["name"]), default=None)
+def next_row(queue, manifest=None):
+    registry = queue.get("dispatch_registry")
+    if manifest is not None and registry:
+        from analysis_priority_order import submitted_order
+        from batch_dispatch import choose_next, load_bound
+        info = read(Path(registry))
+        priority = submitted_order(Path(info["root"]).parent) if info.get("root") else None
+        if (info.get("v4_handoff", {}).get("plans") or (priority or {}).get("entries")
+                or info.get("analysis_workers", {}).get("assignments")) and any(
+                Path(binding["manifest"]) == manifest for binding in info["bindings"].values()):
+            bound = [(binding, queue if Path(binding["manifest"]) == manifest else snapshot)
+                     for binding, snapshot in load_bound(info)]
+            next_item = choose_next(bound, info)
+            if not next_item or Path(next_item[0]["manifest"]) != manifest:
+                return None
+            return next((row for row in queue["projects"] if row["id"] == next_item[1]["id"]), None)
+    selection = handoff.select([({"category": ""}, row) for row in queue["projects"]],
+                               eligible=eligible_pending, review_priority=review_priority,
+                               natural=natural, active_state=ACTIVE)
+    return selection.pair[1] if selection.pair else None
 
 
-def require_turn(queue, row, user_order_reason=None):
+def require_turn(queue, row, user_order_reason=None, *, global_checked=False):
     if user_order_reason is not None:
         if not user_order_reason.strip():
             raise ValueError("指定顺序须提供用户明确要求的具体依据")
+    if user_order_reason is not None or global_checked:
         active = next((item for item in queue["projects"] if item["status"] == ACTIVE
                        and item["id"] != row["id"]), None)
         if active:
@@ -305,7 +331,7 @@ def preserve(row):
     prior = {k: row[k] for k in ("status", "reason", "package", "course_folder", "source_sha256",
                                "content_sha256", "publication", "package_ready", "last_changed",
                                "supplemented_origin", "supplemented_sha256", "supplement_reason",
-                               "user_order_reason", "user_order_at", "scope_status", "scope_gaps", "scope_resolutions",
+                               "user_order_reason", "user_order_at", "analysis_priority", "scope_status", "scope_gaps", "scope_resolutions",
                                "re_review", "reuse_target", "same_source_primary", "archive_evidence",
                                "alias_recheck", "requires_alias_resolution", "alias_previous_publication_sha256",
                                "disposition_evidence") if k in row}
@@ -358,22 +384,36 @@ def synchronize_aliases(queue, row):
                reason="已核同源，沿主项目既有正式同版入口复用", **fields)
 
 
-def claim(queue, row, package, folder=None, separate=None, *, user_order_reason=None):
-    require_turn(queue, row, user_order_reason)
+def claim(queue, row, package, folder=None, separate=None, *, user_order_reason=None,
+          global_checked=False, accepted_order=None, worker_version=None):
+    require_turn(queue, row, user_order_reason, global_checked=global_checked)
     package = safe_path(package)
     folder = check_course_folder(folder or row.get("course_folder") or package.name)
     check_target(queue, row, package, folder)
     source, originals, identity = identify(queue, row)
+    frozen = (accepted_order or {}).get("analysis_priority") or {}
+    if "source_sha256" in frozen and (frozen["source_sha256"] != identity["source_sha256"]
+            or frozen["metadata_sha256"] != digest(row["metadata"])):
+        raise ValueError("原件与网页提交的版本不同，请核对后重新安排分析")
     duplicates = find_duplicates(queue, row, identity)
     decision = (separate or row.get("duplicate_decision") or "").strip()
     if duplicates and (not decision or not separate and not set(duplicates).issubset(row.get("duplicates", []))):
         raise ValueError(f"原件集合与第 {duplicates} 项完全一致。核实后提供单独保留项目的依据，或登记待复查")
     ready = package.exists()
+    if worker_version is not None and (not ready or worker_version != {
+            "source_sha256": identity["source_sha256"], "metadata_sha256": digest(row["metadata"])}):
+        raise ValueError("工作区或原件在交接后发生变化，请重新核对")
     if ready:
         project = CourseProject.open(package)
         with project.locked():
             verify_identity(project, source, originals, row)
     order = {}
+    if accepted_order:
+        transfer_order = {key: value for key, value in accepted_order.items() if key != "analysis_priority"}
+        if transfer_order:
+            order["v4_order"] = row.get("v4_order", transfer_order)
+        if accepted_order.get("analysis_priority"):
+            order["analysis_priority"] = accepted_order["analysis_priority"]
     if user_order_reason is not None:
         reason = user_order_reason.strip()
         order["user_order_reason"] = reason
@@ -391,6 +431,10 @@ def supplement(queue, row, package, reason):
         raise ValueError("请先领取项目，并给出同一课程补料的核对依据")
     previous_path = safe_path(row["package"])
     package = safe_path(package)
+    from batch_workers import worker_root
+
+    if package != previous_path and worker_root(package) is not None:
+        raise ValueError("请使用新的补料快照目录，不能接入其他分析工作区")
     check_target(queue, dict(row, package=None, package_ready=False), package, row["course_folder"])
     source, originals, identity = identify(queue, row)
     project = CourseProject.open(package)
@@ -410,6 +454,7 @@ def supplement(queue, row, package, reason):
     previous = CourseProject.open(previous_path)
     with previous.locked(), project.locked():
         retained = verify_identity(previous, source, originals, row)
+        require_staged_edition(project)
         combined = project.validate_raw()
         by_name = {item["file"]: item for item in combined}
         if len(combined) <= len(retained) or any(by_name.get(item["file"]) != item for item in retained):
@@ -524,8 +569,8 @@ def disposition_proof(row, identity, evidence, kind):
     return proof, {"path": str(evidence), "sha256": sha(evidence)}
 
 
-def reuse(queue, row, related, evidence, reason, *, canonical_package=None):
-    require_turn(queue, row)
+def reuse(queue, row, related, evidence, reason, *, canonical_package=None, global_checked=False):
+    require_turn(queue, row, global_checked=global_checked)
     _, _, identity = identify(queue, row)
     proof, receipt = disposition_proof(row, identity, evidence, "same_source")
     if not reason.strip():
@@ -567,8 +612,8 @@ def reuse(queue, row, related, evidence, reason, *, canonical_package=None):
            reason=reason.strip(), disposition_evidence=receipt, **close_re_review(row, REUSED))
 
 
-def archive(queue, row, evidence, reason):
-    require_turn(queue, row)
+def archive(queue, row, evidence, reason, *, global_checked=False):
+    require_turn(queue, row, global_checked=global_checked)
     _, _, identity = identify(queue, row)
     _, receipt = disposition_proof(row, identity, evidence, "archive")
     if not reason.strip():
@@ -795,8 +840,8 @@ def describe_row(queue, row):
             "original_folder": str(Path(queue["source"]) / row["name"])}
 
 
-def status(queue, *, scan=False):
-    current = next_row(queue)
+def status(queue, *, scan=False, manifest=None):
+    current = next_row(queue, manifest)
     rows = queue["projects"]
     totals = Counter(row["status"] for row in rows)
     result = {"schema": SCHEMA, "source": queue["source"], "vault": queue["vault"],
@@ -909,6 +954,14 @@ def add_arguments(commands):
     init.add_argument("--defer-history", action="store_true",
                       help="核实当前续作原件，历史验收项目保留回执和版次，稍后逐项复验")
     sub.add_parser("status", help="查看项目进度和原件范围变化").add_argument("manifest", type=Path)
+    delta = sub.add_parser("delta", help="只读核对新旧原件差异、可复用取材和补件候选")
+    delta.add_argument("manifest", type=Path)
+    delta.add_argument("sequence", type=int)
+    delta.add_argument("--candidate", type=Path, help="比较另一个实际原件目录，默认核对已登记来源")
+    delta.add_argument("--stage-package", type=Path, help="为已核同版补件或独立新版准备取材包")
+    edition_reason = delta.add_mutually_exclusive_group()
+    edition_reason.add_argument("--same-edition-reason", help="另一来源已经核对为同版补件的依据")
+    edition_reason.add_argument("--new-edition-reason", help="指定候选目录已确认为独立新版的依据")
     sub.add_parser("refresh", help="登记新增项目并保留原有项目编号").add_argument("manifest", type=Path)
     migrate = sub.add_parser("audit-migrate", help="按已核完整审计分开旧待补、复用、留档并一次性恢复复审")
     migrate.add_argument("manifest", type=Path)
@@ -925,6 +978,12 @@ def add_arguments(commands):
                           help="明确登记并复扫，默认仅只读盘点")
     dispatch.add_argument("--settle-seconds", type=int, default=30,
                           help="新增原件至少两次盘点相符且经过的秒数（不能证明课程齐全）")
+    workers = sub.add_parser("workers", help="分配独立分析工作区并将已准备的项目交给正式验收")
+    workers.add_argument("registry", type=Path)
+    workers.add_argument("worker_action", choices=("status", "configure", "reserve", "recover", "ready", "release"))
+    workers.add_argument("--limit", type=int)
+    workers.add_argument("--session")
+    workers.add_argument("--ticket")
     for name in ("claim", "defer", "reopen", "finish", "supplement", "reuse", "archive", "alias-review"):
         action = sub.add_parser(name)
         action.add_argument("manifest", type=Path)
@@ -936,6 +995,7 @@ def add_arguments(commands):
             action.add_argument("--separate", metavar="REASON")
             action.add_argument("--user-order-reason", metavar="DIRECTIVE",
                                 help="仅在用户明确指定本项目顺序时记录其具体要求；不抢占在办项目、不跳过就绪检查")
+            action.add_argument("--worker-ticket", help="从已经准备完成的独立分析工作区接续")
         if name == "defer":
             action.add_argument("reason")
         if name == "supplement":
@@ -962,6 +1022,10 @@ def run(args):
             from batch_dispatch import dispatch
             result = dispatch(args.root, args.registry, args.legacy_manifest,
                               refresh=args.refresh, settle_seconds=args.settle_seconds)
+        elif action == "workers":
+            from batch_workers import run_workers
+            result = run_workers(args.registry, args.worker_action, limit=args.limit,
+                                 session=args.session, ticket=args.ticket)
         elif action == "plan":
             queue = scan_batch(args.source, args.vault)
             if args.legacy_directory:
@@ -972,7 +1036,21 @@ def run(args):
         else:
             path = safe_path(args.manifest)
             if action == "status":
-                result = status(open_queue(path), scan=True)
+                result = status(open_queue(path), scan=True, manifest=path)
+            elif action == "delta":
+                from batch_delta import compare, stage
+
+                if (args.same_edition_reason or args.new_edition_reason is not None) and not args.stage_package:
+                    raise ValueError("仅在准备独立取材包时登记版次核对依据")
+                if args.new_edition_reason is not None and args.candidate is None:
+                    raise ValueError("新版取材需要明确指定独立的候选原件目录")
+                queue = open_queue(path)
+                row = row_at(queue, args.sequence)
+                result = compare(queue, row, args.candidate)
+                if args.stage_package:
+                    result = stage(queue, row, result, args.stage_package,
+                                   same_edition_reason=args.same_edition_reason,
+                                   new_edition_reason=args.new_edition_reason)
             elif action == "audit-migrate":
                 from batch_review import migrate
                 if not args.apply:
@@ -993,24 +1071,39 @@ def run(args):
                         refresh_registered_catalog(queue, path)
             else:
                 # Global dispatch and a claim share the same lock order.
-                registry = open_queue(path).get("dispatch_registry") if action in ("claim", "reuse", "archive") else None
+                prior_queue = open_queue(path)
+                global_turn = action in ("claim", "reuse", "archive")
+                bound_write = action in ("defer", "reopen", "supplement", "finish", "refresh", "alias-review")
+                registry = prior_queue.get("dispatch_registry")
+                if not global_turn and not (bound_write and registry and registry_bound(prior_queue, path)):
+                    registry = None
                 guard = file_lock(Path(registry).with_suffix(Path(registry).suffix + ".lock")) if registry else nullcontext()
                 with guard, file_lock(path.with_suffix(path.suffix + ".lock")):
                     queue = open_queue(path)
                     before = digest(queue)
-                    if action in ("claim", "reuse", "archive") and queue.get("dispatch_registry") != registry:
+                    if (global_turn or registry) and queue.get("dispatch_registry") != registry:
                         raise ValueError("批次全局调度绑定已变，请再次领取")
                     if action == "refresh":
                         refresh(queue)
-                        result = status(queue, scan=True)
+                        result = status(queue, scan=True, manifest=path)
                     else:
                         row = row_at(queue, args.sequence)
                         if action == "claim":
+                            order = None
+                            job = None
+                            from batch_workers import check_formal_claim, worker_root
                             if registry:
                                 from batch_dispatch import require_global_turn
-                                require_global_turn(Path(registry), path, row, args.user_order_reason)
-                            claim(queue, row, args.package, args.course_folder, args.separate,
-                                  user_order_reason=args.user_order_reason)
+                                job = check_formal_claim(read(Path(registry)), row, safe_path(args.package), args.worker_ticket)
+                                order = require_global_turn(Path(registry), path, row, args.user_order_reason)
+                            elif args.worker_ticket or worker_root(safe_path(args.package)) is not None:
+                                raise ValueError("只有已绑定正式分类的项目可以接续分析交接")
+                            folder = args.course_folder or (job and job["course_folder"])
+                            if job and folder != job["course_folder"]:
+                                raise ValueError("分析交接须保留原项目的教材名称")
+                            claim(queue, row, args.package, folder, args.separate,
+                                  user_order_reason=args.user_order_reason, global_checked=bool(registry),
+                                  accepted_order=order, worker_version=job and job["source_version"])
                         elif action == "defer":
                             defer(queue, row, args.reason)
                         elif action == "reopen":
@@ -1020,12 +1113,14 @@ def run(args):
                         elif action in ("reuse", "archive"):
                             if registry:
                                 from batch_dispatch import require_global_turn
+                                from batch_workers import check_formal_claim
+                                check_formal_claim(read(Path(registry)), row, None, None)
                                 require_global_turn(Path(registry), path, row)
                             if action == "reuse":
                                 reuse(queue, row, args.related, args.evidence, args.reason,
-                                      canonical_package=args.canonical_package)
+                                      canonical_package=args.canonical_package, global_checked=bool(registry))
                             else:
-                                archive(queue, row, args.evidence, args.reason)
+                                archive(queue, row, args.evidence, args.reason, global_checked=bool(registry))
                         elif action == "alias-review":
                             alias_review(queue, row, args.resolution, args.evidence, args.reason)
                         else:

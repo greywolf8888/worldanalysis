@@ -6,17 +6,21 @@
   const resourceId = /^rv_[0-9a-f]{64}$/;
   const sourceId = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
   const capacity = 500;
+  const finishedStates = new Set(['completed', 'completed_received_scope', 'same_source_reuse']);
   const labels = {
     queued: '待分析', in_progress: '分析中', awaiting_originals: '待补原件',
     awaiting_intake: '待本地资料', source_changed: '来源版本有变', pending_sync: '进度待同步',
+    waiting_for_readiness: '原件待核对',
     completed: '已分析', completed_received_scope: '已分析实收资料',
-    same_source_reuse: '同源复用', archive_only: '留档', awaiting_re_review: '待复验',
+    same_source_reuse: '同源复用', archive_only: '留档', awaiting_re_review: '待复验', awaiting_acceptance: '待验收',
   };
   const timeFormat = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Singapore', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
   });
   const expectedErrors = new Set([
+    '已有同版教材，可直接打开', '该项目需要按现有记录接续处理',
+    '本地原件尚未就绪或已有变化，请核对后再安排', '请移除旧的本地项目并重新安排',
     '分析进度正在同步，请稍后重试', '资料版本已变化，请移除旧项目后重新加入',
     '本地项目尚未注册或身份有冲突', '资料归属待核实，未加入分析顺序',
     '未能匹配当前来源项目，请重开该条资源', '该项目当前不在分析顺位表中', '分析顺位表已满',
@@ -212,7 +216,7 @@
     const target = selection?.target;
     const key = target ? keyOf(target) : '';
     const member = entries.get(key);
-    const stamp = target ? [key, target.resource_id, selection.title, member?.rank, member?.state, entries.size].join('\t') : '';
+    const stamp = target ? [key, target.resource_id, selection.title, member?.rank, member?.state, member?.current_resource_id, entries.size].join('\t') : '';
     view.selected.hidden = !selection;
     if (stamp === view.lastSelection) return;
     view.lastSelection = stamp;
@@ -221,7 +225,7 @@
       return;
     }
     const conflict = member && target.kind === 'article' &&
-      (member.resource_id !== target.resource_id || member.state === 'source_changed');
+      ((member.current_resource_id || member.resource_id) !== target.resource_id || member.state === 'source_changed');
     const info = conflict ? '原条目的来源已变化，请先移除原条目。'
       : member ? `草稿第 ${member.rank} 位` : target.kind === 'article' ? '待本地资料' : '';
     const actions = el('div', '', 'analysis-actions');
@@ -347,7 +351,8 @@
       view.previousList.replaceChildren(...sent.entries.map(entry => el('li', entryTitle(entry))));
     }
     view.submit.hidden = confirming;
-    view.submit.disabled = !canEdit() || sent?.revision === snapshot?.revision || (!count && !sent?.entries.length);
+    view.submit.disabled = !canEdit() || snapshot?.draft_matches_submission === true ||
+      sent?.revision === snapshot?.revision || (!count && !sent?.entries.length);
     view.confirm.hidden = !confirming;
     view.instruction.textContent = count ? `提交当前 ${count} 项分析顺序？` : '提交空顺序，撤回上次的优先安排？';
     view.cancel.disabled = view.accept.disabled = busy || !loaded;
@@ -495,14 +500,17 @@
     const id = row?.resource_version_id || row?.id;
     const site = row?.site_id;
     const article = row?.article_id;
-    if (row?.action_pending || typeof id !== 'string' || !resourceId.test(id) || typeof site !== 'string' ||
+    if (row?.action_pending || finishedStates.has(row?.analysis_state) ||
+        typeof id !== 'string' || !resourceId.test(id) || typeof site !== 'string' ||
         !sourceId.test(site) || typeof article !== 'string' || !sourceId.test(article)) return null;
     return projectAction({kind: 'article', resource_id: id, site_id: site, article_id: article}, entryTitle(row), options);
   }
 
   function localAction(project, options) {
     const id = project?.project_id || project?.local_project_id;
-    if (typeof id !== 'string' || !localId.test(id)) return null;
+    const bookMatches = ['same_registered_bytes', 'same_verified_independent_derivative'].includes(project?.textbook_integrity);
+    if ((bookMatches && finishedStates.has(project?.analysis_state)) ||
+        typeof id !== 'string' || !localId.test(id)) return null;
     return projectAction({kind: 'local', project_id: id}, entryTitle(project), options);
   }
 

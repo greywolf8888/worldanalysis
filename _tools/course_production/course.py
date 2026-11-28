@@ -1,5 +1,7 @@
 """Prepare and review local textbooks and resume ordered course batches."""
 import argparse
+from contextlib import nullcontext
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -8,11 +10,12 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from project import CourseProject, ENTRY, ROOT, local_child, put, read, require_readable_videos, sha
+from project import CourseProject, ENTRY, ROOT, ReceivedCoverageError, local_child, put, read, require_readable_videos, sha
 
 sys.path.insert(0, str(ROOT))
 
 ORDER = "讲次顺序.json"
+RECEIVED_REVIEW = "实收核对.json"
 
 
 def gpu_from_args(args, backend, configured=None):
@@ -112,7 +115,8 @@ def preview(project):
     scope_declaration = declaration_from_project(project)
     body = add_scope_summary(deliver[ENTRY.as_posix()], scope_declaration)
     deliver[ENTRY.as_posix()] = body
-    render_preview(project.preview, deliver, figures, project.art)
+    render_preview(project.preview, deliver, figures, project.art,
+                   companion_draft=project.work, companion_fallback=project.folder)
     template = prepare_review(project, body, order, receipt, scope_declaration=scope_declaration)
     put(project.work / TEMPLATE, template)
     return body, figures, template
@@ -138,8 +142,46 @@ def reviewed_preview(project):
     return body, figures, template, review
 
 
+def check_review_status(project):
+    """Report only the concrete disposition found by the current review run."""
+    from acceptance import REVIEW, TEMPLATE
+    from media_inventory import MEDIA_INVENTORY
+    from scope_review import DECLARATION
+
+    def optional_digest(path):
+        return sha(path) if path.is_file() else None
+
+    def inputs():
+        return {"intake_sha256": sha(project.intake), "draft_sha256": optional_digest(project.work / "教材.md"),
+                "review_sha256": optional_digest(project.work / REVIEW),
+                "scope_declaration_sha256": optional_digest(project.work / DECLARATION),
+                "media_inventory_sha256": optional_digest(project.ledger / MEDIA_INVENTORY),
+                "documents_summary_sha256": optional_digest(project.ledger / "documents-summary.json")}
+
+    before = inputs()
+    try:
+        _, _, template, _ = reviewed_preview(project)
+    except ReceivedCoverageError as error:
+        disposition = {"received_analysis": error.state, "location": error.location, "detail": str(error)}
+        code = 1
+    except (OSError, ValueError, RuntimeError, LookupError, TypeError, subprocess.SubprocessError) as error:
+        disposition = {"received_analysis": "unverified", "detail": str(error)}
+        code = 1
+    else:
+        disposition = {"received_analysis": "covered", "body_sha256": template["snapshot"]["text_sha256"],
+                       "source_scope_sha256": template["snapshot"]["source_scope_sha256"]}
+        code = 0
+    after = inputs()
+    if before != after:
+        disposition = {"received_analysis": "unverified", "detail": "核对期间的原件清单或工作稿发生变化，请重试"}
+        code = 1
+    result = {"schema": 1, "observed_at": datetime.now(timezone.utc).isoformat(), **after,
+              "review_template_sha256": optional_digest(project.work / TEMPLATE)}
+    return {**result, **disposition}, code
+
+
 def prepare_fact_request(project):
-    from acceptance import REVIEW, TEMPLATE, validate_scope_against_template
+    from acceptance import REVIEW, TEMPLATE, edition_snapshot, validate_scope_against_template
     from independent_facts import review_request
     from source_coverage import validate_source_coverage
 
@@ -150,6 +192,9 @@ def prepare_fact_request(project):
             or sha(preview_path) != template["snapshot"]["text_sha256"]):
         raise ValueError("请从当前已生成的同版预览填写验收记录，再生成独立事实待查清单")
     body = preview_path.read_text(encoding="utf-8")
+    companions = template["snapshot"].get("companions")
+    if companions and edition_snapshot(project.preview, body).get("companions") != companions:
+        raise ValueError("预览的配套资料已变化，请重新核对这一版")
     validate_source_coverage(body, template["source_scope"], review)
     validate_scope_against_template(body, review, template)
     request = review_request(body, review)
@@ -159,19 +204,18 @@ def prepare_fact_request(project):
 
 
 def accept(project, obsidian_exe):
-    from acceptance import commit, validate_review_proofs, verify_publication
+    from acceptance import commit, edition_snapshot, validate_review_proofs, verify_publication
     from media_inventory import verify_course_media
-    from reader_review import snapshot
 
     body, figures, template, review = reviewed_preview(project)
     run_obsidian(obsidian_exe, "--project", project.folder, project.preview)
     render = read(project.preview / "obsidian-render.json")
     current = (project.preview / ENTRY).read_text(encoding="utf-8")
-    if current != body or snapshot(project.preview, current) != {
-        key: template["snapshot"][key] for key in ("text_sha256", "images")
+    if current != body or edition_snapshot(project.preview, current) != {
+        key: template["snapshot"][key] for key in ("text_sha256", "images", "companions") if key in template["snapshot"]
     } or any(sha(local_child(project.state, name)) != digest
              for name, digest in template["snapshot"]["evidence"].items()):
-        raise ValueError("阅读检查期间预览或配图已修改，请重新验收")
+        raise ValueError("阅读检查期间正文、配图或配套资料已修改，请重新验收")
     validate_review_proofs(project, review)
     sources = project.validate_raw()
     verify_course_media(project, sources, review["episodes"])
@@ -203,7 +247,10 @@ def verify_reader(project, publication, executable):
         raise ValueError("请先用 deliver 将日常笔记名迁移到项目名称")
     render = project.work / RENDER_DIR / f"{state['sha256']}.json"
     render.parent.mkdir(parents=True, exist_ok=True)
-    run_obsidian(executable, "--installed", target, entry.relative_to(target).as_posix(), render)
+    arguments = ["--installed", target, entry.relative_to(target).as_posix(), render]
+    if publication["review"]["snapshot"].get("companions"):
+        arguments.append(local_child(project.ledger, f"publications/{state['sha256']}.json"))
+    run_obsidian(executable, *arguments)
     observation = automated_observation(project, publication, state, render)
     put(render.parent / "当前回执.json", observation)
     return confirm(project, publication, observation)
@@ -277,6 +324,9 @@ def main(argv=None):
             command.add_argument("--obsidian-exe", type=Path)
         if name == "coverage":
             command.add_argument("--write", action="store_true", help="保存核查范围和未填写的模板到课程工作区")
+        if name == "check-review":
+            command.add_argument("--status-json", action="store_true", help="输出本次实际发现的已收内容核对结果")
+            command.add_argument("--record", action="store_true", help="把本次核对结果保存在课程工作区，供接力读取")
         if name == "verify":
             command.add_argument("--require-vault", action="store_true", help="要求日常阅读入口及同版重开核验")
         if name == "deliver":
@@ -285,6 +335,14 @@ def main(argv=None):
             command.add_argument("--reviewed-previous", help="已核实身份、可替换的旧教材 SHA-256")
         if name == "confirm-vault":
             command.add_argument("observation", type=Path, help="日常阅读库的实际窗口核验记录")
+    for action in ("check-historical-attachments", "accept-historical-attachments"):
+        historical = commands.add_parser(action, help="自动核已具名签收的附件入口变化，沿用历史分析范围")
+        historical.add_argument("project", type=Path)
+        historical.add_argument("workspace", type=Path)
+        historical.add_argument("sequence", type=int)
+        historical.add_argument("signed", type=Path)
+        if action == "accept-historical-attachments":
+            historical.add_argument("--obsidian-exe", type=Path)
     window = commands.add_parser("window", help="连续解码原片小窗以核对菜单和同屏变化")
     window.add_argument("project", type=Path)
     window.add_argument("lesson", type=int)
@@ -325,6 +383,8 @@ def main(argv=None):
     visual.add_argument("--crop", nargs=4, type=int)
     visual.add_argument("--ocr", action="store_true")
     args = parser.parse_args(argv)
+    if args.action == "check-review" and args.record and not args.status_json:
+        parser.error("--record 须与 check-review --status-json 一起使用")
     if args.action == "batch":
         return run_batch(args)
 
@@ -339,7 +399,16 @@ def main(argv=None):
         if args.action == "status":
             show_status(project)
             return 0
-        with project.locked():
+        formal_write = args.action in ("accept", "deliver", "confirm-vault", "verify-reader", "accept-historical-attachments")
+        guard = nullcontext()
+        if formal_write:
+            from batch_workers import publication_lock, require_worker_publication
+
+            guard = publication_lock(project.folder)
+        with guard, project.locked():
+            if formal_write:
+                require_worker_publication(project.folder, args.action, vault=getattr(args, "vault", None),
+                                           folder=getattr(args, "course_folder", None))
             if args.action in ("start", "prepare"):
                 prepare(project, args)
             elif args.action == "coverage":
@@ -355,8 +424,26 @@ def main(argv=None):
                 else:
                     print(json.dumps(record, ensure_ascii=False, indent=2))
             elif args.action == "check-review":
+                if args.status_json:
+                    result, code = check_review_status(project)
+                    if args.record:
+                        put(project.work / RECEIVED_REVIEW, result)
+                    print(json.dumps(result, ensure_ascii=False))
+                    return code
                 reviewed_preview(project)
                 print("双向内容核对通过，尚未发布")
+            elif args.action == "check-historical-attachments":
+                from historical_companions import FIELD, prepare as prepare_historical
+
+                result, _, _ = prepare_historical(project, args.workspace, args.sequence, args.signed)
+                print(json.dumps({"body_sha256": result["outputs"][ENTRY.as_posix()],
+                                  "parent_body_sha256": result[FIELD]["parent_body_sha256"],
+                                  "companions": result["review"]["snapshot"]["companions"]}, ensure_ascii=False))
+            elif args.action == "accept-historical-attachments":
+                from historical_companions import accept as accept_historical
+
+                print(json.dumps(accept_historical(project, args.workspace, args.sequence, args.signed,
+                                                   args.obsidian_exe, run_obsidian), ensure_ascii=False))
             elif args.action == "fact-review-template":
                 path, request = prepare_fact_request(project)
                 print(f"{path} · {len(request['facts'])} 项待核事实")
@@ -427,7 +514,8 @@ def main(argv=None):
                                   "audio": sum(row.get("kind") == "audio" for row in episodes),
                                   "embedded_videos": sum("embedded" in row and row.get("kind") != "audio" for row in episodes),
                                   "attachments": len(record["review"]["documents"]),
-                                  "images": len(record["outputs"]) - 1,
+                                  "images": len(record["review"]["snapshot"]["images"]),
+                                  "companion_files": len(record["review"]["snapshot"].get("companions", {})),
                                    "vault_delivery": live, **edition_scope}, ensure_ascii=False, indent=2))
         return 0
     except subprocess.CalledProcessError as error:

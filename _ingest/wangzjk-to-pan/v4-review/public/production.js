@@ -47,28 +47,50 @@ function collectionStatus(discovery){
  if(discovery.public_checkpoint_pending_sync||!run)section.append(el('p','采集记录待更新。','status-note'));
  return section;
 }
-function textbook(p){
+function textbook(p,label='在 Obsidian 打开教材'){
  if(!p||typeof p.obsidian_href!=='string')return null;
  try{
   const u=new URL(p.obsidian_href),path=u.searchParams.get('path')??'';
   if(u.protocol!=='obsidian:'||u.hostname!=='open'||u.pathname!==''||u.hash||[...u.searchParams.keys()].join()!=='path'||!/^G:\/(?:[\s\S]+)\.md$/i.test(path)||path.includes('..'))return null;
-  const a=el('a','在 Obsidian 打开教材','detail-link');a.href=u.href;a.rel='noreferrer noopener';return a;
+  const a=el('a',label,'detail-link');a.href=u.href;a.rel='noreferrer noopener';return a;
  }catch{return null;}
+}
+const completionLabels = {
+ originals: ['原始资料', {core_missing:'核心资料待补',support_missing:'配套资料待补',documented_scope_received:'已核明的资料已收到',awaiting_originals:'待原件'}],
+ received_analysis: ['实收内容', {accepted_for_edition:'本版实收内容已核完',queued:'待分析',in_progress:'分析中',awaiting_acceptance:'待验收',received_coverage_missing:'已收资料有遗漏',received_unreadable:'有已收资料无法读取',received_unresolved:'实收内容待核对',received_reported_missing:'请核对已收到的资料'}],
+ textbook: ['教材', {received_scope_usable:'可学习已收部分',core_usable:'核心内容可学习',documented_scope_usable:'已核范围可完整学习',historical_readable:'已有同版教材',legacy_entry_pending:'旧版入口，待复核',companions_unavailable:'配套资料无法打开'}],
+ cleanup: ['本地原件', {retain_for_core_gap:'有核心资料待补，继续保留',one_copy_needs_authorization_check:'一个副本待确认清理',one_copy_removed:'一个副本已清理'}]
+};
+function courseCompletionRows(record){
+ const facts = record?.course_completion || {};
+ return Object.entries(completionLabels).flatMap(([key,[name,labels]]) => {
+  const label = labels[facts[key]];
+  return typeof label === 'string' ? [[name,label]] : [];
+ });
 }
 function projectState(p,showTitle=true){
  const section=el('div',null,'project-facts');
  if(showTitle&&p.title)section.append(el('h4',p.title,'project-title'));
  const isReuse=p.analysis_state==='same_source_reuse';
- const download=p.download_complete===true?'已下载完整':p.download_complete===false?'尚未下载完整':'下载情况待核实';
+ const download=p.download_complete===true?'已下载完整':p.download_complete===false?'尚未下载完整':'';
  const category=typeof p.category==='string'?p.category.replace(/^\d+_/,''):'';
  const scope=['核心待补','配套待补'].includes(p.analysis_scope)?p.analysis_scope:'';
  const acceptance=p.acceptance_state==='unrecorded'&&p.analysis_state!=='in_progress'?'':progressLabels.acceptance[p.acceptance_state];
+ const completion=courseCompletionRows(p);
+ const productionDay=shortDate(p.production_date?.date||p.production_date);
+ const productionQualifier={estimated:'（约，已知最早）',known_earliest:'（已知最早）'}[p.production_date?.certainty]||'';
  section.append(factTable([
-  ['分类',category],['本地下载',download],['分析',progressLabels.analysis[p.analysis_state]],['实收范围',scope],
-  ['待补资料',p.scope_gaps>0?fmt(p.scope_gaps)+' 项':''],['验收',acceptance],
-  ['教材',isReuse?'复用同源教材':progressLabels.textbook[p.textbook_state]],['教材保存',progressLabels.preservation[p.preservation_state]],
-  ['本地清理',progressLabels.cleanup[p.local_cleanup_state]],['清理后阅读',progressLabels.reopened[p.local_cleanup_reader_state]],
-  ['分析日期',shortDate(p.analysis_date?.date||p.analysis_date)],['教材制作日期',shortDate(p.production_date?.date||p.production_date)]
+  ['分类',category],['本地下载',download],...completion,
+  ...(!completion.length?[
+   ['分析',progressLabels.analysis[p.analysis_state]],['实收范围',scope],['验收',acceptance],
+   ['教材',isReuse?'复用同源教材':progressLabels.textbook[p.textbook_state]]
+  ]:[]),
+  ['待补资料',p.scope_gaps>0?fmt(p.scope_gaps)+' 项':''],['教材保存',progressLabels.preservation[p.preservation_state]],
+  ...(!p.course_completion?.cleanup?[
+   ['本地清理',progressLabels.cleanup[p.local_cleanup_state]],['清理后阅读',progressLabels.reopened[p.local_cleanup_reader_state]]
+  ]:[]),
+  ['分析日期',shortDate(p.analysis_date?.date||p.analysis_date)],['制作日期',productionDay?productionDay+productionQualifier:''],
+  ['历史阅读日期',shortDate(p.historical_readback_date)]
  ]));
  const actions=el('div',null,'project-actions');
  const link=textbook(p);if(link)actions.append(link);
@@ -114,6 +136,7 @@ function preservationStatus(preservation,cleanup){
 }
 let productionSeq=0;
 async function localPanel(){
+ $('local-title').textContent='处理进度';
  const k=++productionSeq,box=$('local-body');box.replaceChildren(el('p','加载中…','status-note'));openDialog('local-status');
  try{
   const [summary,cleanup,discovery,projects]=await Promise.all(['/api/local-status','/api/cleanup-readiness','/api/discovery-readiness','/api/local-projects?page=1'].map(path=>api(path)));
@@ -126,7 +149,27 @@ async function localPanel(){
   if(summary.sync_state==='pending_sync')box.prepend(el('p','本地进度待同步。','status-note'));
  }catch{if(k===productionSeq&&$('local-status').open)box.replaceChildren(el('p','未能加载处理进度，请重试。','status-note notice'));}
 }
-function localPage(area,page){
+async function textbookPanel(){
+ const k=++productionSeq,box=$('local-body');
+ $('local-title').textContent='我的教材';
+ box.replaceChildren(el('p','加载中…','status-note'));openDialog('local-status');
+ try{
+  const data=await api('/api/textbooks?page=1');
+  if(k!==productionSeq||!$('local-status').open)return;
+  box.replaceChildren();
+  if(data.sync_state==='pending_sync'){box.append(el('p','教材暂时无法读取，请稍后重试。','status-note'));return;}
+  const overviews=el('div',null,'project-actions');
+  for(const overview of data.overviews){
+   const label=data.overviews.length===1?'在 Obsidian 打开总览':overview.title.replace(/^\d+_/,'')+'总览';
+   const link=textbook(overview,label);
+   if(link)overviews.append(link);
+  }
+  if(overviews.children.length)box.append(overviews);
+  if(data.count){const list=el('div',null,'local-project-list');box.append(list);localPage(list,data,'/api/textbooks');}
+  else box.append(el('p','暂无可打开的教材。','status-note'));
+ }catch{if(k===productionSeq&&$('local-status').open)box.replaceChildren(el('p','未能加载教材，请重试。','status-note notice'));}
+}
+function localPage(area,page,endpoint='/api/local-projects'){
  const body=el('div',null),controls=el('div',null,'actions local-project-controls');
  let request=0;
  function draw(p,i){
@@ -141,7 +184,7 @@ function localPage(area,page){
   prev.disabled=i<=1;next.disabled=i*16>=p.count;
   async function load(j){
    const k=++request;
-   try{const result=await api('/api/local-projects?page='+j);if(k===request&&area.isConnected&&$('local-status').open)draw(result,j);}
+   try{const result=await api(endpoint+'?page='+j);if(k===request&&area.isConnected&&$('local-status').open)draw(result,j);}
    catch{if(k===request&&area.isConnected&&!body.querySelector('.notice'))body.prepend(el('p','未能加载这一页，请重试。','status-note notice'));}
   }
   prev.addEventListener('click',()=>void load(i-1));next.addEventListener('click',()=>void load(i+1));
@@ -180,4 +223,5 @@ async function preconfirmPanel(){
  }catch{if(k===reviewSeq&&$('preconfirmation').open)box.replaceChildren(el('p','未能加载转存信息，请重试。','status-note notice'));}
 }
 $('local-open').addEventListener('click',()=>void localPanel());$('local-close').addEventListener('click',()=>closeDialog($('local-status')));
+$('local-library-open').addEventListener('click',()=>void textbookPanel());
 $('preconfirm-open').addEventListener('click',()=>void preconfirmPanel());$('preconfirm-close').addEventListener('click',()=>closeDialog($('preconfirmation')));

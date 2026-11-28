@@ -18,7 +18,7 @@ PAGE_SIZE = 48
 MAX_CACHED_SEARCHES = 8
 MAX_CACHED_ROWS = 36_000
 CURSOR = re.compile(r"[0-9a-f]{64}\.(?:rv|cv)_[0-9a-f]{64}\Z")
-PARAMETERS = {"q", "category", "subcategory", "platform", "site", "day", "after", "selected"}
+PARAMETERS = {"q", "category", "subcategory", "platform", "site", "day", "after", "selected", "versions"}
 
 
 class CalendarRequestError(ValueError):
@@ -35,7 +35,7 @@ def read_query(query: str, sites: set[str]) -> dict[str, str]:
         params = {key: value[0] for key, value in fields.items()}
         if len(params.get("q", "")) > 200 or "\x00" in params.get("q", ""):
             raise ValueError
-        if params.get("selected", "0") not in ("0", "1"):
+        if params.get("selected", "0") not in ("0", "1") or params.get("versions", "latest") not in ("latest", "all"):
             raise ValueError
         category = params.get("category", "")
         category = CATEGORY_ALIASES.get(category, category)
@@ -146,6 +146,7 @@ def course_calendar(library: Library, query: str, *, progress=None, selected_ids
         "site": params.get("site", ""),
         "to": params.get("day", ""),
         "selected": params.get("selected", "0"),
+        "versions": params.get("versions", "latest"),
     }
     selected = frozenset(selected_ids)
     selection = (selection_revision, sorted(selected)) if filter_values["selected"] == "1" else None

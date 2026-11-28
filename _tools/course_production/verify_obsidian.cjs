@@ -1,36 +1,82 @@
 // Open a copy of this delivery in an isolated Obsidian profile and test the real reading view.
 const fs = require("node:fs/promises");
+const { createReadStream } = require("node:fs");
 const { createHash } = require("node:crypto");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { setTimeout: delay } = require("node:timers/promises");
 
-async function prepareNote(vault, cases, folder, preview, rel) {
+function linkedFilename(href) {
+  const filename = decodeURIComponent(href.split("#", 1)[0]);
+  return /\.md$/i.test(filename) ? filename : decodeURIComponent(href);
+}
+
+function companionProse(body) {
+  let fence;
+  return body.replace(/<!--[\s\S]*?-->/g, "").split("\n").filter(line => {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      return false;
+    }
+    if (!marker) return true;
+    fence = marker[1];
+    return false;
+  }).join("\n");
+}
+
+async function prepareNote(vault, cases, folder, preview, rel, companion = null, publishedCompanions = {}) {
   const name = path.basename(folder);
   const note = path.join(preview, rel);
   const body = await fs.readFile(note, "utf8");
+  const published = companion?.published;
+  const linkBody = companion && companion.literal!==null ? "" : published ? companionProse(body) : body;
   const vaultNote = path.join(vault, name, rel);
-  await fs.mkdir(path.dirname(vaultNote), {recursive:true});
-  await fs.writeFile(vaultNote, body);
+  if (!published) {
+    await fs.mkdir(path.dirname(vaultNote), {recursive:true});
+    await fs.writeFile(vaultNote, body);
+  }
   const images = new Set();
   const localLinks = new Map();
+  const originals = new Set();
+  if (published) {
+    for (const match of linkBody.matchAll(/(!?)\[[^\]\n]*\]\((<[^<>\r\n]+>|[^)\r\n]+)\)/g)) {
+      const href = match[2].replace(/^<|>$/g, "");
+      if (/^(?:https?:|#)/i.test(href)) continue;
+      const destination = path.posix.join(path.posix.dirname(rel), linkedFilename(href));
+      if (!Object.hasOwn(publishedCompanions, destination)) throw Error("配套入口未列入同版清单 " + destination);
+      if (match[1] && /\.(?:png|jpe?g|webp|gif|svg|bmp|avif)$/i.test(destination)) images.add(path.posix.basename(destination));
+      if (!match[1]) originals.add(decodeURIComponent(href));
+    }
+  }
+  const courseLinks = published ? "" : linkBody;
   const addImage = file => {
     if (!file.startsWith(path.join(preview, "课件", "原图") + path.sep)) throw Error("Unexpected image " + file);
     images.add(path.basename(file));
     localLinks.set(file, path.relative(preview, file));
   };
-  for (const match of body.matchAll(/!\[\[([^|\]]+\.png)(?:\|[0-9]+)?\]\]/g)) {
+  for (const match of courseLinks.matchAll(/!\[\[([^|\]]+\.png)(?:\|[0-9]+)?\]\]/g)) {
     if (!match[1].startsWith(name + "/课件/原图/")) throw Error("Unexpected image " + match[1]);
     addImage(path.resolve(preview, match[1].slice(name.length + 1)));
   }
-  for (const match of body.matchAll(/!\[[^\]\n]+\]\(([^)\n]+)\)/g)) {
+  for (const match of courseLinks.matchAll(/!\[[^\]\n]+\]\(([^)\n]+)\)/g)) {
     addImage(path.resolve(path.dirname(note), decodeURIComponent(match[1])));
   }
-  const originals = new Set();
-  for (const match of body.matchAll(/\]\((\.\.\/[^)]+)\)/g)) {
-    const relativeUrl = decodeURIComponent(match[1]);
-    const file = path.resolve(path.dirname(path.join(folder, rel)), relativeUrl);
-    if (!file.startsWith(path.join(folder, "原始资料") + path.sep)) throw Error("Source escapes course " + file);
+  const noteLinks = /\]\((<[^<>\r\n]+>|[^)\r\n]+)\)/g;
+  for (const match of courseLinks.matchAll(noteLinks)) {
+    const href = match[1].replace(/^<|>$/g, "");
+    if (!companion && !/^(?:\.|%2e){2}(?:\/|%2f)/i.test(href)) continue;
+    if (companion && /^(?:[a-z]+:|#)/i.test(href)) continue;
+    const relativeUrl = decodeURIComponent(href);
+    const relativeFile = linkedFilename(href);
+    if (!companion && relativeFile.startsWith("../配套资料/")) {
+      if (!Object.hasOwn(publishedCompanions, relativeFile.slice(3))) throw Error("配套资料未随同版验收 " + relativeFile);
+      originals.add(relativeUrl);
+      continue;
+    }
+    const file = path.resolve(path.dirname(path.join(folder, rel)), relativeFile);
+    if (!file.startsWith(path.join(folder, companion ? "配套资料" : "原始资料") + path.sep))
+      throw Error("Source escapes course " + file);
     originals.add(path.posix.normalize(relativeUrl));
     localLinks.set(file, path.relative(folder, file));
   }
@@ -44,9 +90,9 @@ async function prepareNote(vault, cases, folder, preview, rel) {
       else if (error.code !== "EEXIST") throw error;
     }
   }
-  const provenance = [...body.matchAll(/<!-- (段落出处|配图出处) (.+?) -->/g)];
-  if (!provenance.some(match => match[1] === "段落出处") ||
-      provenance.filter(match => match[1] === "配图出处").length < images.size) {
+  const provenance = [...linkBody.matchAll(/<!-- (段落出处|配图出处) (.+?) -->/g)];
+  if (!companion && (!provenance.some(match => match[1] === "段落出处") ||
+      provenance.filter(match => match[1] === "配图出处").length < images.size)) {
     throw Error("缺少隐藏的出处记录 " + note);
   }
   cases.set(name + "/" + rel, {name, images:[...images], urls:[...originals],
@@ -54,7 +100,79 @@ async function prepareNote(vault, cases, folder, preview, rel) {
     bodyCharacters:body.length,
     digest:createHash("sha256").update(body).digest("hex"),
     appendices:[...body.matchAll(/^> \[!info\]- (原课与配套资料|有声原课与工具入口)$/gm)].map(match => match[1]),
-    formula:/\$\$[\s\S]+?\$\$/.test(body),code:/^(?:\x60{3}|~{3})\w+/m.test(body),table:/^\|.*\|\s*$/m.test(body)});
+    formula:!companion && /\$\$[\s\S]+?\$\$/.test(body),code:/^(?:\x60{3}|~{3})\w+/m.test(body),
+    table:!companion && /^\|.*\|\s*$/m.test(body), companion});
+}
+
+async function fileDigest(file) {
+  const digest = createHash("sha256");
+  for await (const data of createReadStream(file)) digest.update(data);
+  return digest.digest("hex");
+}
+
+async function preparePublishedCompanions(vault, folder, preview, location, receiptPath) {
+  const manifestPath = receiptPath || path.join(preview, "companion-outputs.json");
+  const manifest = await fs.readFile(manifestPath, "utf8").then(JSON.parse, error => {
+    if (!receiptPath && error.code === "ENOENT") return null;
+    throw error;
+  });
+  const proofs = receiptPath ? manifest?.review?.snapshot?.companions : manifest?.companions;
+  if (!proofs) return {};
+  if (typeof proofs !== "object" || Array.isArray(proofs)) throw Error("配套资料清单格式不符");
+  for (const [relative, digest] of Object.entries(proofs)) {
+    const parts = relative.split("/");
+    if (parts.length < 2 || parts[0] !== "配套资料" || parts.some(part => !part || part === "." || part === ".." || /[\\:\0]/.test(part))
+        || typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)) throw Error("无效的同版配套入口 " + relative);
+    const source = path.join(location, ...parts);
+    if (!source.startsWith(path.join(location, "配套资料") + path.sep) || await fs.realpath(source) !== source) {
+      throw Error("配套资料入口超出同版目录 " + source);
+    }
+    const destination = path.join(vault, path.basename(folder), ...parts);
+    await fs.mkdir(path.dirname(destination), {recursive: true});
+    await fs.copyFile(source, destination);
+    if (await fileDigest(destination) !== digest) throw Error("配套资料与同版验收指纹不符 " + relative);
+  }
+  return {proofs, readCompanions: !receiptPath || Boolean(manifest.obsidian?.companion_reading)
+    || process.env.WORLDANALYSIS_OBSIDIAN_RECHECK_COMPANIONS === "1"};
+}
+
+async function preparePublishedNotes(vault, cases, folder, proofs) {
+  const course = path.join(vault, path.basename(folder));
+  for (const relative of Object.keys(proofs).filter(name => /\.md$/i.test(name))) {
+    const body = await fs.readFile(path.join(course, relative), "utf8");
+    if (!body.trim()) throw Error("配套阅读稿无可读内容 " + relative);
+    const literal = /^#[^\n]+\n\n(`{3,})text\n([\s\S]*)\n\1\n$/.exec(body);
+    await prepareNote(vault, cases, folder, course, relative, {
+      published: relative,
+      literal: literal ? literal[2].replace(/\r\n/g, "\n") : null,
+      tables: !literal && /^\|.*\|\s*$/m.test(companionProse(body)) ? 1 : 0,
+    }, proofs);
+  }
+}
+
+async function prepareCompanions(vault, cases, folder) {
+  const manifest = JSON.parse(await fs.readFile(path.join(folder, "配套资料清单.json"), "utf8"));
+  if (manifest.schema!==1 || manifest.kind!=="companion_stage" || !manifest.materials?.length)
+    throw Error("缺少配套资料清单");
+  for (const material of manifest.materials) {
+    const files = [[material.original,material.source_sha256],[material.preview,material.preview_sha256]];
+    for (const [relative, expected] of files) {
+      const file=typeof relative==="string" && path.resolve(folder,relative);
+      if (!file || !file.startsWith(path.join(folder,"配套资料")+path.sep) || await fs.realpath(file)!==file
+          || createHash("sha256").update(await fs.readFile(file)).digest("hex")!==expected)
+        throw Error("配套资料与清单不一致");
+    }
+    const literal = material.preview_structure.representation==="complete_literal_text";
+    const body = literal ? await fs.readFile(path.join(folder,material.preview),"utf8") : "";
+    const literalBlock=literal ? /^#[^\n]+\n\n(\x60{3,})text\n([\s\S]*)\n\1\n$/.exec(body) : null;
+    if (literal && !literalBlock) throw Error("缺少完整可复制的文字原稿");
+    const expectedText = literal ? literalBlock[2].replace(/\r\n/g,"\n") : null;
+    await prepareNote(vault,cases,folder,folder,material.preview,{
+      literal:expectedText,
+      tables:material.preview_structure.tables || 0
+    });
+  }
+  await prepareNote(vault,cases,folder,folder,"配套资料/00 配套资料.md",{literal:null,tables:0});
 }
 
 async function configureVault(vault) {
@@ -99,22 +217,33 @@ async function evaluate(client, expression, timeout) {
 }
 async function main(){
   const installed = process.argv[2] === "--installed";
-  if (installed ? process.argv.length !== 6 : process.argv[2] !== "--project" || process.argv.length !== 5) {
-    throw Error("用法 --project 课程包 阅读预览目录；或 --installed 日常库课目录 笔记相对路径 回执文件");
+  const companion = process.argv[2] === "--companion";
+  if (installed ? ![6, 7].includes(process.argv.length) : process.argv.length !== 5 || (!companion && process.argv[2] !== "--project")) {
+    throw Error("用法 --project 课程包 阅读预览目录；或 --installed 日常库课目录 笔记相对路径 回执文件 [正式发布回执]；或 --companion 配套候选目录 回执文件");
   }
   const folder=path.resolve(process.argv[3]);
-  const preview=installed ? folder : path.resolve(process.argv[4]);
-  const output=installed ? path.resolve(process.argv[5]) : path.join(preview,"obsidian-render.json");
-  const working=installed ? path.dirname(output) : path.dirname(preview);
+  const preview=installed || companion ? folder : path.resolve(process.argv[4]);
+  const output=installed ? path.resolve(process.argv[5]) : companion ? path.resolve(process.argv[4]) : path.join(preview,"obsidian-render.json");
+  const working=installed || companion ? path.dirname(output) : path.dirname(preview);
   const entry=installed ? process.argv[4].split(path.sep).join("/") : "课件/00 开始学习.md";
   if (path.posix.dirname(entry)!=="课件" || !entry.endsWith(".md")) throw Error("无效的课件路径");
   const qa=await fs.mkdtemp(path.join(working,"obsidian-render-"));
   const vault=path.join(qa,"搬移后的学习库"),roam=path.join(qa,"roaming"),local=path.join(qa,"local");
   const profile=path.join(roam,"obsidian");
   const cases=new Map();
+  let publishedCompanions = {};
   let app, browser, client, passed=false;
   try {
-    await prepareNote(vault, cases, folder, preview, entry);
+    if (companion) await prepareCompanions(vault,cases,folder);
+    else {
+      const receiptPath = installed && process.argv[6] ? path.resolve(process.argv[6]) : null;
+      if (!installed || receiptPath) {
+        const copy = await preparePublishedCompanions(vault, folder, preview, installed ? folder : preview, receiptPath);
+        publishedCompanions = copy?.proofs || {};
+        if (copy?.readCompanions) await preparePublishedNotes(vault, cases, folder, publishedCompanions);
+      }
+      await prepareNote(vault, cases, folder, preview, entry, null, publishedCompanions);
+    }
     await configureVault(vault);
     for(const d of [profile,local]) await fs.mkdir(d,{recursive:true});
     await fs.writeFile(path.join(profile,"obsidian.json"),JSON.stringify({vaults:{a73c12e5f03b94d6:{path:vault,ts:Date.now(),open:true}},updateDisabled:true}));
@@ -156,8 +285,10 @@ async function main(){
     const files=[...cases.keys()];
     await until(()=>evaluate(client,JSON.stringify(files)+".every(p=>{const f=app.vault.getAbstractFileByPath(p);return f&&app.metadataCache.getFileCache(f)})"));
     const checks=[];
+    const companionReading={};
     for(const file of files){
       const noteCase=cases.get(file);
+      const published=noteCase.companion?.published;
       // Portrait figures can take several scroll positions each. Scale the
       // deadline while keeping the actual walk bounded and checking every item.
       const walkBudget=Math.max(90000,30000+460*noteCase.images.length+Math.ceil(noteCase.bodyCharacters/12));
@@ -165,7 +296,7 @@ async function main(){
         const target=app.vault.getAbstractFileByPath(${JSON.stringify(file)});
         let leaf=app.workspace.activeLeaf || app.workspace.getMostRecentLeaf() || app.workspace.getLeaf(false);
         await leaf.openFile(target,{state:{mode:"preview"}});
-        if (${installed}) {
+        if (${installed || companion || Boolean(published)}) {
           if (leaf.view.file?.path!==target.path) throw Error("初次打开时未定位到日常库的同名教材");
           const reopened=app.workspace.getLeaf("tab");
           leaf.detach();
@@ -175,15 +306,21 @@ async function main(){
         const state=leaf.getViewState(); state.state.mode="preview"; await leaf.setViewState(state);
         const wait=(n)=>new Promise(r=>setTimeout(r,n));
         const rendered=()=>leaf.view.containerEl.querySelector(".markdown-reading-view .markdown-preview-view");
+        const companion=${JSON.stringify(noteCase.companion)};
+        const renderedTitle=()=>view?.querySelector("h1")?.textContent ||
+          (companion?.published && view?.querySelector(".markdown-preview-sizer :is(p,pre,table,img,ul,ol,h2,h3,h4,h5,h6)")
+            ? target.basename : "");
         let view;
         for(let attempt=0;attempt<100;attempt++){
           view=rendered();
-          if(view && view.querySelector("h1"))break;
+          if(renderedTitle())break;
           if(view)view.scrollTop=0;
           await wait(100);
         }
-        if(!view?.querySelector("h1"))throw Error("reading view did not render: "+target.path);
+        if(!renderedTitle())throw Error("reading view did not render: "+target.path);
         const seen=new Map(), sections=new Set(), urls=new Set(), closedAppendices=new Set(), visibleCitations=new Set();
+        const tables=new Set();
+        let literalMatches=false;
         const appendices=${JSON.stringify(cases?.get(file).appendices || [])};
         const provenance=${JSON.stringify(cases?.get(file).provenance || [])};
         const expectedImages=${JSON.stringify(cases.get(file).images)};
@@ -237,11 +374,18 @@ async function main(){
             sections.add(h.textContent.trim());
             if(h.dataset.heading) sections.add(h.dataset.heading.trim());
           }
-          title=title||view.querySelector("h1")?.textContent||"";
+          title=title||renderedTitle();
           horizontalOverflow=horizontalOverflow||view.scrollWidth>view.clientWidth+2;
           formula=formula||!!view.querySelector("mjx-container,.math-block,.MathJax");
           code=code||!!view.querySelector("pre code");
           table=table||!!view.querySelector("table");
+          if(companion){
+            for(const item of view.querySelectorAll("table")) tables.add(item.innerText);
+            if(companion.literal!==null){
+              literalMatches=literalMatches||[...view.querySelectorAll("pre code")].some(item=>
+                item.textContent.replace(/\\r\\n/g,"\\n").replace(/\\n$/,"")===companion.literal);
+            }
+          }
           collectLinks();
           if(provenance.length){
             const visibleText=view.innerText.replace(/\\s+/g," ")
@@ -259,7 +403,8 @@ async function main(){
           const atBottom=view.scrollTop+view.clientHeight>=height-3;
           const sawEnding=expectedSections.every(section=>sections.has(section)) &&
             appendices.every(appendix=>closedAppendices.has(appendix)) &&
-            expectedImages.every(name=>seen.has(name));
+            expectedImages.every(name=>seen.has(name)) &&
+            (!companion || (tables.size>=companion.tables && (companion.literal===null || literalMatches)));
           // Obsidian can briefly report a smaller document before the next chunks are mounted.
           bottomRepeats=atBottom ? bottomRepeats+1 : 0;
           if(atBottom && sawEnding && bottomRepeats>=2){reachedBottom=true;break;}
@@ -285,10 +430,11 @@ async function main(){
             !!cache?.headings?.some(h=>h.heading===mark)));
           return {link:l.link,found};
         });
-        return {file:target.path,mode:leaf.view.getMode(),title,expanded,reopened:${installed},reachedBottom,repeats,pastMissing,
+        return {file:target.path,mode:leaf.view.getMode(),title,expanded,reopened:${installed || companion || Boolean(published)},reachedBottom,repeats,pastMissing,
           sections:[...sections],closedAppendices:[...closedAppendices],
           images:[...seen].map(([name,size])=>({name,...size})),
           internal, formula, code, table, rawLinks:urls.size,
+          ...(companion ? {renderedTables:tables.size,literalMatches:companion.literal===null ? null : literalMatches} : {}),
           missingRawLinks:[...expectedUrls].filter(url=>!urls.has(url)),visibleCitations:[...visibleCitations],
           horizontalOverflow:horizontalOverflow||view.scrollWidth>view.clientWidth+2,
           clientWidth:view.clientWidth, scrollWidth:view.scrollWidth,
@@ -297,10 +443,13 @@ async function main(){
       const actualDigest=createHash("sha256").update(await fs.readFile(path.join(vault,file))).digest("hex");
       if(actualDigest!==noteCase.digest) throw Error("阅读过程中文档版本发生变化 "+file);
       info.document_sha256=actualDigest;
-      checks.push(info);
+      if(published) companionReading[published]=info;
+      else checks.push(info);
     }
-    const result={version:ver.Browser,testVault:vault,checks};
-    const unreadable=checks.filter(v=>v.mode!=="preview" || !v.title || v.horizontalOverflow ||
+    const result={version:ver.Browser,testVault:vault,checks,
+      ...(Object.keys(publishedCompanions).length ? {companions: publishedCompanions} : {}),
+      ...(Object.keys(companionReading).length ? {companion_reading:companionReading} : {})};
+    const unreadable=[...checks,...Object.values(companionReading)].filter(v=>v.mode!=="preview" || !v.title || v.horizontalOverflow ||
       v.internal.some(l=>!l.found) || v.images.some(i=>!i.fit) || (()=>{
         const want=cases.get(v.file);
         return want.images.some(f=>!v.images.some(i=>i.name===f)) || v.missingRawLinks.length>0 ||
@@ -312,9 +461,11 @@ async function main(){
       await fs.writeFile(path.join(qa,"incomplete-render.json"),JSON.stringify(result,null,2));
       throw Error(`Incomplete reading-view checks: ${unreadable.length} notes; full observations: ${path.join(qa,"incomplete-render.json")}`);
     }
-    await fs.writeFile(output, JSON.stringify({version:ver.Browser,checks},null,2)+"\n");
+    const {testVault, ...receipt} = result;
+    await fs.writeFile(output, JSON.stringify(receipt,null,2)+"\n");
     passed=true;
-    console.log("Rendered",checks.length,"notes and",checks.reduce((a,v)=>a+v.images.length,0),"images");
+    const rendered=[...checks,...Object.values(companionReading)];
+    console.log("Rendered",rendered.length,"notes and",rendered.reduce((a,v)=>a+v.images.length,0),"images");
   }catch(error){
     // Keep the full isolated evidence, including failures before the application starts.
     const diagnostic=path.join(qa,"failure-report.json");

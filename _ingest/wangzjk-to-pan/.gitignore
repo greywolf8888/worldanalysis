@@ -7,3 +7,4 @@ __pycache__/
 /v4-review/data/
 /v4-review/evidence/
 /v4-review/test/V4-DEMO-*/
+/v4-review/test/tmp*/

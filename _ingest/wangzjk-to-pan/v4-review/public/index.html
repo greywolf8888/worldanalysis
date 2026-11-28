@@ -24,9 +24,11 @@
     <nav class="masthead-nav" aria-label="资源库导航">
       <a href="/" aria-current="page">资源库</a>
       <a href="/courses" id="catalog-calendar-link">课程表</a>
+      <button id="playbooks-open" type="button" aria-haspopup="dialog" aria-controls="playbooks" hidden>玩法专题</button>
       <a href="/control">控制台</a>
       <button id="progress" type="button">资料来源</button>
       <button id="local-open" type="button">处理进度</button>
+      <button id="local-library-open" type="button">我的教材</button>
       <button id="analysis-open" type="button" aria-haspopup="dialog" aria-controls="analysis-order">分析顺序</button>
     </nav>
     <button id="queue" class="queue-button" type="button">转存清单 <b id="chosen">0</b></button>
@@ -62,6 +64,8 @@
             <div class="filter-footer"><button id="reset" type="button">清除筛选</button><button id="apply-filters" class="primary" type="button">应用筛选</button></div>
           </div>
         </details>
+        <label class="sr" for="versions">版本范围</label>
+        <select id="versions" class="order" name="versions"><option value="latest">较新版本</option><option value="all">全部版本</option></select>
         <label class="sr" for="order">排序</label>
         <select id="order" class="order" name="order"><option value="newest">最新发布</option><option value="oldest">最早发布</option><option value="title">按标题</option></select>
         <div class="view-switch" role="group" aria-label="呈现方式">
@@ -142,6 +146,13 @@
   <div class="drawer-frame">
     <header class="drawer-top"><h2 id="analysis-title">分析顺序</h2><button type="button" class="close-button" data-close autofocus>关闭</button></header>
     <div class="drawer-scroll dialog-body" id="analysis-body"></div>
+  </div>
+</dialog>
+
+<dialog id="playbooks" class="drawer" aria-labelledby="playbooks-title">
+  <div class="drawer-frame">
+    <header class="drawer-top"><h2 id="playbooks-title">玩法专题</h2><button type="button" class="close-button" data-close autofocus>关闭</button></header>
+    <div class="drawer-scroll dialog-body" id="playbooks-body" aria-live="polite"></div>
   </div>
 </dialog>
 

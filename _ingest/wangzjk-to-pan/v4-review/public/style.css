@@ -182,6 +182,10 @@ button.card-topic:not(:disabled):hover { color: var(--accent); background: trans
 .article-relations li span { display: block; font-size: .82rem; }
 button.relation-title { min-height: 30px; border: 0; padding: .14rem 0; text-align: start; font-weight: 650; color: var(--text); background: transparent; }
 button.relation-title:not(:disabled):hover { color: var(--accent-dark); background: transparent; text-decoration: underline; }
+.playbook-pair { list-style: none; padding: .6rem 0; margin: 0; border-bottom: 1px solid var(--soft-line); }
+.playbook-pair li + li { margin-top: .5rem; }
+.playbook-pair small { display: block; }
+.playbook-pair blockquote { margin: .2rem 0 .3rem; padding-inline-start: .6rem; border-inline-start: 2px solid var(--soft-line); }
 .pagination { display: flex; justify-content: center; align-items: center; gap: .4rem .65rem; flex-wrap: wrap; padding: .85rem 0 .1rem; font-size: .83rem; color: var(--secondary); }
 .catalog-pagination { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: .45rem .7rem; padding: .52rem 0 .1rem; border-bottom: 0; color: var(--secondary); font-size: .83rem; font-variant-numeric: tabular-nums; }
 .catalog-pagination .page-controls, .catalog-pagination .page-numbers, .catalog-pagination .page-jump { display: flex; align-items: center; gap: .16rem; }

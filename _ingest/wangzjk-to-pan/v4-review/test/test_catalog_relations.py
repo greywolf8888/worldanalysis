@@ -3,11 +3,15 @@
 from hashlib import sha256
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from catalog_model import Library
 from catalog_relations import CatalogRelations, article_identity, candidate_pairs, version_compare
+from catalog_semantics import CatalogStore, article_key, relationship_input, reusable_classification, source_input
 
 
 def article(aid, title="教材示例", *, paragraphs=(), author=None, edition=None, version_date=None,
@@ -58,6 +62,89 @@ class CandidateTests(unittest.TestCase):
 
 
 class ProjectionTests(unittest.TestCase):
+    INTRO = [
+        "先拆解原始经营流程，将每项操作对应到实际输入、输出文件和需要核实的参数条件，分别记录演示数据与正式经营数据。",
+        "第一部分处理素材去向和客户复盘，第二部分对照现场执行清单、呈现条件和测试结果，第三部分实际还原参考模板及可替代路径。",
+        "最后用五组事先记录的真实文件逐一复验，确认每种资料的展示位置、办理过程与必要授权，保存原版记录和复核结果。",
+    ]
+
+    def test_exact_complete_cross_site_text_uses_first_intake_but_preserves_source_selection(self):
+        first = article(1, "展板设计与完整检查 2.0", paragraphs=self.INTRO, published="2026-11-27")
+        later = {**article(2, first["title"], paragraphs=self.INTRO, published="2026-11-01"),
+                 "site_id": "secondary.test", "article_key": "secondary.test/2"}
+        seen = {first["article_key"]: "2026-11-27T12:00:00+08:00",
+                later["article_key"]: "2026-11-28T12:00:00+08:00"}
+        rows = (later, first)
+        lib = CatalogRelations(rows, (), first_seen=seen)
+        normal, = lib.project(rows)
+        selected, = lib.project(rows, keep_selected={later["id"]})
+        filtered, = lib.project((later,))
+        self.assertEqual((normal["id"], selected["id"], filtered["id"]), (first["id"], later["id"], later["id"]))
+        self.assertEqual(normal["display_id"], selected["display_id"])
+        self.assertEqual(normal["other_sources"][0]["article_revision"], later["article_revision"])
+        self.assertEqual(lib.stats()["exact_intro_folds"], 1)
+
+    def test_exact_intro_requires_complete_and_no_conflict_or_withdrawal(self):
+        first = article(1, "展板设计与完整检查 v2.0", paragraphs=self.INTRO, author="林峰", edition="v2.0")
+        second = {**article(2, first["title"], paragraphs=self.INTRO, author="林峰", edition="2.0"),
+                  "site_id": "secondary.test", "article_key": "secondary.test/2"}
+        partial = {**second, "coverage": "partial"}
+        author = {**second, "analysis": {**second["analysis"], "author": "赵琳"}}
+        edition = {**second, "analysis": {**second["analysis"], "edition": "支线改订版"}}
+        title = {**second, "title": first["title"].replace("2.0", "20")}
+        for other, relationships in ((partial, ()), (author, ()), (edition, ()), (title, ()),
+                                     (second, (edge(first, second, "same_version", revoked=True),)),
+                                     (second, (edge(first, second, "uncertain"),))):
+            with self.subTest(other=other["title"], relationships=relationships):
+                rows = (first, other)
+                self.assertEqual(len(CatalogRelations(rows, relationships).project(rows)), 2)
+
+    def test_store_suppresses_exact_fold_after_operator_withdrawal(self):
+        rows = (article(1, "展板设计与完整检查", paragraphs=self.INTRO),
+                {**article(2, "展板设计与完整检查", paragraphs=self.INTRO), "site_id": "secondary.test"})
+        inputs = [source_input(row, {"coverage":"complete", "clean_text":"\n".join(self.INTRO)}, {}) for row in rows]
+        by_key = {row["article_key"]:row for row in inputs}
+        relation = {"relation":"same_version", "same_scope":True, "reason":"同版资料实际核对",
+                    "evidence":[{"side":side, "field":"paragraphs", "text":self.INTRO[0]} for side in ("left","right")]}
+        with TemporaryDirectory(dir=Path(__file__).resolve().parent) as scratch:
+            store = CatalogStore(Path(scratch) / "catalog.sqlite3")
+            relation_id = store.correct_relation(*inputs, relation)
+            store.undo(relation_id)
+            self.assertEqual(store.read(by_key)[1], [])
+            blocked = store.read(by_key, include_suppressed=True)[1]
+            projected = [{**raw, **relationship_input(item)} for raw, item in zip(rows, inputs)]
+            self.assertEqual(len(CatalogRelations(projected, blocked).project(projected)), 2)
+
+    def test_exact_alias_reuses_text_verdict_without_extending_version_or_evidence_history(self):
+        intro = [self.INTRO[0] + "本课演示在抖音发布制作完成的短视频。", *self.INTRO[1:]]
+        first = article(1, "展板设计与完整检查", paragraphs=intro)
+        second = {**article(2, first["title"], paragraphs=intro), "site_id":"secondary.test"}
+        lib = Library.__new__(Library)
+        lib.raw_rows = [{**row, "excerpt":"", "blocks":[], "source_categories":[]} for row in (first,second)]
+        lib.adapters = {row["site_id"]:Mock() for row in lib.raw_rows}
+        for adapter in lib.adapters.values():
+            adapter.catalog_evidence.return_value = ({}, None)
+        keys = [article_key(row["site_id"], row["article_id"]) for row in lib.raw_rows]
+        store = Mock()
+        verdict = {"category":"media", "subcategory":"短视频制作", "secondary_category":"",
+                   "author":"林峰", "edition":"2.0",
+                   "platforms":[{"id":"douyin", "role":"use", "text":intro[0]}],
+                   "evidence":[{"field":"paragraphs", "text":intro[0]}]}
+        store.read.return_value = ({keys[0]:("agent",verdict)}, [], 0)
+        intros = {(row["site_id"],row["article_id"]):{"coverage":"complete","clean_text":"\n".join(intro)}
+                  for row in lib.raw_rows}
+        lib.attach_catalog(store, intros)
+        target = lib.semantic_rows[keys[1]]
+        self.assertEqual(target["classification_state"], "reused")
+        self.assertEqual(lib.reused_classifications, {keys[1]})
+        self.assertEqual(target["platforms"][0]["id"], "douyin")
+        self.assertEqual(target["analysis"], {})
+        self.assertEqual(target["input_hash"], relationship_input(lib.semantic_inputs[keys[1]])["input_hash"])
+        self.assertNotIn(keys[1], lib.semantic_classified)
+        donor, source = (lib.semantic_inputs[key] for key in keys)
+        self.assertIsNone(reusable_classification(donor, {**source,"excerpt":"不同发布说明"}, verdict))
+        self.assertIsNone(reusable_classification(donor, source, {**verdict, "evidence":[{"field":"excerpt","text":"说明"}]}))
+
     def test_full_source_group_has_direct_bindings_and_filter_sensitive_representative(self):
         first = article(1, "新版展板设计", published="2026-01-01")
         repost = article(2, "原作者的展板课程", paragraphs=["完整章节与原作者介绍"], published="2026-11-22")

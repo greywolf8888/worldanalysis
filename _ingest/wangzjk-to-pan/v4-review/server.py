@@ -8,23 +8,29 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+import sys
 from threading import RLock
 from time import perf_counter
 from urllib.parse import parse_qs, urlsplit
 from catalog_model import CATEGORIES, STATUS, ROOT, catalog_input_stamp, compact, digest, now, open_index
 
 from production_bridge import LocalProjection
+from catalog_decisions import analysis_decision, cross_author_playbooks
 from catalog_progress import CatalogProgress
 from confirm_gate import readiness
+from course_followups import related_followups
 from analysis_priority import AnalysisPriority, AnalysisPriorityError
 from member_queue import MAX_LIMIT, DEFAULT_NON_PROJECTS, DEFAULT_OBSERVATIONS, build_worklist, read_backfill, read_non_projects, read_observations
 from share_locations import MAX_BROWSER_IMPORT_BYTES, import_browser_share_locations, protected_owner_exports
-from course_calendar import CalendarRequestError, course_calendar
-from pipeline_control import JOBS, PipelineControl, RunBusy
+from course_calendar import PARAMETERS as CALENDAR_PARAMETERS, CalendarRequestError, course_calendar
+from pipeline_control import DEFAULT_PORT, JOBS, PipelineControl, RunBusy
 from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, PLATFORMS as PLATFORM_LABELS, KEY as ARTICLE_KEY
 from catalog_semantics import CatalogStore, article_key
 from intro_inputs import intro_revision
 from catalog_model import SEMANTIC_DB
+
+sys.path.append(str(ROOT.parent))
+from lib.manual_verification import read_status as read_verification_status
 
 INDEX={"/":("index.html","text/html"),"/style.css":("style.css","text/css"),"/app.js":("app.js","text/javascript"),"/catalog-facets.js":("catalog-facets.js","text/javascript"),"/production.js":("production.js","text/javascript"),
        "/priority.js":("priority.js","text/javascript"),"/priority.css":("priority.css","text/css"),
@@ -33,12 +39,12 @@ INDEX={"/":("index.html","text/html"),"/style.css":("style.css","text/css"),"/ap
        "/courses":("courses.html","text/html"),"/courses.css":("courses.css","text/css"),"/courses.js":("courses.js","text/javascript"),
        "/control":("control.html","text/html"),"/control.css":("control.css","text/css"),"/control.js":("control.js","text/javascript")}
 ID=re.compile(r'rv_[0-9a-f]{64}\Z')
-DEFAULT={'q':'','category':'','subcategory':'','platform':'','status':'','site':'','from':'','to':'','order':'newest','view':'grid','selected':'0','baidu':'0','page':1,'scroll':0}
+DEFAULT={'q':'','category':'','subcategory':'','platform':'','status':'','site':'','from':'','to':'','order':'newest','view':'grid','selected':'0','baidu':'0','versions':'latest','page':1,'scroll':0}
 MAX_ID=5000
 DRAFT_ENTRY_LIMIT=60
 MAX_MULTI_REMOVE_BODY=(len('rv_')+64+3) * MAX_ID + 256
 CATALOG_PAGE_LIMITS=(16,20,24,28,32)
-RESOURCE_FILTERS=('q','category','subcategory','platform','status','site','from','to','order','baidu')
+RESOURCE_FILTERS=('q','category','subcategory','platform','status','site','from','to','order','baidu','versions')
 RESOURCE_CACHE_SIZE=12
 RESOURCE_CACHE_ROWS=48_000
 
@@ -49,7 +55,7 @@ class RequestError(Exception):
 def filters(a, library):
     if type(a) is not dict or a.keys()-DEFAULT.keys()-{'limit'}:raise RequestError(400,'未知筛选参数')
     f={**DEFAULT,**a}
-    for k in ('q','category','subcategory','platform','status','site','from','to','order','view','selected','baidu'):
+    for k in ('q','category','subcategory','platform','status','site','from','to','order','view','selected','baidu','versions'):
         if not isinstance(f[k],str) or len(f[k])>250 or '\x00' in f[k]:raise RequestError(400,'筛选参数无效')
     category= CATEGORY_ALIASES.get(f['category'],f['category'])
     if (category and category not in TAXONOMY
@@ -58,6 +64,7 @@ def filters(a, library):
             or f['status'] and f['status'] not in STATUS
             or f['site'] and f['site'] not in {x['id'] for x in library.sites}
             or f['order'] not in ('title','oldest','newest') or f['view'] not in ('grid','list')
+            or f['versions'] not in ('latest','all')
             or f['selected'] not in ('0','1') or f['baidu'] not in ('0','1')):
         raise RequestError(400,'筛选范围无效')
     try:
@@ -395,6 +402,39 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(202, self.server.control.start(body['action']))
         except RunBusy as error:
             return self.send(409, {'error': str(error)})
+    def change_workspace_paths(self):
+        from workspace_paths import activate_version, preflight, rollback_version, save_version
+
+        if (self.headers.get_all('Origin', []) != ['http://' + self.server.authority]
+                or self.headers.get_all('Sec-Fetch-Site', []) != ['same-origin']
+                or self.headers.get_content_type() != 'application/json' or self.headers.get_all('Transfer-Encoding')):
+            raise RequestError(403, '请从本机控制台管理保存位置')
+        lengths = self.headers.get_all('Content-Length', [])
+        if len(lengths) != 1 or not re.fullmatch(r'[0-9]{1,4}', lengths[0]) or not 1 <= int(lengths[0]) <= 8000:
+            raise RequestError(413, '路径请求长度无效')
+        try:
+            raw = self.rfile.read(int(lengths[0]))
+            if len(raw) != int(lengths[0]):
+                raise ValueError('路径请求不完整')
+            body = json.loads(raw)
+            if not isinstance(body, dict):
+                raise ValueError('请重新打开路径设置')
+            action = body.pop('action', 'preview')
+            operations = {
+                'preview': (preflight, {'proposal', 'revision'}),
+                'save': (save_version, {'proposal', 'revision', 'proposal_id'}),
+                'activate': (activate_version, {'version_id', 'revision'}),
+                'rollback': (rollback_version, {'revision'}),
+            }
+            choice = operations.get(action) if isinstance(action, str) else None
+            if not choice or set(body) != choice[1]:
+                raise ValueError('请重新打开路径设置')
+            result = choice[0](**body, workspace=self.server.path_workspace)
+            if 'path_config' in result:
+                result['catalog_in_use'] = self.server.catalog_directory
+            return self.send(200, result)
+        except (OSError, ValueError, TypeError, RecursionError) as error:
+            raise RequestError(422, str(error) if isinstance(error, ValueError) else '无法核对该路径') from None
     def route(self,method):
         if self.headers.get_all('Host')!=[self.server.authority]:raise RequestError(403,'仅支持本机绑定地址')
         if len(self.path)>4096 or not self.path.startswith('/') or self.path.startswith('//'):raise RequestError(400,'请求路径无效')
@@ -409,13 +449,35 @@ class Handler(BaseHTTPRequestHandler):
             return self.save_member_progress()
         if p == '/api/control' and method == 'POST' and not u.query and self.server.control is not None:
             return self.start_control_run()
+        if p == '/api/verification-status' and method == 'GET' and not u.query and self.server.control is not None:
+            return self.send(200, read_verification_status(
+                ROOT.parent/'state'/'crawl_state.JSON', Path(self.server.catalog_directory)/'codex-public.json'))
+        if p == '/api/workspace-paths' and not u.query:
+            if method == 'POST':
+                return self.change_workspace_paths()
+            if method == 'GET':
+                from workspace_paths import snapshot
+                return self.send(200, {**snapshot(self.server.path_workspace),
+                                       'catalog_in_use': self.server.catalog_directory})
         lib,draft,local,pending=self.server.snapshot.get()
         analysis=AnalysisPriority(draft.path.with_name('analysis-priority.sqlite3'))
         if method=='GET':
+            if p == '/api/playbooks' and not u.query:
+                progress = None
+                pulse = None
+
+                def playbook_history(row):
+                    nonlocal progress, pulse
+                    if progress is None:
+                        progress = self.server.snapshot.resource_progress(lib, local)
+                        pulse = progress.read()
+                    return progress.fields(row, pulse, include_book=True)
+
+                return self.send(200, {'items': cross_author_playbooks(lib, progress_for=playbook_history)})
             if p == '/api/course-calendar':
                 try:
                     progress = self.server.snapshot.resource_progress(lib, local)
-                    selecting = parse_qs(u.query, max_num_fields=8).get('selected') == ['1']
+                    selecting = parse_qs(u.query, max_num_fields=len(CALENDAR_PARAMETERS)).get('selected') == ['1']
                     choice = draft.read() if selecting else {'ids': (), 'revision': 0}
                     return self.send(200, course_calendar(lib, u.query, progress=progress,
                                      selected_ids=choice['ids'], selection_revision=choice['revision']))
@@ -425,7 +487,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(400, {'error': '课程筛选或日期无效。'})
             if p == '/api/control' and not u.query and self.server.control is not None:
                 return self.send(200, self.server.control.overview(lib, draft.read(), local, pending, analysis.read(lib, local)))
-            if p=='/api/meta':return self.send(200,{**lib.meta,'catalog_page_limits':CATALOG_PAGE_LIMITS,'production_integration':'v4-dsh-cutover-20261126-004','public_checkpoint_pending_sync':pending})
+            if p=='/api/meta':return self.send(200,{**lib.meta,'catalog_page_limits':CATALOG_PAGE_LIMITS,'catalog_version_filter':True,'playbooks':True,'production_integration':'v4-dsh-cutover-20261126-004','public_checkpoint_pending_sync':pending})
             if p=='/api/draft':
                 selection = draft.read()
                 if u.query=='view=selection':
@@ -437,10 +499,11 @@ class Handler(BaseHTTPRequestHandler):
                 raise RequestError(400,'清单页码无效')
             if p=='/api/analysis-priority' and not u.query:return self.send(200,analysis.read(lib,local))
             if p=='/api/local-status' and not u.query:return self.send(200,local.overview())
-            if p=='/api/local-projects':
+            if p in ('/api/local-projects', '/api/textbooks'):
                 pr=parse_qs(u.query,keep_blank_values=True,max_num_fields=2)
                 if set(pr)-{'page'} or len(pr.get('page',['1']))!=1:raise RequestError(400,'无效本地分页')
-                return self.send(200,local.local_rows(filters({'page':pr.get('page',['1'])[0]},lib)['page']))
+                page=filters({'page':pr.get('page',['1'])[0]},lib)['page']
+                return self.send(200,local.textbooks(page) if p=='/api/textbooks' else local.local_rows(page))
             if p=='/api/preconfirmation' and not u.query:return self.send(200,readiness(lib,local,draft.read()))
             if p=='/api/cleanup-readiness' and not u.query:return self.send(200,local.cleanup_preparation())
             if p=='/api/discovery-readiness' and not u.query:return self.send(200,{**local.discovery(),'public_checkpoint_pending_sync':pending})
@@ -456,11 +519,21 @@ class Handler(BaseHTTPRequestHandler):
                 source_row = lib.exact_article(x, article_key(row['site_id'], row['article_id'])) or row
                 detail = lib.display_detail(source_row)
                 detail={k:v for k,v in detail.items() if not k.startswith('_') and k not in ('input_hash','analysis','paragraphs','coverage','roots')}
-                live = progress.fields(source_row, progress.read(), include_book=True) if not row.get('demo') else {}
+                pulse = progress.read() if not row.get('demo') else None
+                live = progress.fields(source_row, pulse, include_book=True) if pulse is not None else {}
+                if (live.get('course_completion') or {}).get('originals') in {
+                        'core_missing', 'support_missing', 'awaiting_originals'}:
+                    if related := related_followups(detail):
+                        live['related_followups'] = related
+                if pulse is not None:
+                    def evidence(peer):
+                        return live if peer is source_row else progress.fields(peer, pulse, include_book=True)
+                    if decision := analysis_decision(lib, source_row, detail, evidence):
+                        live['analysis_decision'] = decision
                 return self.send(200,{**detail,**live,
                                       'baidu_share_links':lib.baidu_links(row),'project_entries':lib.project_entries(row)})
             if p=='/api/resources':
-                t=perf_counter(); raw=parse_qs(u.query,keep_blank_values=True,max_num_fields=16)
+                t=perf_counter(); raw=parse_qs(u.query,keep_blank_values=True,max_num_fields=len(DEFAULT)+2)
                 if any(len(v)!=1 for v in raw.values()):raise RequestError(400,'筛选参数重复')
                 requested_revision=raw.pop('draft_revision',[''])[0]
                 if requested_revision and not re.fullmatch(r'[0-9]{1,18}',requested_revision):
@@ -538,17 +611,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):self.serve('POST')
 
 
-def make_server(library,db_path,port,*,local=None,watch=None,enable_control=False,catalog_db=None):
+def make_server(library,db_path,port,*,local=None,watch=None,enable_control=False,catalog_db=None,path_workspace=None):
+    from workspace_paths import BASE
+
     draft=Draft(db_path,library); state=local if local is not None else LocalProjection(library)
     http=ThreadingHTTPServer(('127.0.0.1',port),Handler)
     http.snapshot=LiveSnapshot(library,draft,state,watch,catalog_db);http.authority='127.0.0.1:'+str(http.server_port)
+    http.path_workspace = BASE if path_workspace is None else path_workspace
+    http.catalog_directory = Path(catalog_db or SEMANTIC_DB).parent.as_posix()
     http.control = PipelineControl(http.server_port) if enable_control else None
     return http
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description='Worldanalysis local resource library');p.add_argument('--port',type=int,default=8767)
+    p=argparse.ArgumentParser(description='Worldanalysis local resource library');p.add_argument('--port',type=int,default=DEFAULT_PORT)
     args=p.parse_args(); lib=open_index()
-    watch = (*(ROOT/'data'/name for name in ('discovery-head.json', 'codex-public.json', 'public-details.json')),
+    watch = (*(SEMANTIC_DB.parent/name for name in ('discovery-head.json', 'codex-public.json', 'public-details.json')),
              *(ROOT.parent/'state'/name for name in ('catalog.json', 'journal.json', 'downloaded-project-markers.json')))
     with make_server(lib,ROOT/'data'/'draft.sqlite3',args.port,watch=watch,enable_control=True,catalog_db=SEMANTIC_DB) as h:
         print('Worldanalysis: http://'+h.authority+'/',flush=True)

@@ -17,11 +17,11 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from lxml import etree, html
-from catalog_model import ART, ORIGIN, ROOT, SITE, compact, read_bound, safe_image, safe_text
+from catalog_model import ART, ORIGIN, ROOT, SEMANTIC_DB, SITE, compact, read_bound, safe_image, safe_text
 from intro_inputs import choose_intro, legacy_intro, read_attempts, record_attempt, should_retry
 from project_detail import project
 
-STATE = ROOT / 'data' / 'codex-public.json'
+STATE = SEMANTIC_DB.parent / 'codex-public.json'
 SCHEMA = 'wa-v4-codex-public-source.v1'
 HOME_TZ = timezone(timedelta(hours=8))
 PAGE_SIZE = 100
@@ -41,6 +41,7 @@ DELAY = 2.65
 POST_FIELDS = 'id,link,date,modified,status,title,excerpt,featured_media,_links,_embedded'
 DETAIL_FIELDS = 'id,link,date,modified,status,title,content,excerpt,featured_media'
 CHALLENGE = re.compile(r'just a moment|cf-chl|访问过于频繁|安全验证后继续', re.I)
+VERIFICATION = re.compile(r'hcaptcha|g-recaptcha|cf-turnstile|校验验证码|请输入验证码|请完成安全验证', re.I)
 
 
 class PublicReadError(Exception):
@@ -75,14 +76,22 @@ class WordPress:
                 headers = response.headers
         except HTTPError as exc:
             if exc.code in (401, 403, 429):
+                if exc.code == 403 and exc.headers and 'html' in exc.headers.get('Content-Type', '').lower():
+                    preview = exc.read(8192).decode('utf-8', 'replace')
+                    if VERIFICATION.search(preview):
+                        raise PublicReadError('publisher_verification_required', exc.code) from None
                 raise PublicReadError('official_publisher_gate', exc.code) from None
             raise PublicReadError('publisher_http_error', exc.code) from None
         except (URLError, OSError):
             raise PublicReadError('publisher_connection_unavailable') from None
         if len(body) > MAX_RESPONSE:
             raise PublicReadError('publisher_response_too_large')
-        if CHALLENGE.search(body[:1000].decode('utf-8', 'replace')) and 'json' not in headers.get('Content-Type',''):
-            raise PublicReadError('official_publisher_gate', 200)
+        if 'json' not in headers.get('Content-Type', ''):
+            preview = body[:8192].decode('utf-8', 'replace')
+            if VERIFICATION.search(preview):
+                raise PublicReadError('publisher_verification_required', 200)
+            if CHALLENGE.search(preview):
+                raise PublicReadError('official_publisher_gate', 200)
         try:
             return json.loads(body), headers, url, sha256(body).hexdigest()
         except (ValueError, UnicodeError):
@@ -555,9 +564,23 @@ def collect(path, max_pages, max_details, seed, *, intro_db=None, only_seed=Fals
                 status()
         return status(finished=True)
     except PublicReadError as exc:
-        state['official_site_hold'] = exc.reason == 'official_publisher_gate'
+        state['official_site_hold'] = exc.reason in {'official_publisher_gate', 'publisher_verification_required'}
         state['last_http'] = exc.status
         return status(exc.reason)
+
+
+def recover_public_verification(path):
+    state = load(path)
+    if not state['official_site_hold'] or state['collection'].get('stop_reason') != 'publisher_verification_required':
+        return {'state': 'no_pending_verification'}
+    try:
+        WordPress().listing(1)
+    except PublicReadError:
+        return {'state': 'publisher_access_restricted', 'resumable': True}
+    state['official_site_hold'] = False
+    state['collection']['stop_reason'] = None
+    publish(state, path)
+    return {'state': 'verification_recovered'}
 
 
 def main():
@@ -566,6 +589,8 @@ def main():
     parser.add_argument('--details', type=int, default=REGULAR_DETAIL_BUDGET)
     parser.add_argument('--seed-detail', action='append', default=[])
     parser.add_argument('--detail-list',type=Path,help='仅补采项目内清单指定的来源文章，一行一个文章号')
+    parser.add_argument('--verification-completed', action='store_true',
+                        help='人工完成原站验证后，只读核对并恢复现有采集断点')
     args = parser.parse_args()
     maximum = MAX_TARGET_DETAILS if args.detail_list else REGULAR_DETAIL_BUDGET
     if not 0 <= args.pages <= 160 or not 0 <= args.details <= maximum or not all(ART.fullmatch(value) for value in args.seed_detail):
@@ -580,6 +605,11 @@ def main():
         if not seeds or len(seeds) > MAX_TARGET_DETAILS or any(not ART.fullmatch(value) for value in seeds):
             parser.error('invalid article list')
     with collector_lock(STATE):
+        if args.verification_completed:
+            result = recover_public_verification(STATE)
+            if result['state'] != 'verification_recovered':
+                print(json.dumps(result, ensure_ascii=True))
+                return 2
         result = collect(STATE,args.pages,args.details,seeds,only_seed=bool(args.detail_list))
     print(json.dumps(result,ensure_ascii=True))
     return 0 if result['state']=='updated' else 2

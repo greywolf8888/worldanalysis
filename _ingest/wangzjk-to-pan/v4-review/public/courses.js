@@ -32,8 +32,9 @@ const dayPattern = /^\d{4}-\d{2}-\d{2}$/;
 const groups = new Map();
 const seen = new Set();
 const coursesByResource = new Map();
-let selections;
+let selections = readSelections(location.search);
 let facetMeta = null;
+let fullVersions = false;
 let cursor = '';
 let request = null;
 let needsReload = false;
@@ -67,6 +68,7 @@ function readSelections(search) {
     site: params.get('site') || '',
     day: dayPattern.test(day) ? day : '',
     selected: params.get('selected') === '1' ? '1' : '',
+    versions: params.get('versions') === 'all' ? 'all' : '',
   };
 }
 
@@ -93,7 +95,7 @@ function paintFacets() {
 }
 
 function linkLibrary(values) {
-  const keys = ['q','category','subcategory','platform','site','selected'];
+  const keys = ['q','category','subcategory','platform','site','selected','versions'];
   const query = new URLSearchParams(keys.filter(key => values[key]).map(key => [key, values[key]]));
   if (values.day) query.set('to', values.day);
   if (!query.size) query.set('category', '');
@@ -318,7 +320,7 @@ async function nextPage(manual) {
       filters.elements.site.hidden = data.sites.length < 2;
     }
     firstNewLink = addCourses(data.items, data.sites.length > 1, data.snapshot_id);
-    const tally = [formatNumber.format(data.total) + ' 个项目'];
+    const tally = [formatNumber.format(data.total) + (selections.versions === 'all' ? ' 个版本' : ' 个项目')];
     if (data.version_total > data.total) tally.push(formatNumber.format(data.version_total) + ' 个版本');
     if (data.source_total > data.total) tally.push(formatNumber.format(data.source_total) + ' 篇来源');
     total.textContent = tally.join(' · ');
@@ -357,10 +359,12 @@ function reset(values, remember = false) {
   list.replaceChildren();
   total.textContent = '';
   more.hidden = true;
+  if (!fullVersions) values = {...values, versions: ''};
   selections = facetMeta ? catalogFacets.normalize(values, facetMeta) : values;
   selectedFilter.setAttribute('aria-pressed', String(selections.selected === '1'));
   filters.elements.q.value = values.q;
   filters.elements.site.value = values.site;
+  filters.elements.versions.value = selections.versions === 'all' ? 'all' : 'latest';
   jump.elements.day.value = values.day;
   latest.hidden = !values.day;
   datePosition.hidden = !values.day;
@@ -377,6 +381,7 @@ function searchCourses() {
     ...selections,
     q: filters.elements.q.value.trim(),
     site: filters.elements.site.value,
+    versions: filters.elements.versions.value === 'all' ? 'all' : '',
   }, true);
 }
 
@@ -385,6 +390,7 @@ filters.addEventListener('submit', event => {
   searchCourses();
 });
 filters.elements.site.addEventListener('change', searchCourses);
+filters.elements.versions.addEventListener('change', searchCourses);
 jump.addEventListener('submit', event => {
   event.preventDefault();
   if (jump.reportValidity()) reset({...selections, day: jump.elements.day.value}, true);
@@ -433,9 +439,18 @@ async function loadSelection() {
   }
 }
 selection?.subscribe(selectionChanged);
-void loadSelection();
 window.addEventListener('pageshow', event => {
   if (event.persisted) void loadSelection();
 });
 window.addEventListener('popstate', () => reset(readSelections(location.search)));
-reset(readSelections(location.search));
+async function startCalendar() {
+  filters.elements.versions.disabled = true;
+  try {
+    const response = await fetch('/api/meta', {cache: 'no-store'});
+    if (response.ok) fullVersions = (await response.json()).catalog_version_filter === true;
+  } catch {}
+  filters.elements.versions.disabled = !fullVersions;
+  reset(readSelections(location.search));
+  void loadSelection();
+}
+void startCalendar();

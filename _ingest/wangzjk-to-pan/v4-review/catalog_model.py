@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import re
 from typing import Protocol
@@ -12,17 +13,29 @@ from urllib.parse import urlsplit
 
 from catalog_relations import CatalogRelations
 from catalog_semantics import CATEGORIES as TAXONOMY, CATEGORY_ALIASES, PLATFORMS as PLATFORM_LABELS
-from catalog_semantics import CatalogStore, article_key, relationship_input, source_input
+from catalog_semantics import CatalogStore, article_key, relationship_input, reusable_classification, source_input
 from catalog_topics import TOPIC_REVISION, displayed_secondary_topic, intro_preview, project_topic
 from catalog_platforms import PLATFORM_REVISION, project_platforms
 from intro_inputs import choose_intro, intro_revision, legacy_intro, read_intros
 from share_locations import historical_share_locations, merge_share_locations, protected_owner_exports, read_protected_owner_export
+from workspace_paths import CLOUD_DESTINATION as TARGET, path_bindings
 
 ROOT = Path(__file__).absolute().parent
-SEMANTIC_DB = ROOT / 'data' / 'pipeline-runs.sqlite3'
+CATALOG_PATH_ENV = 'WORLDANALYSIS_CATALOG_PATH_VERSION'
+
+
+def bind_catalog(workspace=ROOT.parents[2], *, version_id=None):
+    binding = path_bindings(workspace=workspace, version_id=version_id)
+    folder = binding['paths']['catalog_data']
+    if not folder:
+        raise ValueError('采集保存位置不可用，请恢复以前的位置')
+    return binding['version_id'], Path(folder)
+
+
+CATALOG_PATH_VERSION, CATALOG_DATA = bind_catalog(version_id=os.environ.get(CATALOG_PATH_ENV))
+SEMANTIC_DB = CATALOG_DATA / 'pipeline-runs.sqlite3'
 SITE = 'wangzjk.com'
 ORIGIN = 'https://www.wangzjk.com'
-TARGET = '/apps/教育分析学习/wangzjk.com'
 CATEGORIES = {'commerce':'电商', 'ai_media':'AI 图文视频', 'growth':'运营增长',
               'business':'商业项目', 'tools':'工具与自动化', 'unsorted':''}
 STATUS = {'observed':'发现入口 · 待核范围', 'verified':'历史根级验读',
@@ -314,6 +327,21 @@ class Library:
                 'coverage','other_sources','other_versions','paragraphs','excerpt_full','source_kind'}
         return {k:v for k,v in r.items() if k not in omit and not k.startswith('_')}
 
+    @staticmethod
+    def set_topics(row, source, reviewed, *, manual=False, repository_links=()):
+        category, subtopic = project_topic(source['title'], source['paragraphs'], source['excerpt'], reviewed,
+                                           manual=manual, source_checked=source['coverage'] in {
+                                               'complete', 'partial', 'image_only'})
+        secondary = displayed_secondary_topic(category, reviewed, manual=manual)
+        live_platforms = project_platforms(source['title'], source['paragraphs'], source['excerpt'], reviewed,
+                                           manual=manual, github_links=repository_links)
+        row.update(category=category, category_label=TAXONOMY.get(category, ('', ()))[0], subcategory=subtopic,
+                   secondary_category=secondary,
+                   platforms=[{'id': platform, 'label': PLATFORM_LABELS[platform]} for platform in live_platforms])
+        row['_search'] = norm(' '.join([row['title'], row['site_label'], row['site_id'], row['excerpt'],
+            row['category_label'], subtopic, *(p['label'] for p in row['platforms']),
+            *row['source_categories'], *source['paragraphs']]))
+
     def attach_catalog(self, store, intros):
         self.semantic_inputs = {}
         self.semantic_rows = {}
@@ -327,10 +355,11 @@ class Library:
             self.semantic_inputs[token] = value
             if saved and saved.get('github_links'):
                 repository_links[token] = saved['github_links']
-        classified, relations, self.stale_relations = store.read(self.semantic_inputs)
+        classified, relations, self.stale_relations = store.read(self.semantic_inputs, include_suppressed=True)
         self.semantic_classified = classified
-        self.semantic_relations = relations
-        pending={article_key(ref['site_id'],ref['article_id']) for relation in relations if relation['relation']=='uncertain'
+        self.reused_classifications = set()
+        self.semantic_relations = [relation for relation in relations if not relation.get('revoked')]
+        pending={article_key(ref['site_id'],ref['article_id']) for relation in self.semantic_relations if relation['relation']=='uncertain'
                  for ref in (relation['left'],relation['right'])}
         seen = Counter(r['id'] for r in self.raw_rows)
         for raw in self.raw_rows:
@@ -338,17 +367,8 @@ class Library:
             value = self.semantic_inputs[token]
             record_state, analysis = classified.get(token,('pending',None))
             valid = analysis or {}
-            category,subtopic = project_topic(value['title'],value['paragraphs'],value['excerpt'],valid,
-                                              manual=record_state=='manual',
-                                              source_checked=value['coverage'] in {'complete','partial','image_only'})
-            secondary = displayed_secondary_topic(category,valid,manual=record_state=='manual')
-            live_platforms = project_platforms(value['title'],value['paragraphs'],value['excerpt'],valid,
-                                               manual=record_state=='manual',github_links=repository_links.get(token, ()))
             row = {**raw, 'article_key':token, 'input_hash':relationship_input(value,valid)['input_hash'], 'analysis':valid,
                    'coverage':value['coverage'],'paragraphs':value['paragraphs'],'classification_state':{'agent':'verified','manual':'manual'}.get(record_state,'pending'),
-                   'category':category,'category_label':TAXONOMY.get(category,('',()))[0],'subcategory':subtopic,
-                   'secondary_category':secondary,
-                   'platforms':[{'id':p,'label':PLATFORM_LABELS[p]} for p in live_platforms],
                    'version_label':valid.get('edition') or next((d['text'] for d in valid.get('dates',[]) if d['meaning']=='version'),''),
                    'action_pending':seen[raw['id']]!=1,'relationship_pending':token in pending}
             if row['action_pending']:
@@ -356,15 +376,35 @@ class Library:
             if not row['excerpt'] and value['paragraphs']:
                 row['excerpt']=safe_text(value['paragraphs'][0],360)
             row['card_summary']=intro_preview(value['title'],value['paragraphs'],value['excerpt'])
-            row['_search']=norm(' '.join([raw['title'],raw['site_label'],raw['site_id'],row['excerpt'],
-                row['category_label'],row['subcategory'],*(p['label'] for p in row['platforms']),*raw['source_categories'],*value['paragraphs']]))
+            self.set_topics(row, value, valid, manual=record_state == 'manual',
+                            repository_links=repository_links.get(token, ()))
             if value['paragraphs'] and (not row['blocks'] or value['coverage']=='complete'):
                 text_blocks=[{'kind':'text','text':part} for part in value['paragraphs']]
                 images=[b for b in row['blocks'] if b['kind']=='image']
                 row['blocks']=[*text_blocks,*images]
                 row['detail_state']='public_sample'
             self.semantic_rows[token]=row
-        self.relations=CatalogRelations(self.semantic_rows.values(),relations)
+        first_seen = {key: source['first_seen_at'] for key, source in self.semantic_inputs.items() if source.get('first_seen_at')}
+        self.relations=CatalogRelations(self.semantic_rows.values(), relations, first_seen=first_seen)
+        for anchor in self.relations.exact_groups:
+            keys = [self.relations.rows[key]['article_key'] for key in self.relations.versions.members[anchor]]
+            if any(classified.get(key, ('', None))[0].startswith('manual') for key in keys):
+                continue
+            donors = {key: classified[key][1] for key in keys if classified.get(key, ('', None))[0] == 'agent'}
+            if not donors:
+                continue
+            for key in set(keys) - classified.keys():
+                source = self.semantic_inputs[key]
+                links = repository_links.get(key, ())
+                results = [reusable_classification(self.semantic_inputs[donor], source, verdict)
+                           if repository_links.get(donor, ()) == links else None for donor, verdict in donors.items()]
+                result = results[0]
+                if result is None or any(other != result for other in results[1:]):
+                    continue
+                row = self.semantic_rows[key]
+                self.set_topics(row, source, result, repository_links=links)
+                row['classification_state'] = 'reused'
+                self.reused_classifications.add(key)
 
     def exact_article(self, resource_id, token):
         row = getattr(self,'semantic_rows',{}).get(token)
@@ -438,7 +478,8 @@ class Library:
         return [link.href for link in merge_share_locations(*locations)]
 
     def match(self,f,selected,*,eligible=None):
-        terms=norm(f.get('q','')).split(); after,before=f.get('from',''),f.get('to',''); category,status,site=(f.get(x,'') for x in ('category','status','site'))
+        terms = re.findall(r'[^\s,;、]+', norm(f.get('q','')))
+        after,before=f.get('from',''),f.get('to',''); category,status,site=(f.get(x,'') for x in ('category','status','site'))
         if hasattr(self,'relations'):
             category= CATEGORY_ALIASES.get(category,category)
             subgroup, platform = f.get('subcategory',''),f.get('platform','')
@@ -453,7 +494,8 @@ class Library:
                    and (not after or row['published_at']>=after)
                    and (not before or row['published_at'] and row['published_at']<=before)
                    and (f.get('selected')!='1' or row['id'] in selected and not row['action_pending'])]
-            items=self.relations.project(items,keep_selected=selected if f.get('selected')=='1' else ())
+            items=self.relations.project(items, keep_selected=selected if f.get('selected')=='1' else (),
+                                         all_versions=f.get('versions')=='all')
             return self.sort_items(items,f)
         items=[r for k,r in self.by_id.items() if (not terms or all(t in self.search[k] for t in terms))
             and (not category or category==r['category']) and (not status or status==r['status'])
@@ -520,8 +562,9 @@ def merge_codex_collection(path, articles, facts):
 
 
 def catalog_input_stamp():
-    paths=(ROOT.parent/'state'/'catalog.json',ROOT/'data'/'public-details.json',
-           ROOT/'data'/'discovery-head.json',ROOT/'data'/'codex-public.json')
+    data = SEMANTIC_DB.parent
+    paths=(ROOT.parent/'state'/'catalog.json',data/'public-details.json',
+           data/'discovery-head.json',data/'codex-public.json')
     version=[]
     for path in paths:
         try:
@@ -537,11 +580,12 @@ def open_index():
     store=CatalogStore(SEMANTIC_DB)
     catalog_revision=store.revision()
     before={name:read_bound(ROOT.parent/'state'/name) for name in FILES}
-    facts, ref=read_bound(ROOT/'data'/'public-details.json')
+    data = SEMANTIC_DB.parent
+    facts, ref=read_bound(data/'public-details.json')
     # Compare bytes after assembling the multi-file snapshot; never publish a mixed generation.
     if any(read_bound(ROOT.parent/'state'/k)[1]!=v[1] for k,v in before.items()):raise ValueError('上游读取期间发生变化')
     state={k:v[0] for k,v in before.items()}; provenance={k:v[1] for k,v in before.items()}
-    overlay_path=ROOT/'data'/'discovery-head.json'; overlay_hash=None; discovery=None; codex_hash=None
+    overlay_path=data/'discovery-head.json'; overlay_hash=None; discovery=None; codex_hash=None
     baseline_articles=len(state['catalog.json']['articles'])
     if overlay_path.exists():
         overlay,overlay_hash=read_bound(overlay_path,3_000_000)
@@ -557,7 +601,7 @@ def open_index():
             if i in articles and i not in facts['articles'] and (p.get('state')!='public_sample' or p.get('article_url')==articles[i]['url']):facts['articles'][i]=p
         discovery={'observed_at':overlay.get('observed_at'),'day':overlay.get('day'),'day_count':overlay.get('visible_posts_count'),'frontier':overlay.get('original_queue_frontier'),
                    'new_articles':len(articles)-len(existing),'read_only':True,'stop_reason':overlay.get('stop_reason'),'pending_detail_count':len(overlay.get('next_uninspected_ids',[])),'checkpoint_sha256':overlay_hash}
-    codex_path=ROOT/'data'/'codex-public.json'
+    codex_path=data/'codex-public.json'
     if codex_path.exists():
         codex_hash, public_status=merge_codex_collection(codex_path,state['catalog.json']['articles'],facts['articles'])
         discovery={**public_status,'collector':'codex','checkpoint_sha256':codex_hash,

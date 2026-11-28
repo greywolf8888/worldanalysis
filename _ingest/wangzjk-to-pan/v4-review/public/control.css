@@ -183,3 +183,37 @@
   .control-stage { padding-right: .72rem; }
   .control-stage-footer button, .control-stage-footer a, .control-heading button { min-height: 42px; }
 }
+.control-paths {
+  margin-top: 1rem;
+}
+.control-paths summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+.control-paths dd {
+  overflow-wrap: anywhere;
+}
+.control-path-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: .6rem;
+  margin-top: .65rem;
+}
+.control-path-form[hidden] {
+  display: none;
+}
+.control-path-form label {
+  display: grid;
+  gap: .3rem;
+}
+.control-path-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
+  flex-basis: 100%;
+  gap: .6rem;
+}
+.control-path-fields input {
+  min-width: 0;
+  width: 100%;
+}

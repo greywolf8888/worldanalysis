@@ -10,7 +10,9 @@ import subprocess
 import sys
 from threading import Lock
 from time import monotonic
-from urllib.parse import quote
+from urllib.parse import quote, unquote
+from course_completion import completion_fields, current_received_issue, verified_companion_install
+from course_followups import CourseFollowups
 from catalog_model import ROOT, SITE, exact_root_fact, now, read_bound, safe_text, source_key
 
 BASE=ROOT.parents[2]
@@ -18,8 +20,10 @@ CONTRACT=BASE/'_exchange/control/decisions/v4-local-integration-20261126-r3.json
 CONTRACT_SHA='4b1c112b2daa3356808dac676e88594dde6fd27cb5a3adba0e1cca7404b615ff'
 SCRIPT=BASE/'_tools/v4-local-status-preservation.py'
 SCRIPT_SHA='9de1256e2f9cb8012ea201fd931090de3c1362950ae95e5724b58aad7e6fcf69'
+HISTORICAL_SCRIPT = BASE / '.runtime/course-production-worktree/_tools/course_production/history_inventory.py'
 HEX=re.compile(r'[a-f0-9]{64}\Z')
 PROJECTION_CACHE_SECONDS = 25
+OVERVIEW_LINK = re.compile(r'^- \[.*\]\(\.\./([^()]+)\) · 分析 ')
 
 
 def stamp(value):
@@ -55,6 +59,99 @@ def file_inside(value, roots):
     return None
 
 
+def overview_textbook_order(overview, root):
+    """Read ordering from the generated analysis-date list of the formal vault."""
+    start, end = '<!-- Worldanalysis:course-catalog -->', '<!-- /Worldanalysis:course-catalog -->'
+    try:
+        with overview.open('rb') as stream:
+            raw = stream.read(4_000_001)
+        if len(raw) > 4_000_000:
+            return []
+        text = raw.decode('utf-8-sig')
+    except (OSError, ValueError):
+        return []
+    if text.count(start) != 1 or text.count(end) != 1 or text.index(start) >= text.index(end):
+        return []
+    managed = text.split(start, 1)[1].split(end, 1)[0]
+    order = []
+    in_analysis_view = False
+    for line in managed.splitlines():
+        if line.startswith('## '):
+            in_analysis_view = line == '## 按分析日期（新到旧）'
+        if not in_analysis_view or not (match := OVERVIEW_LINK.match(line)):
+            continue
+        try:
+            decoded = unquote(match[1], errors='strict')
+        except ValueError:
+            continue
+        relative = Path(decoded)
+        if (relative.is_absolute() or relative.as_posix() != decoded or len(relative.parts) != 3
+                or relative.parts[0].startswith('.') or relative.parts[1] != '课件'
+                or relative.parts[2] != relative.parts[0] + '.md' or any(c in decoded for c in '\\:\0')):
+            continue
+        order.append(root / relative)
+    return list(dict.fromkeys(order))
+
+
+def legacy_reuse_textbooks(projects, roots, overview_paths):
+    """Show a same-edition reused note as an entrance only, without creating a project or copying a sign-off."""
+    candidates = defaultdict(set)
+    for project in projects:
+        book = project.get('textbook') or {}
+        matched = book.get('registered_sha256')
+        if (book.get('relation') != 'same_source_reuse' or book.get('state') != 'registered_edition_matches'
+                or (project.get('acceptance') or {}).get('state') != 'same_source_reuse'
+                or not isinstance(matched, str) or not HEX.fullmatch(matched)
+                or book.get('current_sha256') != matched or not isinstance(book.get('entry'), str)):
+            continue
+        path = Path(book['entry'])
+        if path in overview_paths:
+            candidates[path].add(matched)
+    items = {}
+    for path, hashes in candidates.items():
+        if len(hashes) != 1 or not file_inside(str(path), roots):
+            continue
+        try:
+            with path.open('rb') as stream:
+                body = stream.read(12_000_001)
+            if len(body) > 12_000_000 or sha256(body).hexdigest() not in hashes:
+                continue
+        except OSError:
+            continue
+        items[path] = {'title': safe_text(path.stem, 500), 'category': overview_paths[path],
+                       'textbook_state': 'legacy_reuse_entry', 'course_completion': {'textbook': 'legacy_entry_pending'},
+                       'analysis_date': None, 'production_date': None,
+                       'obsidian_href': 'obsidian://open?path=' + quote(path.as_posix(), safe='')}
+    return items
+
+
+def formal_review_stage(project, data):
+    analysis = project.get('analysis') or {}
+    if analysis.get('state') != 'in_progress':
+        return project
+    progress = data.get('current_production') or {}
+    paths = progress.get('evidence') or {}
+    body_sha = progress.get('candidate_sha256')
+    if (progress.get('local_project_id') != project.get('local_project_id')
+            or not isinstance(body_sha, str) or not HEX.fullmatch(body_sha)
+            or not paths.get('candidate_manifest') or not paths.get('independent_review_request')):
+        return project
+    try:
+        path = Path(paths['independent_review_request'])
+        candidate = Path(paths['candidate_manifest'])
+        results = BASE / '整理结果'
+        if (not path.is_relative_to(results) or not candidate.is_relative_to(results)
+                or candidate.resolve(strict=True) != candidate or not candidate.is_file()
+                or current_received_issue(project, BASE)):
+            return project
+        request, _ = read_bound(path, 16_000_000)
+        if request.get('body_sha256') != body_sha or request.get('decision') != '':
+            return project
+    except (OSError, ValueError, TypeError, AttributeError):
+        return project
+    return {**project, 'analysis': {**analysis, 'state': 'awaiting_acceptance'}}
+
+
 def projection_snapshot():
     contract,ch=read_bound(CONTRACT,80_000)
     spec=contract['projection']
@@ -74,6 +171,20 @@ def projection_snapshot():
     if d.get('schema_version')!=1 or d.get('projection_status') not in ('available','partial') or not at or abs((datetime.now(timezone.utc)-at).total_seconds())>180:
         raise ValueError('invalid or stale projection')
     return d
+
+
+def historical_textbooks():
+    try:
+        if HISTORICAL_SCRIPT.resolve(strict=True) != HISTORICAL_SCRIPT:
+            return []
+        response = subprocess.run([sys.executable, '-B', '-X', 'utf8', str(HISTORICAL_SCRIPT),
+                                   '--read-historical'], cwd=BASE, capture_output=True, timeout=8, check=True)
+        data = json.loads(response.stdout) if len(response.stdout) <= 1_000_000 else None
+        if isinstance(data, dict) and isinstance(data.get('entries'), list):
+            return data['entries']
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return []
 
 
 CLEANUP_STAGES={
@@ -111,7 +222,9 @@ def preservation_view(book, cleanup, body_bytes_match=True):
 class LocalProjection:
     def __init__(self, lib, load=projection_snapshot):
         self.lib=lib;self.load=load;self.guard=Lock();self.last_good=None;self.loaded_at=-10000000
+        self.followups=CourseFollowups(BASE)
         self.last_result=None
+        self.history_guard=Lock(); self.history_at=-float('inf'); self.history=[]
         self.ops={};self.catalog={};self.markers={};self.exact_recycle={}
         if getattr(lib,'provenance',None):
             state=ROOT.parent/'state'; expected=lib.provenance
@@ -133,6 +246,20 @@ class LocalProjection:
             except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError,AssertionError):
                 result={'data':self.last_good,'sync_state':'pending_sync','observed_at':(self.last_good or {}).get('observed_at')}
             self.last_result=result;self.loaded_at=monotonic();return result
+    def analysis_anchor(self, project_id):
+        script = BASE / '.runtime/course-production-worktree/_tools/course_production/analysis_priority_order.py'
+        if script.resolve(strict=True) != script or not script.is_file():
+            raise ValueError('正式分析入口不可用')
+        try:
+            result = subprocess.run(
+                [sys.executable, '-B', '-X', 'utf8', str(script), '--anchor', project_id],
+                cwd=BASE, capture_output=True, timeout=120, check=True,
+            )
+        except subprocess.SubprocessError as error:
+            raise ValueError('本地项目当前无法核对') from error
+        if len(result.stdout) > 8_000:
+            raise ValueError('本地项目返回无效')
+        return json.loads(result.stdout)
     @staticmethod
     def roots(d):
         roots=[]
@@ -144,23 +271,32 @@ class LocalProjection:
             except (OSError,ValueError):pass
         return roots
     def project_view(self,p,d,basis):
+        p=formal_review_stage(p,d)
         dw=p.get('download') or {};an=p.get('analysis') or {};ac=p.get('acceptance') or {};bk=p.get('textbook') or {};cl=p.get('cleanup') or {};curr=p.get('dates') or {}
         f=file_inside(bk.get('entry'),self.roots(d)); verified_hash=bk.get('current_sha256'); expected_hash=bk.get('registered_sha256')
         same_bytes=False
+        companions_readable=True
         if f and isinstance(verified_hash,str) and HEX.fullmatch(verified_hash):
             try:
                 with f.open('rb') as stream: raw=stream.read(12_000_001)
                 same_bytes=len(raw)<=12_000_000 and sha256(raw).hexdigest()==verified_hash
+                if same_bytes and bk.get('state') == 'registered_edition_matches' and bk.get('relation') == 'own':
+                    companions_readable=verified_companion_install(p, f, BASE, raw)
             except OSError:pass
         preservation=preservation_view(bk,cl,same_bytes)
         integrity=('same_registered_bytes' if same_bytes and verified_hash==expected_hash else
                    'same_verified_independent_derivative' if preservation['preservation_state']=='installed_verified' else 'unverified_or_changed')
         href='obsidian://open?path='+quote(f.as_posix(),safe='') if f else None
+        completion = completion_fields(p, BASE) if same_bytes or an.get('state') == 'in_progress' else completion_fields({'analysis': an})
+        if not companions_readable:
+            completion['textbook'] = 'companions_unavailable'
+            completion.pop('cleanup', None)
         return {'project_id':p.get('local_project_id'),'title':safe_text(p.get('title'),500),'category':p.get('category'),'sequence':p.get('sequence'),
                 'link_basis':basis,'receipt_status':p.get('batch_status'),'directory_present':dw.get('directory_present'),'download_complete':dw.get('download_complete'),
                 'file_count_in_registration':dw.get('registered_file_count'),'analysis_state':an.get('state'),'analysis_scope':an.get('scope_status'),'scope_gaps':an.get('scope_gap_count'),
                 'acceptance_state':ac.get('state'),'textbook_state':bk.get('state'),'textbook_integrity':integrity,'obsidian_href':href,
-                'analysis_date':curr.get('analysis'),'production_date':curr.get('production'),**preservation}
+                'analysis_date':curr.get('analysis'),'production_date':curr.get('production'),
+                'course_completion':completion,**preservation}
     def exact_targets(self,row):
         found=set(); roots=set(); histories=set()
         for source in row.get('sources',[]):
@@ -176,7 +312,7 @@ class LocalProjection:
         pairs, all_ids, _ = self.exact_targets(row)
         if pairs:
             r = self.get()
-            d = r['data'] or {}
+            d = (r['data'] or {}) if r['sync_state'] in ('live', 'partial') else {}
         else:
             # A new share alone cannot prove a historical root or join a signed project.
             cached = self.last_result if monotonic() - self.loaded_at < PROJECTION_CACHE_SECONDS else None
@@ -198,7 +334,8 @@ class LocalProjection:
         s=self.get();d=s['data'] or {};l=exact_map(d.get('legacy_links') or []); counts=d.get('counts') or {}
         rows=d.get('projects') or []; ids={p['local_project_id'] for p in rows}; active=d.get('current_production') or {}; selected=next((p for p in rows if p['local_project_id']==active.get('local_project_id')),None)
         exact={p for p in l.values() if p in ids}
-        statuses=[preservation_view(p.get('textbook') or {},p.get('cleanup') or {}) for p in rows]
+        fresh=s['sync_state'] in ('live','partial')
+        statuses=[preservation_view(p.get('textbook') or {},p.get('cleanup') or {}) for p in rows] if fresh else []
         stages={'installed_verified':sum(t['preservation_state']=='installed_verified' for t in statuses),
                 'cleanup_states':dict(Counter(t['local_cleanup_state'] for t in statuses)),
                 'verified_post_cleanup_reopens':sum(t['local_cleanup_reader_state']=='verified' for t in statuses),
@@ -206,13 +343,81 @@ class LocalProjection:
         return {'sync_state':s['sync_state'],'observed_at':s['observed_at'],'counts':counts,'legacy_exact_identity_links':len([k for k,p in l.items() if p in ids]),
                 'linked_local_projects':len(exact),'independent_local_projects':len(ids-exact),
                 'projection_contract_revision':3,'local_preservation':stages,
-                'current_production':{**self.project_view(selected,d,'registered_current_production'),'phase':active.get('phase'),'updated_at':active.get('updated_at')} if selected else None,
+                'current_production':{**self.project_view(selected,d,'registered_current_production'),'phase':active.get('phase'),'updated_at':active.get('updated_at')} if fresh and selected else None,
                 'scope_note':'本地目录已见、完整下载、分析、验收、教材、清理分别读取；历史双键只连接过去确证身份。',
                 'cloud_live_confirmation_for_cleanup':False,'cloud_deletion_allowed':False,'current_site_total_unknown':True}
     def local_rows(self,page):
-        r=self.get();d=r['data'] or {};rows=d.get('projects') or [];start=(page-1)*16;links=set(exact_map(d.get('legacy_links') or []).values())
+        r=self.get();d=(r['data'] or {}) if r['sync_state'] in ('live','partial') else {}
+        rows=d.get('projects') or [];start=(page-1)*16;links=set(exact_map(d.get('legacy_links') or []).values())
         return {'sync_state':r['sync_state'],'observed_at':r['observed_at'],'page':page,'count':len(rows),
                 'items':[self.project_view(p,d,'historical_exact_link_available' if p['local_project_id'] in links else 'independently_registered') for p in rows[start:start+16]]}
+    def historical_items(self, roots, formal_entries):
+        with self.history_guard:
+            if monotonic() - self.history_at >= PROJECTION_CACHE_SECONDS:
+                self.history = historical_textbooks()
+                self.history_at = monotonic()
+            records = self.history
+        items = {}
+        seen = set(formal_entries)
+        for row in records:
+            if row.get('status') != 'historical_same_edition_readback':
+                continue
+            entry = row.get('entry')
+            if not isinstance(entry, str) or Path(entry).is_absolute():
+                continue
+            path = file_inside(str(BASE / entry), roots)
+            if not path or path in seen:
+                continue
+            try:
+                with path.open('rb') as stream:
+                    body = stream.read(12_000_001)
+                if len(body) > 12_000_000 or sha256(body).hexdigest() != row['edition_sha256']:
+                    continue
+            except OSError:
+                continue
+            day = stamp(row.get('historical_readback_timestamp'))
+            seen.add(path)
+            items[path] = {'project_id': row['id'], 'title': safe_text(row['title'], 500),
+                          'category': row['category'], 'textbook_state': 'registered_edition_matches',
+                          'course_completion': {'textbook': 'historical_readable'},
+                          'obsidian_href': 'obsidian://open?path=' + quote(path.as_posix(), safe=''),
+                          'historical_readback_date': row.get('historical_readback_date') if day else None}
+        return dict(sorted(items.items(), key=lambda pair: (pair[1]['title'], pair[1]['project_id'])))
+
+    def textbooks(self, page):
+        observation = self.get()
+        fresh = observation['sync_state'] in ('live', 'partial')
+        data = (observation['data'] or {}) if fresh else {}
+        projects = data.get('projects', [])
+        rows = [project for project in projects if completion_fields(project).get('textbook')]
+
+        def date_order(project):
+            analysis = ((project.get('dates') or {}).get('analysis') or {}).get('date')
+            return -int(analysis.replace('-', '')) if isinstance(analysis, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', analysis) else 0
+
+        rows.sort(key=lambda project: (date_order(project), project.get('title') or '', project['local_project_id']))
+        start = (page - 1) * 16
+        roots = self.roots(data)
+        formal_entries = {Path(entry) for project in projects
+                          if isinstance(entry := (project.get('textbook') or {}).get('entry'), str)}
+        history = self.historical_items(roots, formal_entries) if roots else {}
+        overviews = []
+        overview_paths = {}
+        for root in sorted(roots):
+            overview = file_inside(str(root / '00 入口/00 项目总览.md'), (root,))
+            if overview:
+                overviews.append({'title': root.parent.name, 'obsidian_href': 'obsidian://open?path='+quote(overview.as_posix(), safe='')})
+                overview_paths.update((path, root.parent.name) for path in overview_textbook_order(overview, root))
+        formal = {Path(project['textbook']['entry']): project for project in rows if project['textbook'].get('entry')}
+        reused = legacy_reuse_textbooks(projects, roots, overview_paths)
+        readers = {**reused, **history}
+        entries = dict.fromkeys([*formal, *history, *reused])
+        ordered = [path for path in overview_paths if path in entries]
+        ordered.extend(path for path in entries if path not in overview_paths)
+        items = [self.project_view(formal[path], data, 'independently_registered') if path in formal else readers[path]
+                 for path in ordered[start:start+16]]
+        return {'sync_state': observation['sync_state'], 'page': page, 'count': len(ordered),
+                'items': [item for item in items if item['course_completion'].get('textbook')], 'overviews': overviews}
     def cleanup_preparation(self):
         s=self.get();d=s['data'] or {};l=exact_map(d.get('legacy_links') or []);ids={p['local_project_id'] for p in d.get('projects',[])}
         prior={k for k,v in self.markers.items() if v.get('cloud_cleanup_state')=='recycled_verified_exact_id'}

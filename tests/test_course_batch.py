@@ -10,12 +10,13 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_tools/course_production"))
 import batch
 from project import CourseProject, ENTRY, put, sha
 from reader_review import snapshot
-from independent_facts import review_request
+from independent_facts import identity as fact_review_identity, review_request
 from scope_review import add_scope_summary
 from source_coverage import coverage_review_template, fingerprint
 from vault_delivery import confirm, install
@@ -113,6 +114,20 @@ class CourseBatchTest(unittest.TestCase):
             "mode": "preview", "reopened": True, "reached_bottom": True,
             "references_collapsed": True, "visible_citations": False,
             "section_seen": "实操", "note": "重开同一版教材并浏览至文末"})
+
+    def cached_publication(self, source, package):
+        from prepare_documents import prepare_documents
+
+        project, record, delivery = self.existing_publication(source, package)
+        summary = prepare_documents(project.raw, project.validate_raw(), project.ledger, project.work)
+        digests = record["review"]["snapshot"]["evidence"]
+        digests["ledger/documents-summary.json"] = sha(project.ledger / "documents-summary.json")
+        for item in summary["records"]:
+            relative = item["result"]
+            digests[f"work/{relative}"] = sha(project.work / relative)
+        record["review"]["independent_fact_review"].update(fact_review_identity(record["body"], record["review"]))
+        put(project.ledger / "publications" / f"{delivery['sha256']}.json", record)
+        return project, record, delivery, summary
 
     def initialize(self, *args):
         return self.command("init", self.source, "--manifest", self.state, "--vault", self.vault, *args)
@@ -418,6 +433,143 @@ class CourseBatchTest(unittest.TestCase):
         self.assertIn("逐件保留原快照", error)
         self.assertEqual(self.state.read_bytes(), unchanged)
         self.assertEqual(len(previous.validate_raw()), 1)
+
+    def test_delta_compares_signed_history_by_bytes_even_after_reopen(self):
+        source = self.source_folder("课程", "原件")
+        removable = source / "旧附录.txt"
+        removable.write_text("原始附录", encoding="utf-8")
+        self.initialize()
+        old, _, delivery = self.existing_publication(source, self.root / "已验收包")
+        self.command("claim", self.state, 1, old.folder)
+        self.command("finish", self.state, 1, old.folder)
+
+        description = source / "资料/说明.md"
+        stamp = description.stat()
+        description.write_text("新版", encoding="utf-8")
+        os.utime(description, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        removable.unlink()
+        (source / "新附录.txt").write_text("新增材料", encoding="utf-8")
+        self.command("reopen", self.state, 1, "--accept-changes", "记录实收修订")
+        new = CourseProject.initialize(source, self.root / "新工作包")
+        self.command("claim", self.state, 1, new.folder)
+        old.raw.rename(old.folder / "已保全的原件")
+        unchanged_manifest = self.state.read_bytes()
+
+        result = self.command("delta", self.state, 1)
+        self.assertTrue(result["read_only"])
+        self.assertTrue(result["already_in_progress"])
+        self.assertEqual(result["baseline"]["publication_sha256"], delivery["sha256"])
+        self.assertEqual(result["disposition"], "registered_range_changed")
+        self.assertEqual([item["file"] for item in result["changed"]], ["资料/说明.md"])
+        self.assertEqual([item["file"] for item in result["removed"]], ["旧附录.txt"])
+        self.assertEqual([item["file"] for item in result["added"]], ["新附录.txt"])
+        self.assertEqual(self.state.read_bytes(), unchanged_manifest)
+
+    def test_delta_preserves_prior_external_supplements_without_claiming_disk_presence(self):
+        source = self.source_folder("课程", "保留资料")
+        self.initialize()
+        old = CourseProject.initialize(source, self.root / "初版")
+        self.command("claim", self.state, 1, old.folder)
+        combined = self.root / "原件整合"
+        (combined / "资料").mkdir(parents=True)
+        (combined / "资料/说明.md").write_bytes((source / "资料/说明.md").read_bytes())
+        (combined / "补件.txt").write_text("另一已核原件", encoding="utf-8")
+        new, _, _ = self.existing_publication(combined, self.root / "后续班次", folder=old.folder.name)
+        self.command("supplement", self.state, 1, new.folder, "--reason", "核实同版原件")
+        self.command("finish", self.state, 1, new.folder)
+
+        result = self.command("delta", self.state, 1)
+        self.assertEqual(result["disposition"], "unchanged")
+        self.assertEqual([item["file"] for item in result["unchanged"]], ["资料/说明.md"])
+        self.assertEqual([item["file"] for item in result["carried_supplements"]], ["补件.txt"])
+        self.assertFalse(result["removed"])
+
+    def test_delta_stage_reuses_only_pinned_static_parse_and_never_inherits_signoff(self):
+        import prepare_documents
+
+        source = self.source_folder("课程", "原件步骤")
+        self.initialize()
+        old, record, delivery, summary = self.cached_publication(source, self.root / "已验收")
+        relative = summary["records"][0]["result"]
+        digests = record["review"]["snapshot"]["evidence"]
+        self.command("claim", self.state, 1, old.folder)
+        self.command("finish", self.state, 1, old.folder)
+        before = self.state.read_bytes()
+
+        other = self.root / "另一个来源"
+        (other / "资料").mkdir(parents=True)
+        (other / "资料/说明.md").write_bytes((source / "资料/说明.md").read_bytes())
+        (other / "新练习.txt").write_text("补充练习", encoding="utf-8")
+        target = self.root / "新的取材工作包"
+        args = ("delta", self.state, 1, "--candidate", other, "--stage-package", target)
+        self.assertIn("核实确属同一课程版次", self.command(*args, success=False))
+        self.assertFalse(target.exists())
+        args += ("--same-edition-reason", "线下核实为同版原件及新增练习")
+        result = self.command(*args)
+        self.assertEqual(result["reused_static_evidence"], 1)
+        new = CourseProject.open(target)
+        self.assertFalse(new.entry.exists())
+        self.assertFalse((new.ledger / "publications").exists())
+        self.assertEqual(self.state.read_bytes(), before)
+        self.assertEqual(self.command(*args), result)
+
+        with patch.object(prepare_documents, "inspect_document", wraps=prepare_documents.inspect_document) as parse:
+            updated = prepare_documents.prepare_documents(new.raw, new.validate_raw(), new.ledger, new.work)
+        self.assertEqual([call.args[0].name for call in parse.call_args_list], ["新练习.txt"])
+        self.assertEqual(len(updated["records"]), 2)
+
+        (old.work / relative).write_text("篡改的取材", encoding="utf-8")
+        second = self.command("delta", self.state, 1, "--candidate", other)
+        self.assertFalse(second["reusable_evidence"])
+        digests[f"work/{relative}"] = sha(old.work / relative)
+        put(old.ledger / "publications" / f"{delivery['sha256']}.json", record)
+        repinned = self.command("delta", self.state, 1, "--candidate", other)
+        self.assertFalse(repinned["reusable_evidence"])
+
+    def test_delta_new_edition_requires_separate_identity_and_uses_only_unchanged_evidence(self):
+        source = self.source_folder("课程原版", "原件步骤")
+        (source / "训练.txt").write_text("第一版的训练", encoding="utf-8")
+        (source / "旧附录.txt").write_text("旧资料", encoding="utf-8")
+        self.initialize()
+        old, _, delivery, _ = self.cached_publication(source, self.root / "原版教材工作包")
+        self.command("claim", self.state, 1, old.folder)
+        self.command("finish", self.state, 1, old.folder)
+        before = self.state.read_bytes()
+
+        candidate = self.source_folder("课程第二版", "原件步骤")
+        (candidate / "训练.txt").write_text("第二版的训练", encoding="utf-8")
+        (candidate / "新附录.txt").write_text("新资料", encoding="utf-8")
+        target = self.root / "新版教材工作包"
+        stage = ("delta", self.state, 1, "--candidate", candidate, "--stage-package", target)
+        self.assertIn("完整保留旧原件", self.command(*stage, success=False))
+        self.assertFalse(target.exists())
+        result = self.command(*stage, "--new-edition-reason", "作者新版清单与此候选的新增和修订已对应")
+        self.assertEqual(result["stage_kind"], "new_edition")
+        self.assertNotIn("project_id", result)
+        self.assertEqual(result["reused_static_evidence"], 1)
+        self.assertEqual(self.state.read_bytes(), before)
+
+        new = CourseProject.open(target)
+        plan = batch.read(new.work / "增量取材.json")
+        self.assertEqual([item["file"] for item in plan["changed"]], ["训练.txt"])
+        self.assertEqual([item["file"] for item in plan["removed"]], ["旧附录.txt"])
+        self.assertEqual([item["file"] for item in plan["added"]], ["新附录.txt"])
+        self.assertEqual([item["file"] for item in plan["reused_static_evidence"]], ["资料/说明.md"])
+        old_row = batch.read(self.state)["projects"][0]
+        self.assertEqual(plan["comparison_project_id"], old_row["id"])
+        with self.assertRaisesRegex(ValueError, "另一个正式项目身份"):
+            batch.require_staged_edition(new, old_row)
+        with self.assertRaisesRegex(ValueError, "不能作为同版补件"):
+            batch.require_staged_edition(new)
+        self.assertFalse(new.entry.exists())
+        self.assertFalse((new.ledger / "publications").exists())
+
+        self.command("refresh", self.state)
+        claimed = self.command("claim", self.state, 2, new.folder)
+        self.assertNotEqual(claimed["id"], old_row["id"])
+        self.assertNotIn("publication", claimed)
+        self.assertEqual(batch.read(self.state)["projects"][0], old_row)
+        self.assertEqual(sha(Path(delivery["entry"])), delivery["sha256"])
 
     def test_simultaneous_claims_cannot_bind_different_course_packages(self):
         self.source_folder("文档项目", "课程说明")

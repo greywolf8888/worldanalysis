@@ -36,6 +36,12 @@ BUNDLE_SHA256S = frozenset({
 PLUGIN = ROOT / "plugins/dsh-mcp-bridge"
 BRIDGE = ROOT / "bridge"
 DISCOVERY = BRIDGE / "mcp-bridge.json"
+DESKTOP_MANIFEST = HOME_DIR / "profiles/desktop/package.json"
+DESKTOP_DISCOVERY = ROOT / "desktop-bridge/mcp-bridge.json"
+DESKTOP_READBACK_BINDING = ROOT / "desktop-session-readback.json"
+BROWSER_ELECTRON_VERSION = "44.10.2"
+BROWSER_ELECTRON_ROOT = ROOT / "browser-runtime" / f"electron-{BROWSER_ELECTRON_VERSION}"
+BROWSER_ELECTRON_RECORD = BROWSER_ELECTRON_ROOT.with_name(f"{BROWSER_ELECTRON_ROOT.name}.json")
 CHECKPOINT = ROOT / "readiness.json"
 ISOLATION_PATCH = ROOT / "config/runtime-isolation.yml"
 DESKTOP_EXE = "DeepSeek Harness.exe"
@@ -46,6 +52,7 @@ MAX_RESPONSE = 1_048_576
 WEB_LAUNCH = re.compile(rb"dsh web: (http://127\.0\.0\.1:\d+/\?token=[A-Za-z0-9_-]+)")
 TASK_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}")
 DEVICE_NAME = re.compile(r"con|prn|aux|nul|com[1-9]|lpt[1-9]", re.IGNORECASE)
+DSH_UUID = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
 
 
 def exact(path):
@@ -59,7 +66,8 @@ def exact(path):
 def project_directory(path):
     if not path.is_relative_to(PROJECT):
         raise ValueError("运行数据必须位于 Worldanalysis 内")
-    for parent in reversed((*path.relative_to(PROJECT).parents, path.relative_to(PROJECT))):
+    relative = path.relative_to(PROJECT)
+    for parent in (*reversed(relative.parents), relative):
         current = PROJECT / parent
         current.mkdir(exist_ok=True)
         if not exact(current).is_dir():
@@ -205,6 +213,27 @@ def cli(*args):
     return [str(exact(RUNTIME / DESKTOP_EXE)), "--expose-internals", str(RUNTIME / CLI_ASAR), *args]
 
 
+def browser_electron():
+    if not BROWSER_ELECTRON_RECORD.exists():
+        return None
+    try:
+        receipt = read_json(BROWSER_ELECTRON_RECORD)
+        if (receipt["version"] != BROWSER_ELECTRON_VERSION
+                or Path(receipt["destination"]) != BROWSER_ELECTRON_ROOT):
+            return None
+        program = BROWSER_ELECTRON_ROOT / "electron.exe"
+        if receipt.get("verified_location") == "original_installed":
+            original = (Path.home() / ".dsh/profiles/desktop/node_modules/electron/dist").resolve(strict=True)
+            if original != Path(receipt["source"]):
+                return None
+            program = original / "electron.exe"
+        elif receipt.get("verified_location") != "project_copy":
+            return None
+        return program if digest(program) == receipt["files"].get("electron.exe") else None
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
+
+
 def runtime_environment():
     system_keys = {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "OS", "PROCESSOR_ARCHITECTURE",
                    "NUMBER_OF_PROCESSORS", "USERPROFILE", "APPDATA", "LOCALAPPDATA"}
@@ -217,6 +246,8 @@ def runtime_environment():
     env.update(DSH_HOME=str(project_directory(HOME_DIR)), ELECTRON_RUN_AS_NODE="1", TEMP=temporary, TMP=temporary,
                npm_config_userconfig=str(exact(npm_config)),
                npm_config_cache=str(project_directory(ROOT / "npm-cache")))
+    if browser := browser_electron():
+        env["ELECTRON_PATH"] = str(browser)
     return env
 
 
@@ -289,6 +320,9 @@ def start_desktop():
     env = runtime_environment()
     env.pop("ELECTRON_RUN_AS_NODE", None)
     env["DSH_DESKTOP_DIAGNOSTIC_FILE"] = str(logs / "desktop-startup.txt")
+    env["DSH_BAIDU_NETDISK_CREDENTIAL_DIR"] = str(project_directory(ROOT / "desktop-netdisk-credentials"))
+    env["DSH_INNER_BROWSER_STATE_DIR"] = str(project_directory(ROOT / "desktop-inner-browser"))
+    env["BSK_HOME"] = str(project_directory(ROOT / "desktop-browser-skill"))
     with log.open("a", encoding="utf-8") as output:
         process = subprocess.Popen([str(executable), f"--user-data-dir={desktop_data}"], cwd=folder, env=env,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -297,6 +331,18 @@ def start_desktop():
         try:
             code = process.wait(timeout=3)
         except subprocess.TimeoutExpired:
+            output.flush()
+            helper = exact(PROJECT / "_tools/dsh_desktop_welcome.py")
+            result = subprocess.run([sys.executable, "-B", "-X", "utf8", str(helper),
+                                     str(process.pid), str(executable)],
+                                    cwd=PROJECT, env=env, capture_output=True, text=True, timeout=45,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            readback = result.stdout.strip() or "readback_unavailable"
+            output.write(f"{stamp} 专用工作区 {process.pid}: {readback}\n")
+            if result.returncode or readback not in {"workspace_after_skip", "workspace_ready", "process_exited"}:
+                raise ValueError(f"专用 DSH 未能自动进入工作区。启动记录位于 {log}")
+            if process.poll() not in (None, 0):
+                raise ValueError(f"专用 DSH 启动后退出。启动记录位于 {log}")
             return 0
         if code:
             output.write(f"{stamp} 启动退出 0x{code:08X}\n")
@@ -357,8 +403,8 @@ def endpoint(record):
     return url.port
 
 
-def request(port, method, route, headers=None, body=None):
-    connection = HTTPConnection("127.0.0.1", port, timeout=3)
+def request(port, method, route, headers=None, body=None, *, timeout=3):
+    connection = HTTPConnection("127.0.0.1", port, timeout=timeout)
     try:
         connection.request(method, route, body=body, headers=headers or {})
         response = connection.getresponse()
@@ -370,20 +416,28 @@ def request(port, method, route, headers=None, body=None):
         connection.close()
 
 
-def bridge_identity(record):
+def bridge_identity(record, *, timeout=3):
     port = endpoint(record)
     instance = record.get("instanceId")
     if not isinstance(instance, str) or not instance or record.get("running") is not True or record["pid"] <= 0:
         raise ValueError("专用 DSH 当前未报告运行")
-    status, _, raw = request(port, "GET", "/healthz")
+    status, _, raw = request(port, "GET", "/healthz", timeout=timeout)
     health = json.loads(raw)
     if status != 200 or (health.get("pid"), health.get("instanceId")) != (record["pid"], instance):
         raise ValueError("专用 DSH 的发现记录和健康状态不一致")
     return port
 
 
-def bridge_probe(record):
-    port = bridge_identity(record)
+def bridge_probe(record, *, session_id=None, deadline=None):
+    def remaining():
+        if deadline is None:
+            return 3
+        timeout = deadline - time.monotonic()
+        if timeout <= 0:
+            raise TimeoutError("专用桌面读回超时")
+        return timeout
+
+    port = bridge_identity(record, timeout=remaining())
     token = record.get("token")
     if not isinstance(token, str) or not re.fullmatch(r"[0-9a-fA-F]{16,}", token):
         raise ValueError("专用 DSH 发现记录缺少可核对的本地授权")
@@ -393,7 +447,8 @@ def bridge_probe(record):
         body = {"jsonrpc": "2.0", "method": method, "params": params}
         if serial is not None:
             body["id"] = serial
-        status, response_headers, raw = request(port, "POST", "/mcp", headers, json.dumps(body).encode("utf-8"))
+        status, response_headers, raw = request(port, "POST", "/mcp", headers, json.dumps(body).encode("utf-8"),
+                                                timeout=remaining())
         if unauthenticated:
             if status != 401:
                 raise ValueError("隔离 MCP 未拒绝无凭据请求")
@@ -427,8 +482,15 @@ def bridge_probe(record):
         sessions = sessions["sessions"]
     if not isinstance(sessions, list):
         raise ValueError("专用 DSH 会话读回格式不匹配")
-    return {"loopback": True, "unauthenticated_status": 401, "protocol": details["protocolVersion"],
-            "tools": len(tools), "session_readback": len(sessions)}
+    result = {"loopback": True, "unauthenticated_status": 401, "protocol": details["protocolVersion"],
+              "tools": len(tools), "session_readback": len(sessions)}
+    if session_id is not None:
+        observed = post(4, "tools/call", {"name": "dsh_get_session", "arguments": {"sessionId": session_id}})
+        session = observed.get("structuredContent")
+        if observed.get("isError") is not False or not isinstance(session, dict):
+            raise ValueError("专用桌面未返回已配置会话")
+        result["session"] = session
+    return result
 
 
 def await_bridge(process, log):
@@ -518,6 +580,29 @@ def verify():
     return checkpoint
 
 
+def intake_binding(frozen=None):
+    from workspace_paths import path_bindings
+
+    version = frozen.get('version_id') if isinstance(frozen, dict) else None
+    if frozen is not None and (not isinstance(version, str) or set(frozen) != {'version_id', 'root'}):
+        raise ValueError('收件位置需要固定目录和版本')
+    values = path_bindings(workspace=PROJECT, version_id=version)
+    value = values['paths']['intake']
+    root = Path(value) if value else None
+    if root is None or not root.is_relative_to(PROJECT) or root == PROJECT or not exact(root).is_dir():
+        raise ValueError('任务收件目录不可用')
+    binding = {'version_id': values['version_id'], 'root': root.as_posix()}
+    if frozen is not None and frozen != binding:
+        raise ValueError('任务固定收件位置与登记不一致')
+    return binding
+
+
+def install_v4_import_path():
+    branch = PROJECT / '_ingest/wangzjk-to-pan'
+    sys.path[:0] = [str(branch), str(branch / 'v4-review')]
+    return branch
+
+
 def preflight_task(task_id):
     if not TASK_ID.fullmatch(task_id) or DEVICE_NAME.fullmatch(task_id):
         raise ValueError("任务编号无效")
@@ -535,6 +620,10 @@ def preflight_task(task_id):
             or task.get("task_id") != task_id or task.get("demo") is True
             or not isinstance(received_path, str) or Path(received_path) != receipt_path):
         raise ValueError("共享任务身份或回执路径不匹配")
+    install_v4_import_path()
+    planned = (task.get('inputs') or {}).get('intake_binding')
+    intake = intake_binding(planned if planned is not None else
+                            {'version_id': 'legacy', 'root': (PROJECT / '分析目标下载地址').as_posix()})
     receipt = "missing"
     if receipt_path.exists():
         row = read_json(receipt_path)
@@ -544,7 +633,85 @@ def preflight_task(task_id):
             receipt = "task_identity_matched"
     return {"task_id": task_id, "state": "ready" if task.get("state") == "ready" else "not_ready",
             "authorization": "reference_present_unverified" if task.get("authorization_ref") else "missing",
-            "receipt": receipt, "dedicated_session_bound": False}
+            "receipt": receipt, "intake": intake, "intake_frozen": planned is not None,
+            "dedicated_session_bound": (DESKTOP_READBACK_BINDING.is_file()
+                                        and read_json(DESKTOP_READBACK_BINDING).get('session_id') == task.get('target_session_id'))}
+
+
+def desktop_session_summary(session, binding):
+    projections = session["projections"]
+    if (session.get("sessionId") != binding["session_id"] or session.get("workspaceId") != binding["workspace_id"]
+            or projections.get("title") != binding["title"]
+            or any(Path(session.get(key) or "") != PROJECT for key in ("workspacePath", "cwd"))
+            or Path(projections.get("workingDirectory") or "") != PROJECT):
+        return {"state": "identity_mismatch", "identity_verified": False, "read_only_ready": False}
+    state = session["state"]
+    permissions = projections.get("permissions") or {}
+    preset = permissions.get("currentValue", permissions.get("preset"))
+    role = (session.get("live") is True and session.get("interactionMode") == "ui"
+            and preset == permissions.get("sandbox", preset) == "danger-full-access"
+            and permissions.get("approval", "never") == "never")
+    pending = (state.get("pendingInput"), session.get("pendingInteractions"))
+    busy = (state.get("queue"), session.get("activeWorkflowRuns", []))
+    if "desktopPendingEvents" in session:
+        pending += (session["desktopPendingEvents"],)
+    cursor = state.get("cursor")
+    if not role:
+        status = "role_unverified"
+    elif not all(isinstance(rows, list) for rows in (*pending, *busy)):
+        status = "readback_incomplete"
+    elif any(pending):
+        status = "awaiting_user"
+    elif (any(busy) or state.get("running") is not False or session.get("turnSettled") is not True
+          or (projections.get("plan") or {}).get("active") is not False):
+        status = "busy"
+    elif type(cursor) is not int or cursor < 0:
+        status = "readback_incomplete"
+    else:
+        status = "ready"
+    return {"state": status, "identity_verified": True, "read_only_ready": status == "ready",
+            "role_verified": role, "cursor": cursor if type(cursor) is int and cursor >= 0 else None}
+
+
+def desktop_preflight():
+    bridge = {"connected": False, "observed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    session = {"state": "unconfigured", "identity_verified": False, "read_only_ready": False}
+    result = {"profile": "desktop", "profile_ready": False, "bridge": bridge, "session": session}
+    try:
+        bundles = read_json(DESKTOP_MANIFEST)["dsh"]["profile"]["bundles"]
+        result["profile_ready"] = PROFILE_BUNDLES.issubset(bundles)
+        if not result["profile_ready"]:
+            return result
+        record = read_json(DESKTOP_DISCOVERY)
+        bridge_identity(record, timeout=0.5)
+        bridge["connected"] = True
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, HTTPException):
+        session["state"] = "bridge_unavailable"
+        return result
+    try:
+        binding = read_json(DESKTOP_READBACK_BINDING)
+        if (binding.get("schema_version") != 1 or binding.get("purpose") != "read_only_preflight"
+                or Path(binding["project_path"]) != PROJECT or not re.fullmatch(DSH_UUID, binding["workspace_id"])
+                or not re.fullmatch("session-" + DSH_UUID, binding["session_id"])
+                or not isinstance(binding["title"], str) or not 0 < len(binding["title"]) <= 128):
+            raise ValueError("只读会话绑定无效")
+    except FileNotFoundError:
+        return result
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        session["state"] = "invalid_binding"
+        return result
+    try:
+        observed = bridge_probe(record, session_id=binding["session_id"], deadline=time.monotonic() + 1.5)
+        current = read_json(DESKTOP_DISCOVERY)
+        identity = ("url", "pid", "instanceId", "running")
+        if any(current.get(key) != record.get(key) for key in identity):
+            bridge["connected"] = False
+            raise ValueError("专用桌面桥接身份在读回期间变化")
+        result["session"] = desktop_session_summary(observed["session"], binding)
+        bridge["authenticated_readback"] = True
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, HTTPException):
+        session["state"] = "readback_failed"
+    return result
 
 
 def preflight(task_id=None):
@@ -563,6 +730,7 @@ def preflight(task_id=None):
             pass
     result = {"schema_version": 1, "profile": PROFILE, "profile_ready": profile_ready,
               "bridge": {"connected": connected, "last_verified_at": last_verified_at},
+              "desktop": desktop_preflight(),
               "profile_market_enabled": MARKET_BUNDLE in bundles,
               "session_binding": "unbound", "netdisk_account": "unverified",
               "production_execution": "disabled", "claim_enabled": False, "download_enabled": False}
@@ -586,12 +754,16 @@ def main():
     market.add_argument("state", choices=("enable", "disable"))
     check = commands.add_parser("preflight", help="只读检查专用桥接、正式派发门禁及共享任务")
     check.add_argument("--task-id")
+    commands.add_parser('intake-binding', help='只读取得当前收件目录及版本，供新任务保存')
     args = parser.parse_args()
     try:
         if args.action == "status":
             record = read_json(CHECKPOINT) if CHECKPOINT.exists() else {"production_execution": "disabled", "readback": None}
         elif args.action == "preflight":
             record = preflight(args.task_id)
+        elif args.action == 'intake-binding':
+            install_v4_import_path()
+            record = intake_binding()
         elif args.action == "desktop":
             return start_desktop()
         else:

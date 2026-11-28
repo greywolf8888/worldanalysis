@@ -1,4 +1,4 @@
-﻿param([string]$Pythonw)
+﻿param([string]$Pythonw, [switch]$OnDesktop)
 
 $ErrorActionPreference = 'Stop'
 $project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -15,7 +15,14 @@ if ([IO.Path]::GetFileName($python) -ine 'pythonw.exe') { throw '请指定 Pytho
 if ((Get-AuthenticodeSignature -FilePath $python).Status -ne 'Valid') { throw '请使用签名有效的 Python 安装。' }
 
 $entry = Join-Path $project '_tools\dsh_dedicated.py'
-$path = Join-Path $project 'Worldanalysis 专用 DSH.lnk'
+$directory = $project
+if ($OnDesktop) {
+    $directory = [Environment]::GetFolderPath('DesktopDirectory')
+    if (-not $directory -or -not (Test-Path -LiteralPath $directory -PathType Container)) {
+        throw '找不到当前 Windows 用户的桌面。'
+    }
+}
+$path = Join-Path $directory 'Worldanalysis 专用 DSH.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($path)
 $shortcut.TargetPath = $python

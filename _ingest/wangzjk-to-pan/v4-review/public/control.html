@@ -35,6 +35,7 @@
         <button id="control-refresh" type="button">刷新状态</button>
       </div>
     </div>
+    <div id="control-verification" role="alert" aria-atomic="true"></div>
     <p class="control-notice" id="control-feedback" role="status" hidden></p>
     <p class="notice control-notice" id="control-error" role="alert" hidden></p>
     <div class="control-layout" id="control-content" aria-busy="true">
@@ -53,6 +54,28 @@
         <ol class="control-runs" id="control-runs" hidden></ol>
       </section>
     </div>
+    <details class="control-panel control-paths" id="control-paths">
+      <summary>保存位置</summary>
+      <p class="control-empty" id="control-path-status" role="status"></p>
+      <dl class="control-metrics" id="control-path-list"></dl>
+      <form class="control-path-form" id="control-path-form" hidden>
+        <div class="control-path-fields" id="control-path-fields"></div>
+        <div class="control-actions">
+          <button type="submit">核对路径</button>
+          <button id="control-path-save" type="button" hidden>保存这组位置</button>
+        </div>
+      </form>
+      <div class="control-path-form" id="control-path-versions" hidden>
+        <label>已保存的位置
+          <select id="control-path-version"></select>
+        </label>
+        <button id="control-path-activate" type="button">切换到所选位置</button>
+        <button id="control-path-rollback" type="button" hidden>恢复上一次位置</button>
+      </div>
+      <dl class="control-metrics" id="control-path-candidate" hidden></dl>
+      <p id="control-path-blocker" hidden></p>
+      <p id="control-path-feedback" role="status" hidden></p>
+    </details>
     <noscript><p class="notice">启用 JavaScript 后即可查看并操作控制台。</p></noscript>
   </main>
 </body>

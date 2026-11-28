@@ -4,6 +4,8 @@
 
 教材保留原课讲次，讲内按学习问题组织。直接说明方法和适用条件，自然引导学习者操作，给讲师亲历或课堂主张明确归属，整理者新增的演算注明示例。图片紧跟它能解释的动作或关系。段落与原图的出处保存在 Markdown 注释里，原片和附件入口放在文末默认折叠的「原课与配套资料」。本地入口由现有的[课程整理 Skill](../.agents/skills/course-material-archive/SKILL.md) 接续，编辑判定见[写作流程](../.agents/skills/course-material-archive/workflow.md#本地教材工作流)和[验收说明](../.agents/skills/course-material-archive/acceptance.md#本地教材验收)。
 
+先由实收原件建立独立教学要点，再对应正文、原图与必要配套。关键动作的隐藏时码贴近动作文字和邻图。独立测试先从原件查漏，再逐项核本版事实、跟做路径和附件。历史修订方法见[教材覆盖与局部修订](../.agents/skills/course-material-archive/references/teaching-and-coverage.md)。
+
 ~~~mermaid
 flowchart TD
     A["课程原件文件夹"] --> B["start · 入库与画音、附件准备"]
@@ -280,6 +282,10 @@ PDF 的 URI 链接注释离线保存到提取结果的 `metadata.pdf_hyperlinks`
 
 `verify-reader` 从日常库中读取已交付的正文和链接文件，在独立 Obsidian 环境按该项目路径打开、关闭后重开，读到所有章节和文末，确认全部图片已加载、出处默认折叠以及页面无横向溢出。回执保存于 `.course/work/日常库接口验收/`，其版本摘要记录于 `.course/ledger/obsidian-delivery.json`。有额外实际窗口观察时可运行 `confirm-vault <课程包> <观察记录.json>`。手填记录须有同一版的 `entry`、`sha256`、`installed_at`，以及阅读模式、重开、页尾、折叠、引文、已看到的章节和图片，字段详见命令校验。
 
+新出版的 Markdown 配套由隔离阅读器逐篇重开到文末，检查必要跳转并将结果写入同版 `companion_reading`。保全包中的其它文件按指纹核对。需要编辑、复制或播放的原件由独立测试按实际格式检查。既有有效回执按其出版时版本读取。
+
+正常候选从项目本地生产控制的 `上线状态.json` 读取 `test_thread` 和 `analysis_thread`。待查模板的 `expected_reviewer_thread_id` 提示当前指定测试会话，`reviewer` 由实际执行独立复核的测试者填写。更换角色按部署环境中的生产控制流程登记。
+
 已绑定的课程后续用 `accept` 时会更新日常库。正文版本变化后重新执行 `verify-reader` 和 `verify --require-vault`。输出中的 `package_verified` 表示独立课程包通过，`verified` 表示日常库也有本版核验结果。`verify --require-vault` 检查现存正文、图片和所链接原件，同时要求该版本的重开记录。最终交付链接必须指到日常库项目名教材。报告有声、部分无口播、全程纯画面等类型的实际复核范围，保留真实听辨和原件缺口。
 
 ### 复核随课材料与作者支持
@@ -363,6 +369,18 @@ $env:WORLDANALYSIS_PYTHON = '<项目 Python 3.12 的完整路径>'
 $env:WORLDANALYSIS_TEST_OBSIDIAN = 'D:\Software\Obsidian\Obsidian.exe'
 & $env:WORLDANALYSIS_PYTHON -X utf8 -B -m unittest discover -s tests -p 'test_course_production.py' -v
 ~~~
+
+## 缺件与增量补充
+
+先以 `batch delta <批次状态.json> <序号>` 对比当前实际原件。可用 `--candidate` 检查拟收件目录。同版补件保留旧原件路径和内容，在独立工作包补取后，沿 `batch reopen`、`batch supplement` 和原同名教材验收。确认为独立新版时单独登记，可以复用内容完全相同的取材。旧版签收保留原据。
+
+实际未收到原件与已收到但未覆盖的问题分别跟踪。外部延伸以实际来源明示，在同版候选中核定用途。生产队列仅接收经过实际文件、范围、身份及稳定性核对的来件。
+
+## 教材盘点与配套准备
+
+`library_quality.py audit --output <本地运行目录内的报告.json>` 盘点已登记教材、可枚举的附件和现有引用。扫描发现的待核候选按原件实际用途判定。可用 `stage <批次状态.json> <序号> --file <原件相对路径> --output <隔离目录>` 准备配套。TXT、Markdown 使用完整原文，结构受支持的 DOCX 可生成文字和表格预览，保留原格式供查阅与编辑。
+
+工作稿用 `../配套资料/文件名` 指向待发布配套，在课程包的 `.course/work/配套资料` 下登记同版实际文件。索引可使用相对链接继续指向原件与阅读稿。正式签收核对沿链接可达的清单、内容指纹及阅读回执。具体清理前另在隔离原件的环境中验证所有必要素材的真实用法。
 
 ## 6. 引用的项目
 

@@ -4,6 +4,8 @@
 
 ## 入口
 
+资源库、课程表和控制台使用[本机运行指南](_ingest/wangzjk-to-pan/v4-review/README.md)。课程生产、独立验收、保全及现场复验从[实施与验收](docs/全链路升级实施与验收.md)进入。
+
 在项目目录使用[Windows启动器](<worldanalysis.cmd>)，它固定使用宿主Python3.12运行时，避免PATH中的Python3.14与本地原生依赖ABI不兼容：
 
 ```bat

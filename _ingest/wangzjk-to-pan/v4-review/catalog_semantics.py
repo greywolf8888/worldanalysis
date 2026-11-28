@@ -159,6 +159,24 @@ def validate_classification(value, source):
             **identity,'dates':dates,'scope':scope,'evidence':checked}
 
 
+def reusable_classification(donor, source, result):
+    """Rebind only topic and platform evidence from a literally equal complete introduction."""
+    if (donor.get('coverage') != 'complete' or source.get('coverage') != 'complete'
+            or any(source[field] != donor[field] for field in ('title', 'paragraphs', 'excerpt'))):
+        return None
+    if any(re.search(r'本站|本公众号|本博主|本店|点[击此].{0,5}下载', text)
+           for text in (source['title'], *source['paragraphs'], source['excerpt'])):
+        return None
+    if any(row.get('field') not in ('title', 'paragraphs') for row in result.get('evidence', ())):
+        return None
+    fields = ('category', 'subcategory', 'secondary_category', 'platforms', 'evidence')
+    try:
+        checked = validate_classification({key: result[key] for key in fields if key in result}, source)
+    except (TypeError, ValueError):
+        return None
+    return {key: checked[key] for key in fields}
+
+
 def validate_relation(value,left,right):
     if not isinstance(value,dict) or set(value)-{'relation','same_scope','newer','evidence','reason'}:
         raise ValueError('关系结果字段无效')
@@ -251,7 +269,7 @@ class CatalogStore:
                 return ('agent',json.loads(row['result']))
         return ('pending',None)
 
-    def read(self,inputs):
+    def read(self,inputs, *, include_suppressed=False):
         results, relation_rows, stale = {}, [], 0
         with self.connect() as db:
             if not self.has(db,'catalog_semantic_meta'):
@@ -269,16 +287,20 @@ class CatalogStore:
             for row in db.execute('''SELECT r.* FROM catalog_relation r JOIN
                     (SELECT relation_id,max(event) AS event,min(event) AS first_event FROM catalog_relation GROUP BY relation_id) z
                     USING(relation_id,event) ORDER BY z.first_event'''):
-                if row['source']=='undo':
-                    continue
                 left,right = inputs.get(row['left_key']),inputs.get(row['right_key'])
+                revoked = row['source'] == 'undo'
                 if not left or not right:
-                    stale += 1
+                    stale += not revoked
                     continue
                 left=relationship_input(left,results.get(left['article_key'],('',None))[1])
                 right=relationship_input(right,results.get(right['article_key'],('',None))[1])
-                if row['left_hash']!=left['input_hash'] or row['right_hash']!=right['input_hash']:
-                    stale += 1
+                invalidated = row['left_hash'] != left['input_hash'] or row['right_hash'] != right['input_hash']
+                if revoked or invalidated:
+                    stale += not revoked
+                    if include_suppressed:
+                        # An explicit old decision needs review before exact text can fold its pair again.
+                        relation_rows.append({'relation_id':row['relation_id'],'left':binding(left),'right':binding(right),
+                                              'relation':'uncertain','revoked':True})
                     continue
                 relation_rows.append({'relation_id':row['relation_id'],'left':binding(left),'right':binding(right),
                                       **json.loads(row['result'])})

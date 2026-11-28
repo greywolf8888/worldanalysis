@@ -1,4 +1,4 @@
-"""Read the original DSH session through the installed Worldanalysis MCP adapter."""
+"""Read the current original and dedicated DSH readiness."""
 
 from datetime import datetime, timezone
 import json
@@ -6,10 +6,12 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[3]
 BRIDGE = ROOT / '_tools' / 'v4-dsh-control.mjs'
+DEDICATED = ROOT / '_tools' / 'dsh_dedicated.py'
 PROTOCOL = '2025-11-25'
 SERVER_NAME = 'worldanalysis-dsh-control'
 
@@ -101,3 +103,30 @@ def probe_dsh():
     except (KeyError, OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError):
         pass
     return {'state': state, 'observed_at': datetime.now(timezone.utc).isoformat(timespec='seconds')}
+
+
+def dedicated_dsh_status():
+    """Read the project desktop session separately from the transfer gate."""
+    try:
+        if DEDICATED.resolve(strict=True) != DEDICATED or not DEDICATED.is_file():
+            return None
+        result = subprocess.run([sys.executable, '-B', '-X', 'utf8', str(DEDICATED), 'preflight'],
+                                cwd=ROOT, capture_output=True, check=True, timeout=3,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if len(result.stdout) > 8_192:
+            return None
+        row = json.loads(result.stdout)
+        if row.get('schema_version') != 1 or row.get('profile_ready') is not True:
+            return None
+        desktop = row.get('desktop') or {}
+        bridge = desktop.get('bridge') or {}
+        session = desktop.get('session') or {}
+        connected = (desktop.get('profile_ready') is True and bridge.get('connected') is True
+                     and bridge.get('authenticated_readback') is True
+                     and session.get('identity_verified') is True)
+        return {'connected': connected,
+                'verified_at': bridge.get('observed_at') if connected else None,
+                'awaiting_account': row.get('netdisk_account') == 'unverified',
+                'execution_enabled': row.get('claim_enabled') is True and row.get('download_enabled') is True}
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, AttributeError):
+        return None

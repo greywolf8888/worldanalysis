@@ -125,6 +125,33 @@ class IndependentFactTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "附带证据文件缺失或变动"):
                 load_independent_receipt(BODY, review)
 
+    def test_current_release_uses_configured_reviewer_when_roles_rotate(self):
+        review = candidate()
+        approval = approved_test_fixture(BODY, review)
+        with TemporaryDirectory() as scratch, patch.dict("os.environ", {
+            "WORLDANALYSIS_COURSE_RUNTIME": str(Path(scratch) / ".runtime"),
+        }):
+            config = Path(scratch) / "整理结果/生产控制/上线状态.json"
+            roles = {"analysis_thread": "synthetic-author", "test_thread": "synthetic-independent-reviewer"}
+            put(config, roles)
+            receipt = receipt_path(BODY, review)
+            put(receipt, approval)
+            request = review_request(BODY, review)
+            self.assertEqual(request.get("expected_reviewer_thread_id"), roles["test_thread"])
+            self.assertEqual(request["reviewer"]["thread_id"], "")
+            self.assertEqual(load_independent_receipt(BODY, review), approval)
+
+            roles["test_thread"] = "replacement-independent-reviewer"
+            put(config, roles)
+            with self.assertRaisesRegex(ValueError, "当前指定"):
+                load_independent_receipt(BODY, review)
+            validate_independent_receipt(BODY, review, approval)
+
+            roles["test_thread"] = roles["analysis_thread"]
+            put(config, roles)
+            with self.assertRaisesRegex(ValueError, "角色配置"):
+                review_request(BODY, review)
+
     def test_request_reuses_the_current_preview_without_creating_approval(self):
         original = "讲义.txt · 整份原件"
         declaration = {"scope_status": "完整验收", "scope_gaps": [], "scope_teaching": [

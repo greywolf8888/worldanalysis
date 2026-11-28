@@ -1,5 +1,7 @@
 # Worldanalysis 专用 DSH
 
+操作沿[专用 DSH Skill](../.agents/skills/worldanalysis-dsh-operations/SKILL.md)和[教材归档规则](收尾实施与教材归档规则.md)。部署时单独配置会话、账号授权、接收目录与确认范围。控制台只按实际记录显示转存和下载状态。
+
 ## Windows 桌面启动
 
 先安装官方 DeepSeek Harness 和 Python 3.11 或以上版本。双击项目根目录的 `启动 Worldanalysis DSH.cmd` 即可打开桌面程序。也可以在项目根目录运行以下命令，生成无控制台窗口的 `Worldanalysis 专用 DSH.lnk`，以后双击该快捷方式打开。
@@ -42,6 +44,10 @@ python -B -X utf8 _tools/dsh_dedicated.py desktop
 当前控制桥接和 `v4-confirmed.py` 绑定原执行会话，专用实例尚未登记正式执行会话或验证百度网盘账户。运行 `preflight` 时，领取和下载保持禁用。正式接管先以正常授权入口核对专用会话、账户、任务接收及回执。旧入口退出且读回确认后，才启用专用入口。
 
 V4 转存以 `_exchange/control/tasks/<任务>.json` 的指纹绑定任务。该任务须引用 `_exchange/control/decisions/` 下用户明确确认的当次范围和固定顺序，每项须引用 `_exchange/dsh/catalog/` 中按实际目录展开核实的范围。DSH 核对实时账户与容量，提交前仍须走 `_exchange/dsh/plans/` 与 `_exchange/dsh/authorizations/` 的正式门禁。下载按对应同版实际收件核对范围并交接分析。清理由独立门禁处理。
+
+读回旧 DSH 转存确认时，由部署环境以 `WORLDANALYSIS_LEGACY_DSH_SESSION_ID` 提供已核实的原执行会话。只在本机配置该值。进程缺少绑定时，保留相关待核交接，完成配置核对后再读回。
+
+公共仓库提供桌面入口、桥接预检及收件路径读回。接管命令和外部执行器由实际部署环境另行配置，绑定当前会话与授权任务。干净检出可以验证通用代码，现场账号、执行归属、转存及下载结果需要从本机实读。
 
 ## 插件与浏览器
 

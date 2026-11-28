@@ -3,7 +3,7 @@ import hashlib
 from io import BytesIO
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 from struct import pack
 import subprocess
@@ -22,6 +22,57 @@ OBSIDIAN = os.environ.get("WORLDANALYSIS_TEST_OBSIDIAN")
 
 
 class CourseProductionTest(unittest.TestCase):
+    def test_key_step_requires_original_time_in_its_own_readable_paragraph(self):
+        with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
+            from acceptance import nearby_figures
+
+        anchor = "选择画板比例"
+        source = (2, 12, 18)
+        evidence = "<!-- 段落出处 第 2 讲 00:12–00:18 -->"
+        image = "![比例面板](原图/比例面板.png)"
+        wrong = "![无关面板](原图/无关面板.png)"
+        self.assertEqual(nearby_figures(f"{anchor} {wrong}\n\n{anchor} {evidence}\n\n{image}",
+                                        anchor, source=source), {"比例面板.png"})
+        with self.assertRaisesRegex(ValueError, "关键步骤缺同段原片出处"):
+            nearby_figures(f"{anchor}\n\n{image}\n\n检查输出。 {evidence}", anchor, source=source)
+        with self.assertRaisesRegex(ValueError, "关键步骤缺同段原片出处"):
+            nearby_figures(f"{anchor}\n\n{image}\n\n~~~md\n{anchor} {evidence} {image}\n~~~",
+                           anchor, source=source)
+
+    def test_new_publication_requires_same_version_companion_reading_proof(self):
+        with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
+            from acceptance import check_render
+
+        note_sha = "a" * 64
+        reading = "配套资料/提示词.md"
+        reading_sha = "b" * 64
+        companions = {reading: reading_sha, "配套资料/提示词.txt": "c" * 64}
+        main = {"document_sha256": note_sha, "mode": "preview", "reachedBottom": True,
+                "horizontalOverflow": False, "visibleCitations": [], "closedAppendices": ["原课与配套资料"]}
+        historical = {"checks": [main], "companions": companions}
+        proof = {"document_sha256": reading_sha, "mode": "preview", "reopened": True,
+                 "reachedBottom": True, "horizontalOverflow": False, "missingRawLinks": []}
+        current = {**historical, "companion_reading": {reading: proof}}
+        check_render(historical, note_sha, companions=companions)
+        with self.assertRaisesRegex(ValueError, "缺当前版配套阅读页"):
+            check_render(historical, note_sha, companions=companions, require_companion_reading=True)
+        check_render(current, note_sha, companions=companions, require_companion_reading=True)
+        for changed in ({"document_sha256": note_sha}, {"reopened": False}, {"reachedBottom": False},
+                        {"missingRawLinks": ["提示词.txt"]}):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "配套阅读页的阅读回执"):
+                bad = {**historical, "companion_reading": {reading: {**proof, **changed}}}
+                check_render(bad, note_sha, companions=companions, require_companion_reading=True)
+
+    def test_companion_markdown_heading_uses_the_referenced_file_identity(self):
+        with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
+            from course_companions import course_file_references, nested_references
+
+        filename = "配套资料/示例#1.md"
+        self.assertEqual(list(course_file_references("[从正文打开](../配套资料/示例%231.md#第一步)")),
+                         [filename])
+        self.assertEqual(list(nested_references("[跳到第一步](示例%231.md#第一步)",
+                                                PurePosixPath("配套资料"))), [filename])
+
     def test_hidden_provenance_round_trips_attachment_punctuation(self):
         with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
             from acceptance import validate_supplements

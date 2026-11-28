@@ -1,4 +1,5 @@
 """Read course archive members offline using numbered files inside the work directory."""
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 import re
@@ -9,7 +10,7 @@ import tempfile
 from threading import Event, Timer
 from zipfile import BadZipFile
 
-from archive_media import ARCHIVE_SIGNATURES, Member, archive_tool, extract_member, list_seven_zip_members
+from archive_media import ARCHIVE_SIGNATURES, Member, archive_tool, extract_member, list_members, list_seven_zip_members
 from archive_media import readable_members, seven_zip_tool
 from project import put, sha
 from worldanalysis.documents import DEFAULT_LIMITS, _safe_member
@@ -74,10 +75,21 @@ def archive_reader(source, out):
                            entry.size, entry.isreg()), entry, entry.isreg()) for entry in archive), copy
 
 
+def archive_index_only(source):
+    """Preserve verifiable structure when expanding the entire archive is out of bounds."""
+    members = list_members(source)
+    ordinary = readable_members(members)
+    counts = Counter(Path(name).suffix.casefold() or "无扩展名" for name in ordinary)
+    return {"processing_status": "partial", "blocks": [],
+            "gaps": [{"reason": "已读取压缩包目录。档内内容待按用途逐项核对"}],
+            "metadata": {"archive_index": {"entries": len(members), "uniquely_located_files": len(ordinary),
+                                           "file_types": dict(counts)}}}
+
+
 def read_archive(source, out, inspect_document):
     limits = DEFAULT_LIMITS
     if source.stat().st_size > limits["max_input_bytes"]:
-        raise ValueError("压缩包超出直接读取大小上限")
+        return archive_index_only(source)
     with source.open("rb") as original:
         if not original.read(8).startswith(ARCHIVE_SIGNATURES[source.suffix.lower()]):
             raise ValueError("压缩包文件头与扩展名不一致")

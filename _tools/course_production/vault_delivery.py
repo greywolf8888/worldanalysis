@@ -5,8 +5,9 @@ import re
 from tempfile import TemporaryDirectory
 from urllib.parse import quote, unquote
 
+from course_companions import ORIGINALS, course_file_references, image_outputs, verify_published_companions
 from project import ENTRY, copy_file, file_lock, local_child, named_entry, put, read, sha
-from publish import LOCAL_LINK, verify_links
+from publish import verify_links
 from reader_review import chapters
 from vault_catalog import refresh_catalog
 
@@ -38,14 +39,13 @@ def destination(vault, folder):
 def linked_originals(project, body):
     originals = {row["file"]: row["sha256"] for row in read(project.intake)["sources"]}
     references = {}
-    for url in dict.fromkeys(LOCAL_LINK.findall(body)):
-        path = Path(unquote(url))
-        if path.parts[:2] != ("..", "原始资料") or ".." in path.parts[2:]:
-            raise ValueError(f"阅读库资料入口超出本课原件 {url}")
-        relative = Path(*path.parts[2:]).as_posix()
+    for name in dict.fromkeys(course_file_references(body)):
+        if not name.startswith(f"{ORIGINALS}/"):
+            continue
+        relative = name.removeprefix(f"{ORIGINALS}/")
         if relative not in originals:
             raise ValueError(f"阅读库资料入口未登记 {relative}")
-        references[(Path("原始资料") / relative).as_posix()] = originals[relative]
+        references[name] = originals[relative]
     return references
 
 
@@ -64,6 +64,7 @@ def verify_installed(project, publication, state):
         path = entry if name == ENTRY_PATH else local_child(target, name)
         if not path.is_file() or sha(path) != digest:
             raise ValueError(f"阅读库的文件与验收版本不一致 {path}")
+    verify_published_companions(target, publication)
     verify_links(target, {entry.relative_to(target).as_posix(): publication["body"]}, art_root=target)
     return entry
 
@@ -159,6 +160,7 @@ def install(project, publication, vault=None, folder=None, reviewed_previous=Non
     if current != entry:
         check_legacy_links(vault, current)
 
+    verify_published_companions(project.folder, publication)
     assets = {**publication["outputs"], **linked_originals(project, publication["body"])}
     assets.pop(ENTRY_PATH)
     if target.exists():
@@ -167,6 +169,8 @@ def install(project, publication, vault=None, folder=None, reviewed_previous=Non
     else:
         install_new_folder(project, vault, target, entry, publication["body"], assets, expected)
         assets_unchanged = False
+
+    verify_published_companions(target, publication)
 
     already_installed = (previous and previous["entry"] == str(entry) and previous["sha256"] == expected
                          and old_sha == expected and assets_unchanged)
@@ -187,7 +191,7 @@ def confirm(project, publication, observed):
     if not state:
         raise ValueError("请先交付到日常 Obsidian 阅读库")
     entry = verify_installed(project, publication, state)
-    images = set(publication["outputs"]) - {ENTRY_PATH}
+    images = image_outputs(publication)
     if (observed.get("entry") != str(entry) or observed.get("sha256") != state["sha256"]
             or observed.get("installed_at") != state["installed_at"]
             or observed.get("mode") != "preview" or not all(
@@ -208,11 +212,13 @@ def automated_observation(project, publication, state, render_file):
 
     entry = verify_installed(project, publication, state)
     render = read(render_file)
-    check_render(render, state["sha256"])
+    check_render(render, state["sha256"],
+                 companions=publication.get("review", {}).get("snapshot", {}).get("companions"),
+                 require_companion_reading="companion_reading" in publication.get("obsidian", {}))
     view = render["checks"][0]
     relative = f"{state['folder']}/{entry.relative_to(entry.parent.parent).as_posix()}"
     sections = tuple(chapters(publication["body"]))
-    files = set(publication["outputs"]) - {ENTRY_PATH}
+    files = image_outputs(publication)
     rendered_images = {f"{ENTRY.parent.as_posix()}/原图/{item['name']}" for item in view["images"]}
     if (view["file"] != relative or not view.get("reopened")
             or not sections or any(section not in view["sections"] for section in sections)

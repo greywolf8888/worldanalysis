@@ -149,6 +149,7 @@ def main():
         if args.action in ('inventory','status'):
             status=store.inventory(inputs)
             print(encode({**status,'presentation':library.relations.stats(),
+                          'reused_classifications':len(library.reused_classifications),
                           'legacy_shared_articles':library.article_count-len(library.by_id)}))
         elif args.action=='audit-topics':
             report=audit_topics(library,args.category,args.sample)
@@ -164,7 +165,8 @@ def main():
         elif args.action=='export':
             if args.kind=='classification':
                 explicit=named_inputs(library,args.article)
-                chosen=sorted(explicit or inputs.values(),
+                available = (row for row in inputs.values() if row['article_key'] not in library.reused_classifications)
+                chosen=sorted(explicit or available,
                     key=lambda r:(r['source_modified'] or r['published_at'] or '',r['article_id']),reverse=True)
                 items=[(row,) for row in chosen if usable(row,args.include_excerpt)]
                 truncated=0

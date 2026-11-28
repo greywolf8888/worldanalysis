@@ -12,9 +12,10 @@ TOOLS = Path(__file__).resolve().parents[1] / "_tools/course_production"
 with patch.object(sys, "path", [str(TOOLS), *sys.path]):
     from acceptance import previous_scope_context
     from independent_facts import review_request, validate_independent_receipt
-    from project import ENTRY, put, read, sha, write
-    from scope_review import add_scope_summary, document_teaching_candidates, publication_scope, validate_scope_review
-    from source_coverage import coverage_review_template, validate_source_coverage
+    from project import ENTRY, ReceivedCoverageError, put, read, sha, write
+    from scope_review import (add_scope_summary, document_teaching_candidates, legacy_scope_summary,
+                              publication_scope, scope_summary, validate_scope_review)
+    from source_coverage import claim_review_rows, coverage_review_template, validate_source_coverage
 
 
 VIDEO = "第 1 讲 00:00–01:00"
@@ -78,8 +79,53 @@ class ScopeReviewTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "附件.*页、表或档内成员"):
             validate_source_coverage(body, review["source_scope"], review)
         body, review = mixed_fixture("配套待补", [{**GAP, "item": "讲义.pdf", "kind": "非核心"}])
-        with self.assertRaisesRegex(ValueError, "已收到的原件不能重报"):
+        with self.assertRaisesRegex(ReceivedCoverageError, "已收到的原件不能重报") as problem:
             validate_scope_review(body, review)
+        self.assertEqual(problem.exception.state, "received_reported_missing")
+
+    def test_learning_supplement_is_visible_independently_verified_and_does_not_cover_originals(self):
+        original, review = mixed_fixture("核心待补", [GAP])
+        link = "https://example.org/official"
+        paragraph = f"**延伸学习。** 可以按[官方练习说明]({link})试做。"
+        marker = f"<!-- 学习补充 {GAP['item']} -->"
+        body = f"{original}\n{paragraph}\n{marker}\n<!-- 外部出处 {link} -->\n"
+        claim = claim_review_rows(body)[-1]
+        claim.update(outcome="外部核验", note="练习是另找的示例，不是缺少的课程原片",
+                     fact_checks=[{"anchor": paragraph, "origin": "外部", "source": link,
+                                   "note": "已在独立来源对照公开练习步骤"}])
+        review["source_coverage"]["claims"].append(claim)
+        validate_source_coverage(body, review["source_scope"], review)
+        validate_scope_review(body, review)
+        signed = approved(body, review)
+        for fact in signed["facts"]:
+            fact.update(decision="通过", observation="补充练习与原片归属分开", evidence="公开说明同段")
+        validate_independent_receipt(body, review, signed)
+        self.assertEqual(signed["scope_acceptance"]["gaps"][0]["item"], GAP["item"])
+
+        with self.assertRaisesRegex(ValueError, "实际仍缺"):
+            validate_source_coverage(body.replace(marker, "<!-- 学习补充 另一个项目 -->"), review["source_scope"], review)
+        with self.assertRaisesRegex(ValueError, "外部来源链接"):
+            validate_source_coverage(body.replace(f"]({link})", "](https://example.org/other)"), review["source_scope"], review)
+        with self.assertRaisesRegex(ValueError, "只引用外部资料"):
+            validate_source_coverage(body.replace(marker, f"{marker}\n<!-- 段落出处 {VIDEO} -->"),
+                                     review["source_scope"], review)
+        with self.assertRaises(ReceivedCoverageError) as problem:
+            validate_source_coverage(body.replace("打开画板菜单并核对选项。", "已收到的操作被删掉。"),
+                                     review["source_scope"], review)
+        self.assertEqual(problem.exception.state, "received_coverage_missing")
+        with self.assertRaisesRegex(ValueError, "当前正文"):
+            validate_independent_receipt(body.replace("试做。", "练习。"), review, signed)
+
+    def test_reader_gap_notice_is_natural_and_legacy_receipt_still_matches(self):
+        body, review = mixed_fixture("核心待补", [GAP])
+        self.assertIn(GAP["impact"], body)
+        self.assertNotIn("原件证据", body)
+        self.assertNotIn("验收范围：", body)
+        legacy = body.replace(scope_summary(review), legacy_scope_summary(review))
+        receipt = approved(legacy, review)
+        stored = {"body": legacy, "scope_status": "核心待补", "scope_gaps": [GAP], "scope_resolutions": [],
+                  "review": {**review, "independent_fact_review": receipt}}
+        self.assertEqual(publication_scope(stored)["scope_gaps"], [GAP])
 
     def test_incomplete_scope_cannot_claim_complete_and_stale_scope_signature_fails(self):
         with self.assertRaisesRegex(ValueError, "实际缺件归属冲突"):
@@ -96,7 +142,7 @@ class ScopeReviewTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "不一致"):
             validate_independent_receipt(body, modified, receipt)
         with self.assertRaisesRegex(ValueError, "正文缺少同版"):
-            validate_scope_review(body.replace("核心待补", "完整验收"), review)
+            validate_scope_review(body.replace(GAP["impact"], "可以完成全部练习。"), review)
         self.assertEqual(publication_scope({"body": BODY, "review": {"schema": 2}}),
                          {"scope_status": None, "scope_gaps": [], "scope_resolutions": []})
 

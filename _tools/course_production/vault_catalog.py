@@ -102,12 +102,14 @@ def scope_and_queue(vault, notes, configured):
     trusted_scopes = {}
     for scope in packages.values():
         relative = scope["entry"]
-        identity = (scope["status"], scope["gap_count"])
+        preservation = scope.get("preservation")
+        identity = (scope["status"], scope["gap_count"], preservation)
         if relative not in trusted_scopes:
             trusted_scopes[relative] = identity
-            by_entry[relative].update(status=scope["status"], gap_count=scope["gap_count"])
+            by_entry[relative].update(status=scope["status"], gap_count=scope["gap_count"],
+                                      preservation=preservation)
         elif trusted_scopes[relative] != identity:
-            by_entry[relative].update(status=UNBOUND_STATUS, gap_count=0)
+            by_entry[relative].update(status=UNBOUND_STATUS, gap_count=0, preservation=None)
     pending = []
     for row in rows:
         relative, exact = batch_binding(row, vault, current, packages)
@@ -174,6 +176,8 @@ def catalog_body(vault, index, notes, statuses, pending):
             status = item["status"] + (f"（{item['gap_count']}项）" if item["gap_count"] else "")
             queue = item["queue"]
             labels = []
+            if item.get("preservation"):
+                labels.extend((item["preservation"]["status"], item["preservation"]["source_storage"]))
             if item["status"] == HISTORICAL_STATUS and any(row["legacy_accepted"] for row in queue):
                 labels.append("旧验收")
             if any(row["source_gap"] for row in queue):
