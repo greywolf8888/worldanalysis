@@ -1,5 +1,6 @@
 # Runtime, local evidence and credentials are not source code.
 .runtime/
+/Worldanalysis 专用 DSH.lnk
 # Isolated environment used by the README quick start.
 .venv/
 __pycache__/
